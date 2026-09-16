@@ -3,19 +3,17 @@ import math
 import time
 from contextlib import suppress
 from copy import copy
-from textwrap import dedent
 from typing import Tuple
 
 import aiogram
 import cachetools
-import pendulum
 from aiocache import cached
 from aiogram.types import Message, Chat, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from aiogram.utils.callback_data import CallbackData
-from aiogram.utils.markdown import hbold, hitalic, hcode
+from aiogram.utils.markdown import hbold, hitalic, hcode, quote_html
 
 from app import bot
-from common.externals.owm import ResponseOneCall, DailyWeather, HourlyWeather, WeatherType, weather, id_to_emoji, weather_map, \
+from common.externals.owm import WeatherForecast, WeatherReading, weather, id_to_emoji, weather_map, \
     coordinates_to_xy, geocoding
 from common.tg.callbacks import CallbackCommandBase
 from common.tg.filters import MetaInfo
@@ -26,8 +24,11 @@ async def get_chat(chat_id: int) -> Chat:
     return await bot.get_chat(chat_id)
 
 
-def parse_response(forecast: ResponseOneCall, location_name: str) -> str:
-    curr, hourly, daily = forecast.current, forecast.hourly, forecast.daily
+def parse_response(forecast: WeatherForecast, location_name: str) -> str:
+    curr = forecast.current
+    timezone = datetime.timezone(datetime.timedelta(seconds=forecast.timezone_offset))
+    today = curr.dt.astimezone(timezone).date()
+    periods = [period for period in forecast.periods if period.dt >= curr.dt]
 
     def pretty_date(d: datetime.date) -> str:
         month_names = ('января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
@@ -35,35 +36,42 @@ def parse_response(forecast: ResponseOneCall, location_name: str) -> str:
         weekday_names = ('понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье')
         return f'{d.day} {month_names[d.month - 1]}, {weekday_names[d.weekday()]}'
 
-    def condition(w: WeatherType) -> str:
-        return hitalic(f'{id_to_emoji(w.id)} {w.description}')
+    def condition(reading: WeatherReading) -> str:
+        if not reading.weather:
+            return hitalic('без описания')
+        weather_type = reading.weather[0]
+        return hitalic(f'{id_to_emoji(weather_type.id)} {weather_type.description}')
 
     def temp(t: float) -> str:
         return hitalic(f'{int(t)}°C')
 
-    def line_hourly(f: HourlyWeather, tz_offset: int) -> str:
-        dt = f.dt.astimezone(pendulum.tz.fixed_timezone(tz_offset))
-        return f'{hbold(dt.strftime("%H:%M"))}: {temp(f.temp)} | {temp(f.feels_like)}, {condition(f.weather[0])}'
+    def line_period(period: WeatherReading) -> str:
+        local = period.dt.astimezone(timezone)
+        label = local.strftime('%H:%M' if local.date() == today else '%d.%m %H:%M')
+        return f'{hbold(label)}: {temp(period.temp)} | ощущается как {temp(period.feels_like)}, {condition(period)}'
 
-    def line_daily(description: str, f: DailyWeather) -> str:
-        start, end = temp(f.temp.min), temp(f.temp.max)
+    def line_range(description: str, readings: list[WeatherReading]) -> str:
+        start, end = temp(min(reading.temp for reading in readings)), temp(max(reading.temp for reading in readings))
         temp_text = f'от {start} до {end}' if start != end else f'{start}'
-        return f'{hbold(description)}: {temp_text}, {condition(f.weather[0])}'
+        return f'{hbold(description)}: {temp_text}'
 
-    text = f'''
-        {hbold('Погода')}: {location_name}, {pretty_date(daily[0].dt.date())}
-
-        {hbold('Сейчас')}: {temp(curr.temp)} | ощущается как {temp(curr.feels_like)}, {condition(curr.weather[0])}
-
-        {line_hourly(hourly[0], tz_offset=forecast.timezone_offset)}
-        {line_hourly(hourly[1], tz_offset=forecast.timezone_offset)}
-        {line_hourly(hourly[2], tz_offset=forecast.timezone_offset)}
-
-        {line_daily('Сегодня', daily[0])}
-        {line_daily('Завтра', daily[1])}
-    '''
-
-    return dedent(text).strip()
+    lines = [
+        f'{hbold("Погода")}: {quote_html(location_name)}, {pretty_date(today)}',
+        '',
+        f'{hbold("Сейчас")}: {temp(curr.temp)} | ощущается как {temp(curr.feels_like)}, {condition(curr)}',
+    ]
+    if periods:
+        lines.extend(['', hbold('Прогноз с шагом 3 часа'), *(line_period(period) for period in periods[:3])])
+        ranges = []
+        for day, label in ((today, 'До конца дня'), (today + datetime.timedelta(days=1), 'Завтра')):
+            readings = [period for period in periods if period.dt.astimezone(timezone).date() == day]
+            if readings:
+                ranges.append(line_range(label, readings))
+        if ranges:
+            lines.extend(['', *ranges, hitalic('Диапазоны — по точкам трёхчасового прогноза.')])
+    else:
+        lines.extend(['', 'Прогноз пока недоступен.'])
+    return '\n'.join(lines)
 
 
 class Weather(CallbackCommandBase):
@@ -89,7 +97,7 @@ class Weather(CallbackCommandBase):
         if text:
             result = await geocoding(text)
             if not result:
-                return None
+                return await target.reply('Не удалось найти место. Уточните название или пришлите геопозицию.')
             coordinates, location_name = result
 
         elif loc := chat.location or target.venue:

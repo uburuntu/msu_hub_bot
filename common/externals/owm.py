@@ -1,5 +1,6 @@
 from msu_hub_bot.settings import settings
 
+import asyncio
 import datetime
 import io
 import math
@@ -8,10 +9,10 @@ from typing import List, Tuple, Optional
 import aiohttp
 from PIL import Image, ImageOps
 from aiocache import cached
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from common import json
-from common.utils import bytes_io, image_bytes_io, is_en
+from common.externals.exceptions import ExternalServiceError
+from common.utils import bytes_io, image_bytes_io
 
 
 class WeatherType(BaseModel):
@@ -21,94 +22,37 @@ class WeatherType(BaseModel):
     icon: str
 
 
-class CurrentWeather(BaseModel):
-    dt: datetime.datetime
-    sunrise: Optional[int]
-    sunset: Optional[int]
-    temp: float
-    feels_like: float
-    pressure: int
-    humidity: int
-    dew_point: float
-    uvi: Optional[float]
-    clouds: int
-    visibility: int
-    wind_speed: int
-    wind_deg: int
-    weather: List[WeatherType]
-
-
-class MinutelyWeather(BaseModel):
-    dt: datetime.datetime
-    precipitation: int
-
-
-class HourlyWeather(BaseModel):
+class WeatherReading(BaseModel):
     dt: datetime.datetime
     temp: float
     feels_like: float
-    pressure: int
-    humidity: int
-    dew_point: float
-    clouds: int
-    visibility: int
-    wind_speed: float
-    wind_deg: int
-    weather: List[WeatherType]
-    pop: float
+    weather: List[WeatherType] = Field(default_factory=list)
 
 
-class Temp(BaseModel):
-    day: float
-    min: float
-    max: float
-    night: float
-    eve: float
-    morn: float
+class WeatherForecast(BaseModel):
+    timezone_offset: int = Field(ge=-86399, le=86399)
+    current: WeatherReading
+    periods: List[WeatherReading]
 
 
-class FeelsLike(BaseModel):
-    day: float
-    night: float
-    eve: float
-    morn: float
+class WeatherServiceError(ExternalServiceError):
+    def __init__(self, status: int = None):
+        self.status = status
+        super().__init__('Не удалось получить погоду. Попробуйте ещё раз позже.')
 
 
-class DailyWeather(BaseModel):
-    dt: datetime.datetime
-    sunrise: int
-    sunset: int
-    temp: Temp
-    feels_like: FeelsLike
-    pressure: int
-    humidity: int
-    dew_point: float
-    wind_speed: float
-    wind_deg: int
-    weather: List[WeatherType]
-    clouds: int
-    pop: float
-    uvi: Optional[float]
+def validate_coordinates(coordinates: Tuple[float, float]) -> Tuple[float, float]:
+    lat, lon = float(coordinates[0]), float(coordinates[1])
+    if not math.isfinite(lat) or not math.isfinite(lon) or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError('Invalid coordinates')
+    return lat, lon
 
 
-class Alert(BaseModel):
-    sender_name: str
-    event: str
-    start: int
-    end: int
-    description: str
-
-
-class ResponseOneCall(BaseModel):
-    lat: float
-    lon: float
-    timezone: str
-    timezone_offset: int
-    current: CurrentWeather
-    minutely: Optional[List[MinutelyWeather]]
-    hourly: List[HourlyWeather]
-    daily: List[DailyWeather]
-    alerts: Optional[List[Alert]]
+async def _get_json(session: aiohttp.ClientSession, url: str, params: dict):
+    async with session.get(url, params=params) as response:
+        if response.status != 200:
+            raise WeatherServiceError(response.status)
+        return await response.json()
 
 
 def id_to_emoji(weather_id: int) -> str:
@@ -165,49 +109,50 @@ def coordinates_to_xy(coordinates: Tuple[float, float], zoom: int):
     return x_tile, y_tile
 
 
-@cached(ttl=2 * 60, key_builder=lambda f, coords, __: (f.__name__, round(coords[0], 3), round(coords[1], 3)))
-async def weather(coordinates: Tuple[float, float], location_name: str = None) -> Optional[Tuple[ResponseOneCall, str]]:
-    # API Docs: https://openweathermap.org/api
+@cached(ttl=2 * 60)
+async def weather(coordinates: Tuple[float, float], location_name: str = None) -> Tuple[WeatherForecast, str]:
+    """Combine current weather and the forecast available at three-hour intervals."""
+    key = settings.require('owm_key')
+    try:
+        lat, lon = validate_coordinates(coordinates)
+        params = dict(lat=lat, lon=lon, units='metric', lang='ru', appid=key)
+        async with asyncio.timeout(25), aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            current = await _get_json(session, 'https://api.openweathermap.org/data/2.5/weather', params)
+            forecast = await _get_json(session, 'https://api.openweathermap.org/data/2.5/forecast', params)
 
-    api_base = 'https://api.openweathermap.org/data/2.5/'
-    params = dict(lat=str(coordinates[0]), lon=str(coordinates[1]),
-                  units='metric', lang='ru', appid=settings.require('owm_key'))
+        def reading(item):
+            return WeatherReading(dt=item['dt'], weather=item.get('weather', []), **item['main'])
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(api_base + 'onecall', params=params) as response:
-            if response.status != 200:
-                return None
-            one_call = await response.read()
-
-        if not location_name:
-            async with session.get(api_base + 'weather', params=params) as response:
-                if response.status != 200:
-                    return None
-                location_name = json.loads(await response.read())['name']
-
-    return ResponseOneCall.parse_raw(one_call), location_name
+        result = WeatherForecast(
+            timezone_offset=forecast['city']['timezone'],
+            current=reading(current),
+            periods=sorted((reading(item) for item in forecast['list']), key=lambda period: period.dt),
+        )
+        name = location_name or current.get('name') or forecast['city'].get('name') or f'{lat:g}, {lon:g}'
+        return result, name
+    except (aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError, IndexError):
+        # Transport errors can contain a URL with appid; keep that out of logs.
+        raise WeatherServiceError() from None
 
 
 async def geocoding(name: str) -> Optional[Tuple[Tuple[float, float], str]]:
-    # API Docs: https://docs.mapbox.com/api/search/geocoding/#forward-geocoding
-
-    mapbox_key = settings.require('mapbox_key')
-    search_text = name[:256]
-    language = 'en,ru' if is_en(search_text) else 'ru,en'
-
-    async with aiohttp.ClientSession() as session:
-        mapbox_url = f'https://api.mapbox.com/geocoding/v5/mapbox.places/{search_text}.json'
-        async with session.get(mapbox_url, params=dict(access_token=mapbox_key, autocomplete='false', types='place', language=language, limit='1')) as response:
-            if response.status != 200:
-                return None
-            result = await response.json()
-
-    features = result.get('features', [])
-    if not features:
-        return None
-
-    center = features[0]['center']
-    return (center[1], center[0]), features[0]['place_name_ru']
+    """Resolve a place using the same OpenWeather credential as its forecast."""
+    key = settings.require('owm_key')
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            result = await _get_json(session, 'https://api.openweathermap.org/geo/1.0/direct',
+                                     dict(q=name[:256], limit=1, appid=key))
+        if not isinstance(result, list):
+            raise ValueError
+        if not result:
+            return None
+        place = result[0]
+        coordinates = validate_coordinates((place['lat'], place['lon']))
+        name = (place.get('local_names') or {}).get('ru') or place['name']
+        description = ', '.join(str(value) for value in (name, place.get('state'), place.get('country')) if value)
+        return coordinates, description
+    except (aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError, IndexError):
+        raise WeatherServiceError() from None
 
 
 @cached(ttl=2 * 60)
