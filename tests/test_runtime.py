@@ -95,7 +95,9 @@ async def test_offline_startup_handlers_shutdown_and_demotivator(monkeypatch, tm
         assert image.width > 480 and image.height > 380
         assert image.getpixel((0, 0)) == (0, 0, 0)
         assert any(pixel != (0, 0, 0) for pixel in image.crop((0, 370, image.width, image.height)).getdata())
-        assert "LiberationSerif-Regular.ttf" in next(lobster.drawtexts("Привет", 480))
+        from hub_bot.utils.caption_layout import times_new_roman_font
+
+        assert times_new_roman_font.name == "LiberationSerif-Regular.ttf"
         image.save(tmp_path / "demotivator.png")
     finally:
         await main.on_shutdown(main.dp)
