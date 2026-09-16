@@ -1,16 +1,12 @@
 import asyncio
 from abc import ABCMeta, abstractmethod
-from contextlib import suppress
 from dataclasses import dataclass, make_dataclass
 from itertools import chain
 from typing import Type
 
-import gino
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from gino import Gino
-from sqlalchemy import text
 
 from common.config import ConfigBase
 from common.executor import TPExecutor
@@ -72,7 +68,7 @@ class AppLogger(AppBase):
     def init(self):
         config = self.config
 
-        LoggerBuilder.set_defaults(config.logs_file.format(name=config.name), config.sentry_url)
+        LoggerBuilder.set_defaults(config.logs_file.format(name=config.name))
         # Remove previous logger, another will be created at accessing
         del self.logger
 
@@ -160,33 +156,6 @@ class AppScheduler(AppBase):
 
     async def on_shutdown(self):
         self.scheduler.shutdown(wait=False)
-
-
-def get_db_mixin(db: Gino, startup_requests: list = None):
-    @dataclass
-    class AppDatabase(AppBase):
-        db: Gino = None
-        startup_requests: list = None
-
-        def init(self):
-            self.db = db
-            self.startup_requests = startup_requests or []
-            return self
-
-        async def on_startup(self):
-            cfg = self.config
-            db_url = f'postgresql://{cfg.pg_user}:{cfg.pg_password}@{cfg.pg_host}:{cfg.pg_port}/main'
-            await self.db.set_bind(db_url)
-            await self.db.gino.create_all()
-            for request in self.startup_requests:
-                await db.status(text(request))
-
-        async def on_shutdown(self):
-            bind = self.db.pop_bind()
-            with suppress(gino.exceptions.UninitializedError):
-                await bind.close()
-
-    return AppDatabase
 
 
 def app_class(class_name: str, *bases: Type[AppBase]):

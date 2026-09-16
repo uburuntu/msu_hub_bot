@@ -59,18 +59,11 @@ jobs:
           HUB_EDGEDB_DSN: ${{ secrets.HUB_EDGEDB_DSN }}
           HUB_EDGEDB_TLS_CA: ${{ secrets.HUB_EDGEDB_TLS_CA }}
           HUB_EDGEDB_TLS_SECURITY: ${{ secrets.HUB_EDGEDB_TLS_SECURITY }}
-          HUB_PG_USER: ${{ secrets.HUB_PG_USER }}
-          HUB_PG_HOST: ${{ secrets.HUB_PG_HOST }}
-          HUB_PG_PORT: ${{ secrets.HUB_PG_PORT }}
-          HUB_PG_PASSWORD: ${{ secrets.HUB_PG_PASSWORD }}
           HUB_PROXY: ${{ secrets.HUB_PROXY }}
           HUB_CERT: ${{ secrets.HUB_CERT }}
           HUB_PKEY: ${{ secrets.HUB_PKEY }}
           HUB_LOGS_FILE: ${{ secrets.HUB_LOGS_FILE }}
-          HUB_SENTRY_URL: ${{ secrets.HUB_SENTRY_URL }}
           HUB_HEALTH_CHECK_URL: ${{ secrets.HUB_HEALTH_CHECK_URL }}
-          HUB_COUNTLY_URL: ${{ secrets.HUB_COUNTLY_URL }}
-          HUB_EXCEPTION_TRACKER_URL: ${{ secrets.HUB_EXCEPTION_TRACKER_URL }}
           HUB_DUMPS_CHAT_ID: ${{ secrets.HUB_DUMPS_CHAT_ID }}
           HUB_EVENTS_CHAT_ID: ${{ secrets.HUB_EVENTS_CHAT_ID }}
           HUB_ERROR_CHAT_ID: ${{ secrets.HUB_ERROR_CHAT_ID }}
@@ -87,18 +80,12 @@ jobs:
           HUB_POSTING_MAIN_CHAT_ID: ${{ secrets.HUB_POSTING_MAIN_CHAT_ID }}
           HUB_VK_DEFAULT_CHAT_ID: ${{ secrets.HUB_VK_DEFAULT_CHAT_ID }}
           HUB_TENET_STICKER_OWNER_ID: ${{ secrets.HUB_TENET_STICKER_OWNER_ID }}
-          HUB_STATHAT_CHAT_ID: ${{ secrets.HUB_STATHAT_CHAT_ID }}
           HUB_VK_USER_TOKEN: ${{ secrets.HUB_VK_USER_TOKEN }}
           HUB_WOLFRAM_TOKEN: ${{ secrets.HUB_WOLFRAM_TOKEN }}
           HUB_WIT_TOKENS: ${{ secrets.HUB_WIT_TOKENS }}
           HUB_JDOODLE_TOKENS: ${{ secrets.HUB_JDOODLE_TOKENS }}
-          HUB_ORFOGRAMMKA_EMAIL: ${{ secrets.HUB_ORFOGRAMMKA_EMAIL }}
-          HUB_ORFOGRAMMKA_PASSWORD: ${{ secrets.HUB_ORFOGRAMMKA_PASSWORD }}
-          HUB_ANTICAPTCHA_TOKEN: ${{ secrets.HUB_ANTICAPTCHA_TOKEN }}
           HUB_LINGVANEX_AUTHORIZATION: ${{ secrets.HUB_LINGVANEX_AUTHORIZATION }}
           HUB_LINGVANEX_IMAGE_AUTHORIZATION: ${{ secrets.HUB_LINGVANEX_IMAGE_AUTHORIZATION }}
-          HUB_OPENAI_AUTHORIZATION: ${{ secrets.HUB_OPENAI_AUTHORIZATION }}
-          HUB_OPENAI_CHAT_AUTHORIZATION: ${{ secrets.HUB_OPENAI_CHAT_AUTHORIZATION }}
           HUB_REMOVE_BG_API_KEY: ${{ secrets.HUB_REMOVE_BG_API_KEY }}
           HUB_IMGUR_AUTHORIZATION: ${{ secrets.HUB_IMGUR_AUTHORIZATION }}
           HUB_OWM_KEY: ${{ secrets.HUB_OWM_KEY }}
@@ -107,13 +94,9 @@ jobs:
           HUB_ACRCLOUD_HOST: ${{ secrets.HUB_ACRCLOUD_HOST }}
           HUB_ACRCLOUD_ACCESS_KEY: ${{ secrets.HUB_ACRCLOUD_ACCESS_KEY }}
           HUB_ACRCLOUD_ACCESS_SECRET: ${{ secrets.HUB_ACRCLOUD_ACCESS_SECRET }}
-          HUB_STATHAT_ACCESS_TOKEN: ${{ secrets.HUB_STATHAT_ACCESS_TOKEN }}
-          HUB_OUTLINE_URL: ${{ secrets.HUB_OUTLINE_URL }}
-          HUB_OUTLINE_NAMES: ${{ secrets.HUB_OUTLINE_NAMES }}
           HUB_SUPPORTERS_BASE: ${{ secrets.HUB_SUPPORTERS_BASE }}
           HUB_SUPPORTERS_TABLE: ${{ secrets.HUB_SUPPORTERS_TABLE }}
           HUB_SUPPORTERS_API_KEY: ${{ secrets.HUB_SUPPORTERS_API_KEY }}
-          HUB_PYNATIVE_COOKIE: ${{ secrets.HUB_PYNATIVE_COOKIE }}
       - name: Remove private image archive
         if: always()
         env:

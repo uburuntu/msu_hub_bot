@@ -1,16 +1,9 @@
-from msu_hub_bot.settings import settings
-from msu_hub_bot.integrations import UnavailableClient
-
-import asyncio
-
 from dataclasses import dataclass
 
 from api2ch import Api2chAsync
 
 from common.applets import AppBase
 from common.db.edb import EdgeDB
-from common.externals.orfogrammka import Orfogrammka
-from common.tg.exc_tracker import TelegramExceptionsTrackerAPI
 from utils.jdoodle import ManyJDoodle
 from utils.wit import Wit
 from utils.wolfram import WolframAPI
@@ -21,7 +14,7 @@ class AppEdgeDB(AppBase):
     edgedb: EdgeDB = None
 
     def init(self):
-        self.edgedb = EdgeDB(self.config.pg_user)
+        self.edgedb = EdgeDB()
         return self
 
     async def on_shutdown(self):
@@ -41,22 +34,6 @@ class AppWolfram(AppBase):
 
     async def on_shutdown(self):
         await self.wolfram.close()
-
-
-@dataclass
-class AppExcTracker(AppBase):
-    exc_tracker: TelegramExceptionsTrackerAPI = None
-
-    def init(self):
-        self.exc_tracker = TelegramExceptionsTrackerAPI()
-        return self
-
-    async def on_startup(self):
-        self.exc_tracker.patch_aiogram()
-        await self.exc_tracker.start_loop()
-
-    async def on_shutdown(self):
-        await self.exc_tracker.close()
 
 
 @dataclass
@@ -93,25 +70,3 @@ class AppDvach(AppBase):
 
     async def on_shutdown(self):
         await self.dvach.close()
-
-
-@dataclass
-class AppOrfogrammka(AppBase):
-    orfogrammka: Orfogrammka = None
-
-    def init(self):
-        self.orfogrammka = (Orfogrammka(settings.orfogrammka_email, settings.orfogrammka_password)
-                           if settings.orfogrammka_email and settings.orfogrammka_password
-                           else UnavailableClient('orfogrammka_email', 'orfogrammka_password'))
-        return self
-
-    async def on_startup(self):
-        if isinstance(self.orfogrammka, UnavailableClient):
-            return
-        try:
-            await asyncio.wait_for(self.orfogrammka.login(), timeout=15)
-        except Exception:
-            self.logger.warning('Orfogrammka login unavailable; it will retry when used')
-
-    async def on_shutdown(self):
-        await self.orfogrammka.close()

@@ -47,18 +47,11 @@ class Settings(BaseSettings):
     edgedb_dsn: str = ""
     edgedb_tls_ca: str = ""
     edgedb_tls_security: str = "strict"
-    pg_user: str = "msu_hub"
-    pg_host: str = ""
-    pg_port: int = 5432
-    pg_password: str = ""
     proxy: str = ""
     cert: str = ""
     pkey: str = ""
     logs_file: str = ".local/logs/{name}.log"
-    sentry_url: str = ""
     health_check_url: str = ""
-    countly_url: str = ""
-    exception_tracker_url: str = ""
     dumps_chat_id: int = 0
     events_chat_id: int = 0
     error_chat_id: int = 0
@@ -75,18 +68,12 @@ class Settings(BaseSettings):
     posting_main_chat_id: int = 0
     vk_default_chat_id: int = 0
     tenet_sticker_owner_id: int = 0
-    stathat_chat_id: int = 0
     vk_user_token: str = ""
     wolfram_token: str = ""
     wit_tokens: list[str] = Field(default_factory=list)
     jdoodle_tokens: list[tuple[str, str]] = Field(default_factory=list)
-    orfogrammka_email: str = ""
-    orfogrammka_password: str = ""
-    anticaptcha_token: str = ""
     lingvanex_authorization: str = ""
     lingvanex_image_authorization: str = ""
-    openai_authorization: str = ""
-    openai_chat_authorization: str = ""
     remove_bg_api_key: str = ""
     imgur_authorization: str = ""
     owm_key: str = ""
@@ -95,13 +82,9 @@ class Settings(BaseSettings):
     acrcloud_host: str = ""
     acrcloud_access_key: str = ""
     acrcloud_access_secret: str = ""
-    stathat_access_token: str = ""
-    outline_url: str = ""
-    outline_names: dict[str, str] = Field(default_factory=dict)
     supporters_base: str = ""
     supporters_table: str = ""
     supporters_api_key: str = ""
-    pynative_cookie: str = ""
 
     class Config:
         env_prefix = "HUB_"

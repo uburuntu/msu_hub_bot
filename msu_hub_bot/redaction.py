@@ -1,4 +1,4 @@
-"""Redact configured values at logging, tracing, and monitoring boundaries."""
+"""Redact configured values from local logs, tracebacks, and output streams."""
 
 import io
 import json
@@ -53,18 +53,6 @@ def redact(value: object) -> str:
     for pattern in _patterns:
         text = pattern.sub(MASK, text)
     return text
-
-
-def sanitize(value):
-    if isinstance(value, dict):
-        return {key: MASK if _sensitive_key.search(str(key)) else sanitize(item) for key, item in value.items() if key != "vars"}
-    if isinstance(value, (list, tuple)):
-        return [sanitize(item) for item in value]
-    return redact(value) if isinstance(value, str) else value
-
-
-def before_send(event, hint):
-    return sanitize(event)
 
 
 class RedactingFormatter(logging.Formatter):

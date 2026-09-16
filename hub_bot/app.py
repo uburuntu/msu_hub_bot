@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from multiprocessing import current_process
 
-from applets import AppDvach, AppWit, AppWolfram, AppJDoodle, AppOrfogrammka, AppEdgeDB
+from applets import AppDvach, AppWit, AppWolfram, AppJDoodle, AppEdgeDB
 from common.applets import AppBot, AppCPUExecutor, AppLogger, AppScheduler, AppVK, AppHealthCheck
 from common.tg.middlewares.check_gets import CheckGets
 from common.tg.middlewares.settings import SettingsMiddleware
@@ -13,7 +13,7 @@ from events import EventsMiddleware, EcosystemManager
 
 
 @dataclass
-class AppHubBot(AppBot, AppVK, AppWolfram, AppDvach, AppWit, AppJDoodle, AppOrfogrammka,
+class AppHubBot(AppBot, AppVK, AppWolfram, AppDvach, AppWit, AppJDoodle,
                 AppLogger, AppCPUExecutor, AppScheduler, AppHealthCheck, AppEdgeDB):
     em: EcosystemManager = None
 
@@ -52,7 +52,6 @@ vk_api = app.vk_api
 wit = app.wit
 wolfram = app.wolfram
 jdoodle = app.jdoodle
-orfogrammka = app.orfogrammka
 
 cpu_executor = app.cpu_executor
 events_chat_id = config.events_chat_id
