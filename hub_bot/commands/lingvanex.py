@@ -1,5 +1,6 @@
 from aiogram.types import Message
 from aiogram.utils.markdown import hcode, quote_html, hbold
+from aiohttp import ClientError
 
 from common.externals.exceptions import ExternalServiceError
 from common.externals.lingvanex import languages_list, translate, translate_image
@@ -8,23 +9,36 @@ from common.tg.filters import MetaInfo
 
 async def tr(meta: MetaInfo, src: str, dest: str):
     translated = ''
+    failed = []
 
     target, file = await meta.extract_image_with_downloading()
     if file is not None:
         try:
-            translated += await translate_image(file, src, dest) + '\n\n'
-        except ExternalServiceError:
-            pass
+            result = await translate_image(file, src, dest)
+            if result and result.strip():
+                translated += result + '\n\n'
+            else:
+                failed.append('изображение')
+        except (ExternalServiceError, ClientError, TimeoutError):
+            failed.append('изображение')
 
     target, text = meta.extract_text()
     if text:
         try:
-            translated += await translate(text, src, dest)
-        except ExternalServiceError:
-            pass
+            result = await translate(text, src, dest)
+            if result and result.strip():
+                translated += result
+            else:
+                failed.append('текст')
+        except (ExternalServiceError, ClientError, TimeoutError):
+            failed.append('текст')
 
     if translated:
+        if failed:
+            translated = translated.rstrip() + '\n\nНе удалось перевести ' + ' и '.join(failed) + '.'
         return await target.reply(quote_html(translated))
+    if failed:
+        return await target.reply('Не удалось выполнить перевод. Попробуйте ещё раз позже.')
 
 
 async def process_langs(message: Message):

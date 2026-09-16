@@ -9,6 +9,8 @@ import js2py
 
 from common.externals.exceptions import BadRequestError
 
+JOB_TIMEOUT_SECONDS = 180
+
 js_rand = js2py.eval_js(
     'function () {\n'
     '    var e = 0;\n'
@@ -33,7 +35,7 @@ async def convert_to_pdf(file: io.BytesIO, filename: str, content_type: str) -> 
         'referrer': 'https://topdf.com/',
     }
 
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with asyncio.timeout(JOB_TIMEOUT_SECONDS), aiohttp.ClientSession(headers=headers) as session:
         url = f'https://topdf.com/upload/{sid}'
         async with session.post(url, data=data) as response:
             if response.status != 200:

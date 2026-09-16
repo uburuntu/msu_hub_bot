@@ -7,6 +7,8 @@ import aiohttp
 from common import json
 from common.externals.exceptions import BadRequestError
 
+JOB_TIMEOUT_SECONDS = 180
+
 
 class Voices(str, Enum):
     homer = "TM:r9mxvgcybyy5"
@@ -30,7 +32,7 @@ async def fake_you(text: str, voice: str = Voices.homer) -> str:
         "inference_text": text,
     }
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+    async with asyncio.timeout(JOB_TIMEOUT_SECONDS), aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
         url = 'https://api.fakeyou.com/tts/inference'
 
         async with session.post(url, headers=headers, json=data) as response:

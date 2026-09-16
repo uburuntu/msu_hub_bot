@@ -76,6 +76,13 @@ async def process_which_anime(message: Message):
             caption += f'— {hcode(anime["filename"])}, {link}, похожесть: {float(anime["similarity"]):.2}\n\n'
             files.append(anime['video'])
 
+        if not files:
+            return await target.reply('Не удалось найти аниме по этому кадру. Попробуйте другой.')
+
+        if len(files) == 1:
+            file = files[0]
+            return await target.reply_video(InputFile.from_url(file, filename=URL(file).name), caption=caption)
+
         media = MediaGroup()
         for file in files:
             media.attach_video(InputFile.from_url(file, filename=URL(file).name), caption=caption)
@@ -170,6 +177,8 @@ async def process_fake_voice(message: Message, meta: MetaInfo):
             text = await translate(text, 'ru', 'en')
             wav_url = await fake_you(text, voice=Voices[meta.keyword.lower()].value)
             file = FakeBytesIO(await download_content(wav_url))
+    except TimeoutError:
+        return await message.reply('Озвучка заняла слишком много времени. Попробуйте ещё раз позже.')
     except ExternalServiceError as e:
         return await message.reply(hitalic(f'🤷🏻‍♂️ {e.text}'))
 
@@ -191,6 +200,8 @@ async def process_topdf(message: Message, meta: MetaInfo):
         async with ChatActioner(message.chat, action_by_type(ContentType.DOCUMENT)):
             file = await download(dest)
             url, thumb, convert_name = await convert_to_pdf(file, dest.file_name, dest.mime_type)
+    except TimeoutError:
+        return await message.reply('Конвертация заняла слишком много времени. Попробуйте ещё раз позже.')
     except ExternalServiceError as e:
         return await message.reply(hitalic(f'🤷🏻‍♂️ {e.text}'))
 
