@@ -20,6 +20,21 @@ from common.utils import megabytes, FakeBytesIO
 from utils.ffmpeg import ffmpeg
 
 
+class _AudioTooLarge(ValueError):
+    pass
+
+
+class _AudioBuffer(FakeBytesIO):
+    def __init__(self, limit: int):
+        super().__init__()
+        self.limit = limit
+
+    def write(self, data):
+        if self.tell() + len(data) > self.limit:
+            raise _AudioTooLarge()
+        return super().write(data)
+
+
 class WitAPIError(Exception):
     def __init__(self, code: int, reason: str):
         self.code = code
@@ -46,7 +61,9 @@ class WitAPI:
         return aiohttp.ClientSession(headers=headers)
 
     async def close(self):
-        await self.session.close()
+        session = self.__dict__.get('session')
+        if session is not None:
+            await session.close()
 
     async def _request(self, endpoint: str, method: str = 'POST', headers: dict = None, data=None, **params) -> dict:
         async with self.throttler:
@@ -136,13 +153,15 @@ class Wit(ManyWitAPI):
         for start in range(0, duration, step):
             file.seek(0)
             chunk = ffmpeg(file, out_suffix='.flac', parameters=parameters + ['-ss', f'{start}ms', '-t', f'{length}ms'])
+            if chunk is None:
+                return []
             chunks.append(chunk)
 
         return chunks
 
     async def stt(self, file: io.BytesIO, duration: int) -> Optional[str]:
         chunks, timeouted = await self.executor.run(self.to_raw_chunks, file, duration)
-        if timeouted:
+        if timeouted or not chunks or any(chunk is None for chunk in chunks):
             return None
 
         texts: List[str] = await asyncio.gather(*[self.instance.speech(chunk, content_type='audio/raw;encoding=signed-integer;bits=16;rate=16000;endian=little')
@@ -157,21 +176,33 @@ class Wit(ManyWitAPI):
         text = ' | '.join(quote_html(t) or hitalic('не распознано') for t in texts)
         return text
 
-    async def process_stt(self, message: Message, settings: Settings):
-        target = message
-        dest = None
+    async def process_stt_command(self, message: Message, settings: Settings):
+        return await self.process_stt(message, settings, explicit=True)
 
-        if settings.auto_speech_recognition:
-            dest = target.voice or target.video_note
+    async def process_stt(self, message: Message, settings: Settings, *, explicit: bool = False):
+        if not explicit and not settings.auto_speech_recognition:
+            return True
+
+        target = message
+        dest = target.voice or target.video_note
 
         if dest is None:
             if target := message.reply_to_message:
                 dest = target.voice or target.video_note or target.audio or target.video
 
-        if dest is None or dest.file_size > megabytes(20):
+        limit = int(megabytes(20))
+        if dest is None or (dest.file_size is not None and dest.file_size > limit):
             return True
 
-        file = await dest.download(destination_file=FakeBytesIO())
+        if not self.instances:
+            raise MissingIntegration('wit_tokens')
+
+        file = _AudioBuffer(limit)
+        try:
+            await dest.download(destination_file=file)
+        except _AudioTooLarge:
+            return True
+        file.seek(0)
         text = await self.stt(file, duration=dest.duration)
         if not text:
             return True

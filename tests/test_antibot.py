@@ -57,7 +57,7 @@ async def test_limited_actor_cannot_ban(moderation, actor):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["administrator", "creator", "left", "kicked"])
+@pytest.mark.parametrize("status", ["administrator", "creator", "left", "kicked", "restricted"])
 async def test_target_membership_is_rechecked(moderation, status):
     query, data, bot = callback(member("creator"), member(status))
     await moderation.process_cb(query, data)

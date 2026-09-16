@@ -1,15 +1,14 @@
 from msu_hub_bot.settings import MissingIntegration
 
-import random
 from contextlib import suppress
 from functools import cached_property
 from io import BytesIO
-from typing import Final, Tuple
+from typing import Tuple
 
 import aiogram
 import aiohttp
 from PIL import Image
-from aiogram.types import InputFile, InputMediaDocument, InputMediaPhoto, Message
+from aiogram.types import InputFile, Message
 from aiogram.utils.markdown import hcode
 
 from common.utils import valid_filename, image_bytes_io
@@ -30,10 +29,12 @@ class WolframAPI:
 
     @cached_property
     def session(self) -> aiohttp.ClientSession:
-        return aiohttp.ClientSession()
+        return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
 
     async def close(self):
-        await self.session.close()
+        session = self.__dict__.get('session')
+        if session is not None:
+            await session.close()
 
     async def _request(self, **params) -> bytes:
         params = {
@@ -64,17 +65,6 @@ class WolframAPI:
     async def process_wolfram(self, message: Message):
         if not self.token:
             raise MissingIntegration("wolfram_token")
-        animations_for_waiting: Final = (
-            'https://giant.gfycat.com/PossibleGrouchyDeer.mp4',
-            'https://giant.gfycat.com/EqualGargantuanKingbird.mp4',
-            'https://giant.gfycat.com/CrispSlowAustrianpinscher.mp4',
-            'https://giant.gfycat.com/TimelyRawApatosaur.mp4',
-            'https://zippy.gfycat.com/WildCheapChicken.mp4',
-            'https://zippy.gfycat.com/PopularBlackandwhiteGroundbeetle.mp4',
-            'https://zippy.gfycat.com/NarrowEvenChinesecrocodilelizard.mp4',
-            'https://zippy.gfycat.com/AmazingNecessaryGalapagosdove.mp4',
-            'https://giant.gfycat.com/AggressiveRecentAntarcticfurseal.mp4',
-        )
 
         query = message.get_args()
         if not query:
@@ -84,19 +74,17 @@ class WolframAPI:
         if not query:
             return await message.reply('Использование: ' + hcode('/wf sum 1/n^2, n=1..inf'))
 
-        target = await message.reply_video(random.choice(animations_for_waiting), caption='🔄 Ожидание...')
+        target = await message.reply('🔄 WolframAlpha обрабатывает запрос…')
 
         try:
-            image, ratio = await self.request(query=query)
-        except WolframAPIError:
-            with suppress(aiogram.exceptions.MessageToDeleteNotFound):
-                await target.delete()
-            return await message.reply(f'🤷🏻‍♂️ По запросу {hcode(query)} ничего не найдено')
+            try:
+                image, ratio = await self.request(query=query)
+            except (WolframAPIError, aiohttp.ClientError, TimeoutError):
+                return await message.reply('Не удалось получить результат от WolframAlpha. Попробуйте другой запрос или повторите позже.')
 
-        with suppress(aiogram.exceptions.MessageToEditNotFound):
             if ratio > 2.1:
-                return await target.edit_media(InputMediaDocument(InputFile(image)))
-
-            return await target.edit_media(InputMediaPhoto(InputFile(image)))
-
-        return True
+                return await message.reply_document(InputFile(image))
+            return await message.reply_photo(InputFile(image))
+        finally:
+            with suppress(aiogram.exceptions.TelegramAPIError, aiohttp.ClientError, TimeoutError):
+                await target.delete()

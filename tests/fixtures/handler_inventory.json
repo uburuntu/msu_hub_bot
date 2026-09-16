@@ -457,7 +457,7 @@
   },
   {
     "type": "register_message_handler",
-    "handler": "wit.process_stt",
+    "handler": "wit.process_stt_command",
     "aliases": [
       "stt"
     ]
@@ -987,6 +987,11 @@
   {
     "type": "register_message_handler",
     "handler": "process_echo",
+    "aliases": []
+  },
+  {
+    "type": "register_callback_query_handler",
+    "handler": "process_expired_callback",
     "aliases": []
   },
   {

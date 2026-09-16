@@ -128,7 +128,7 @@ class AntiBot(CallbackCommandBase):
         target = await reply.bot.get_chat_member(chat_id, user_id)
         if target.is_chat_admin():
             return await query.answer('Администраторов нельзя заблокировать этой кнопкой.', show_alert=True)
-        if not target.is_chat_member():
+        if not target.is_chat_member() or (target.status == 'restricted' and not target.is_member):
             return await query.answer('Этот участник уже покинул чат.')
 
         await query.answer('✅', cache_time=cls.cache_time_10s)

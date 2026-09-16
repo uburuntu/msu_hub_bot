@@ -3,14 +3,16 @@ from msu_hub_bot.redaction import redact
 
 import os
 import traceback
+from contextlib import suppress
 
 import aiogram
+from aiohttp import ClientError
 from aiogram.dispatcher import Dispatcher, FSMContext
 from aiogram.dispatcher.filters import IDFilter, Text
 from aiogram.dispatcher.filters.filters import NotFilter
-from aiogram.types import ContentType, Message, Update, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, ContentType, Message, Update, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils import executor
-from aiogram.utils.markdown import hbold, hpre
+from aiogram.utils.markdown import hbold, hpre, quote_html
 from cachetools import TTLCache
 
 from app import app, bot, dp, logger, redis, wit, wolfram
@@ -69,6 +71,7 @@ from commands.votes import process_votes
 from commands.weather import Weather, WeatherMap
 from commands.zalgo import process_zalgo
 from common.externals.fakeyou import Voices
+from common.externals.exceptions import ExternalServiceError
 from common.tg.filters import MetaCommand
 from texts import cmd_help, cmd_start
 
@@ -97,13 +100,37 @@ async def process_echo(message: Message):
 errors = TTLCache(256, ttl=1 * 60)
 
 
-async def process_error(update: Update, error: BaseException):
-    if isinstance(error, MissingIntegration):
-        text = 'Эта функция пока не настроена на этом экземпляре бота.'
+async def reply_error(update: Update, text: str):
+    # Expired callbacks and deleted messages must not cause a second error.
+    with suppress(aiogram.exceptions.TelegramAPIError):
         if update.callback_query:
             await update.callback_query.answer(text, show_alert=True)
-        elif message := (update.message or update.edited_message or update.channel_post):
-            await message.reply(text)
+        else:
+            for field in ('message', 'edited_message', 'channel_post', 'edited_channel_post'):
+                if message := getattr(update, field, None):
+                    await message.reply(quote_html(text))
+                    break
+
+
+async def process_expired_callback(query: CallbackQuery):
+    with suppress(aiogram.exceptions.TelegramAPIError):
+        await query.answer('Эта кнопка больше не работает. Вызовите команду заново.')
+
+
+async def process_error(update: Update, error: BaseException):
+    if isinstance(error, MissingIntegration):
+        await reply_error(update, 'Эта функция пока не настроена на этом экземпляре бота.')
+        return True
+
+    if isinstance(error, (ExternalServiceError, ClientError, TimeoutError)):
+        logger.warning('External request failed: %s', redact(repr(error)))
+        if isinstance(error, ExternalServiceError):
+            text = redact(error.text)
+        elif isinstance(error, TimeoutError):
+            text = 'Сервис не успел ответить. Попробуйте ещё раз позже.'
+        else:
+            text = 'Не удалось связаться с сервисом. Попробуйте ещё раз позже.'
+        await reply_error(update, text)
         return True
 
     e = aiogram.exceptions
@@ -208,7 +235,7 @@ async def on_startup(dp: Dispatcher):
     dp.register_message_handler(process_image_to_text, MetaCommand('text', 'itt'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_tts, MetaCommand('tts', 'speech', args=1), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_fake_voice, MetaCommand(*Voices.__members__.keys()), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(wit.process_stt, commands=['stt'], content_types=ContentType.ANY, run_task=run_task)
+    dp.register_message_handler(wit.process_stt_command, commands=['stt'], content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(wit.process_stt, NotFilter(IDFilter(chat_id=settings.excluded_chat_id)), content_types=(ContentType.VOICE, ContentType.VIDEO_NOTE),
                                 run_task=run_task)
     dp.register_message_handler(wolfram.process_wolfram, commands=['wf', 'wolfram'], content_types=ContentType.ANY, run_task=run_task)
@@ -299,6 +326,7 @@ async def on_startup(dp: Dispatcher):
 
     dp.register_message_handler(process_echo, IDFilter(chat_id=settings.echo_chat_id), content_types=ContentType.ANY)
 
+    dp.register_callback_query_handler(process_expired_callback, state='*')
     dp.register_errors_handler(process_error)
 
     if not os.getenv('DEBUG_MODE') and False:
