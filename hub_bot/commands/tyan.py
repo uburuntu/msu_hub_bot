@@ -1,9 +1,10 @@
 import random
 
-import aiogram
+from aiogram.exceptions import TelegramBadRequest
 import aiohttp
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from aiogram.utils.callback_data import CallbackData
+from aiogram.filters.callback_data import CallbackData
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hbold
 
 from common import json
@@ -12,8 +13,13 @@ from common.tg.filters import MetaInfo
 from common.tg.middlewares.settings import Settings
 
 
+class TyanCallback(CallbackData, prefix="tyan", sep=":"):
+    type: str
+    category: str
+
+
 class Tyan(CallbackCommandBase):
-    callback_data = CallbackData('tyan', 'type', 'category')
+    callback_data = TyanCallback
 
     @classmethod
     def keyboard(cls, with_nsfw: bool) -> InlineKeyboardMarkup:
@@ -24,23 +30,25 @@ class Tyan(CallbackCommandBase):
         )
         categories_nswf = ('waifu', 'neko', 'trap', 'blowjob')
 
-        keyboard = InlineKeyboardMarkup(row_width=4)
-        keyboard.add(*[InlineKeyboardButton(text=c.title(), callback_data=cls.callback_data.new('sfw', c)) for c in categories_swf])
+        keyboard = InlineKeyboardBuilder()
+        keyboard.row(*[InlineKeyboardButton(text=c.title(), callback_data=TyanCallback(type='sfw', category=c).pack()) for c in categories_swf], width=4)
         if with_nsfw:
-            keyboard.add(InlineKeyboardButton(text='⬇️ NSFW', callback_data=cls.callback_data.new('nsfw', 'nsfw')))
-            keyboard.add(*[InlineKeyboardButton(text=c.title(), callback_data=cls.callback_data.new('nsfw', c)) for c in categories_nswf])
+            keyboard.row(InlineKeyboardButton(text='⬇️ NSFW', callback_data=TyanCallback(type='nsfw', category='nsfw').pack()))
+            keyboard.row(*[InlineKeyboardButton(text=c.title(), callback_data=TyanCallback(type='nsfw', category=c).pack()) for c in categories_nswf], width=4)
 
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, _message: Message, meta: MetaInfo, settings: Settings):
+    async def process(cls, _message: Message, meta: MetaInfo, settings: Settings) -> Message | bool | None:
         target = meta.reply()
         return await target.reply(hbold('База аниме тяночек 👩🏻‍🦰👱🏻‍♀️👩🏻'), reply_markup=cls.keyboard(settings.with_nsfw))
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict, settings: Settings):
+    async def process_cb(cls, query: CallbackQuery, callback_data: TyanCallback, settings: Settings) -> Message | bool | None:
         message = query.message
-        type_, category = callback_data['type'], callback_data['category']
+        if not isinstance(message, Message):
+            return await query.answer("Эта кнопка уже недоступна.")
+        type_, category = callback_data.type, callback_data.category
 
         if type_ == category:
             if type_ == 'sfw':
@@ -54,25 +62,30 @@ class Tyan(CallbackCommandBase):
 
         if category == 'neuro':
             url = cls.request_neuro_tyan()
-            return await message.reply_photo(url, caption=f'{hbold("Нейротянка")} для {query.from_user.get_mention()}')
+            return await message.reply_photo(url, caption=f'{hbold("Нейротянка")} для {query.from_user.mention_html()}')
 
         for _ in range(3):
             try:
                 url = await cls.request_tyan(type_, category)
-                caption = hbold(category.title()) + (f' для {query.from_user.get_mention()}' if message.chat.type != 'private' else '')
+                caption = hbold(category.title()) + (f' для {query.from_user.mention_html()}' if message.chat.type != 'private' else '')
 
                 if url.endswith(('gif', 'mp4')):
                     return await message.reply_video(url, caption=caption)
                 return await message.reply_photo(url, caption=caption)
-            except (aiogram.exceptions.InvalidHTTPUrlContent, aiogram.exceptions.WrongFileIdentifier):
-                pass
+            except TelegramBadRequest as error:
+                if not any(detail in error.message.lower() for detail in ("failed to get http url content", "wrong file identifier")):
+                    raise
+        return None
 
     @classmethod
     async def request_tyan(cls, type_: str, category: str) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.get(f'https://api.waifu.pics/{type_}/{category}') as response:
                 result = await response.json(loads=json.loads)
-                return result['url']
+                url = result['url']
+                if not isinstance(url, str):
+                    raise ValueError('Image provider returned an invalid URL')
+                return url
 
     @classmethod
     def request_neuro_tyan(cls) -> str:

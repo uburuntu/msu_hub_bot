@@ -3,7 +3,9 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+from aiogram.types import Message
+from pydantic import ValidationError
 
 import pytest
 
@@ -129,23 +131,29 @@ async def test_explicit_refresh_is_not_limited_by_live_location_timer(weather_mo
     module = weather_module
     await module.Weather.process_location(message())
     module.clock = 1
-    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
-    await module.Weather.process_cb(query, {"lat": "10", "lon": "20"})
+    query = SimpleNamespace(answer=AsyncMock(), message=Mock(spec=Message, edit_text=AsyncMock()))
+    await module.Weather.process_cb(query, module.WeatherCallback(lat=10, lon=20))
     query.answer.assert_awaited_once()
     query.message.edit_text.assert_awaited_once()
     assert module.weather.await_count == 2
 
 
-@pytest.mark.parametrize("coordinates", [{}, {"lat": "nan", "lon": "20"}, {"lat": "91", "lon": "20"}, {"lat": "10", "lon": "broken"}])
+@pytest.mark.parametrize("coordinates", [{"lat": "nan", "lon": "20"}, {"lat": "91", "lon": "20"}])
 async def test_bad_callback_coordinates_are_acknowledged_without_provider_calls(weather_module, coordinates):
-    query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
-    await weather_module.Weather.process_cb(query, coordinates)
+    query = SimpleNamespace(answer=AsyncMock(), message=Mock(spec=Message, edit_text=AsyncMock()))
+    await weather_module.Weather.process_cb(query, weather_module.WeatherCallback(**coordinates))
     assert query.answer.call_args.kwargs["show_alert"] is True
     weather_module.weather.assert_not_awaited()
 
 
 async def test_unavailable_callback_message_is_acknowledged(weather_module):
     query = SimpleNamespace(answer=AsyncMock(), message=None)
-    await weather_module.Weather.process_cb(query, {"lat": "10", "lon": "20"})
+    await weather_module.Weather.process_cb(query, weather_module.WeatherCallback(lat=10, lon=20))
     assert query.answer.call_args.kwargs["show_alert"] is True
     weather_module.weather.assert_not_awaited()
+
+
+@pytest.mark.parametrize("coordinates", [{}, {"lat": "10", "lon": "broken"}])
+def test_malformed_coordinates_are_rejected_before_dispatch(weather_module, coordinates):
+    with pytest.raises(ValidationError):
+        weather_module.WeatherCallback(**coordinates)

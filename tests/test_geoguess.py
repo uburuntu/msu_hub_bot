@@ -1,6 +1,8 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+from aiogram.types import Message
+from common.tg.runtime import Supervisor
 
 import pytest
 
@@ -28,9 +30,13 @@ def message(chat_id=1, message_id=100):
 
 
 def message_stub(chat_id, message_id):
-    return SimpleNamespace(
-        chat=SimpleNamespace(id=chat_id), message_id=message_id, reply=AsyncMock(), edit_text=AsyncMock(), edit_caption=AsyncMock()
+    return Mock(
+        spec=Message, chat=SimpleNamespace(id=chat_id), message_id=message_id, reply=AsyncMock(), edit_text=AsyncMock(), edit_caption=AsyncMock()
     )
+
+
+async def process_callback(query, data):
+    return await game.Geoguess.process_cb(query, game.GeoguessCallback(**data), None, Supervisor())
 
 
 def query(round_, choice, user_id=5):
@@ -45,6 +51,9 @@ def query(round_, choice, user_id=5):
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch):
     game.Geoguess.rounds = {}
+    async def send(method):
+        return await method
+    monkeypatch.setattr(game, "_send", send)
     monkeypatch.setattr(game, "random_photo", AsyncMock(return_value=PHOTO))
     monkeypatch.setattr(game, "save_scores", AsyncMock())
     yield
@@ -99,12 +108,12 @@ def test_visible_vote_and_duplicate_vote_rejected():
     async def scenario():
         await game.Geoguess.process(message())
         r = game.Geoguess.rounds[1]
-        await game.Geoguess.process_cb(*query(r, 0))
+        await process_callback(*query(r, 0))
         assert r.votes == {5: (0, "User <5>")}
         text = r.board.edit_text.call_args.args[0]
         assert "User &lt;5&gt;" in text and r.options[0] in text
         q, data = query(r, 1)
-        await game.Geoguess.process_cb(q, data)
+        await process_callback(q, data)
         assert r.votes[5][0] == 0
         assert "уже принят" in q.answer.call_args.args[0]
 
@@ -116,18 +125,18 @@ def test_anyone_can_finish_once_and_score_only_correct_votes():
         await game.Geoguess.process(message())
         r = game.Geoguess.rounds[1]
         answer = r.options.index(PHOTO.country)
-        await game.Geoguess.process_cb(*query(r, answer, 10))
-        await game.Geoguess.process_cb(*query(r, (answer + 1) % 4, 11))
+        await process_callback(*query(r, answer, 10))
+        await process_callback(*query(r, (answer + 1) % 4, 11))
         q1, d1 = query(r, "finish", 99)
         q2, d2 = query(r, "finish", 98)
-        await asyncio.gather(game.Geoguess.process_cb(q1, d1), game.Geoguess.process_cb(q2, d2))
+        await asyncio.gather(process_callback(q1, d1), process_callback(q2, d2))
         assert game.Geoguess.rounds == {}
-        game.save_scores.assert_awaited_once_with(1, [(10, "User <10>")])
-        text = r.message.edit_caption.call_args.args[0]
+        game.save_scores.assert_awaited_once_with(1, [(10, "User <10>")], None)
+        text = r.message.edit_caption.call_args.kwargs["caption"]
         assert "Берген, Норвегия" in text and "+1 очко" in text
         assert r.message.edit_caption.call_args.kwargs["reply_markup"] is None
         assert "Источник фотографии" in text
-        await game.Geoguess.process_cb(*query(r, answer, 12))
+        await process_callback(*query(r, answer, 12))
         assert 12 not in r.votes
 
     asyncio.run(scenario())
@@ -137,8 +146,8 @@ def test_no_votes_can_finish_and_start_next():
     async def scenario():
         await game.Geoguess.process(message())
         r = game.Geoguess.rounds[1]
-        await game.Geoguess.process_cb(*query(r, "finish"))
-        assert "никто не ответил" in r.message.edit_caption.call_args.args[0]
+        await process_callback(*query(r, "finish"))
+        assert "никто не ответил" in r.message.edit_caption.call_args.kwargs["caption"]
         await game.Geoguess.process(message())
         assert game.Geoguess.rounds[1].token != r.token
 
@@ -159,11 +168,11 @@ def test_old_message_and_invalid_choice():
         await game.Geoguess.process(message())
         r = game.Geoguess.rounds[1]
         q, data = query(r, 4)
-        await game.Geoguess.process_cb(q, data)
+        await process_callback(q, data)
         assert not r.votes
         q, data = query(r, 0)
         data["round"] = "old-token"
-        await game.Geoguess.process_cb(q, data)
+        await process_callback(q, data)
         assert not r.votes
 
     asyncio.run(scenario())
@@ -243,16 +252,19 @@ def test_score_storage_and_top(monkeypatch):
         zrevrange=AsyncMock(return_value=[(b"10", 3.0)]),
         hget=AsyncMock(return_value=b"Alice <name>"),
     )
+    async def send(method):
+        return await method
+    module._send = send
     app = ModuleType("app")
     app.redis = SimpleNamespace(redis=AsyncMock(return_value=client))
     monkeypatch.setitem(sys.modules, "app", app)
 
     async def scenario():
-        await module.save_scores(1, [(10, "Alice <name>")])
+        await module.save_scores(1, [(10, "Alice <name>")], app.redis)
         pipe.zincrby.assert_called_once_with("msu_hub:geoguess:1:scores", 1, "10")
         pipe.execute.assert_awaited_once()
         m = message()
-        await module.Geoguess.top(m)
+        await module.Geoguess.top(m, app.redis)
         assert "Alice &lt;name&gt; — 3" in m.reply.call_args.args[0]
         client.zrevrange.assert_awaited_once_with("msu_hub:geoguess:1:scores", 0, 9, withscores=True)
 
@@ -279,8 +291,8 @@ def test_score_failure_still_reveals_answer():
         r = game.Geoguess.rounds[1]
         r.votes[1] = (r.options.index(PHOTO.country), "Test")
         game.save_scores.side_effect = RuntimeError("storage unavailable")
-        await game.Geoguess.process_cb(*query(r, "finish"))
-        assert "Не удалось подтвердить запись очков" in r.message.edit_caption.call_args.args[0]
+        await process_callback(*query(r, "finish"))
+        assert "Не удалось подтвердить запись очков" in r.message.edit_caption.call_args.kwargs["caption"]
         assert not game.Geoguess.rounds
 
     asyncio.run(scenario())
@@ -291,12 +303,12 @@ def test_winners_use_usernames_and_clickable_fallback():
         await game.Geoguess.process(message())
         r = game.Geoguess.rounds[1]
         answer = r.options.index(PHOTO.country)
-        await game.Geoguess.process_cb(*query(r, answer, 10))
+        await process_callback(*query(r, answer, 10))
         q, data = query(r, answer, 11)
         q.from_user.username = None
-        await game.Geoguess.process_cb(q, data)
-        await game.Geoguess.process_cb(*query(r, "finish"))
-        text = r.message.edit_caption.call_args.args[0]
+        await process_callback(q, data)
+        await process_callback(*query(r, "finish"))
+        text = r.message.edit_caption.call_args.kwargs["caption"]
         assert "@user_10" in text
         assert '<a href="tg://user?id=11">User &lt;11&gt;</a>' in text
 
@@ -310,8 +322,8 @@ def test_long_winner_list_mentions_everyone():
         answer = r.options.index(PHOTO.country)
         r.votes = {i: (answer, f"User {i}") for i in range(100)}
         r.usernames = {i: f"participant_{i:04d}" for i in range(100)}
-        await game.Geoguess.process_cb(*query(r, "finish"))
-        text = r.message.edit_caption.call_args.args[0]
+        await process_callback(*query(r, "finish"))
+        text = r.message.edit_caption.call_args.kwargs["caption"]
         text += "\n".join(call.args[0] for call in r.message.reply.call_args_list)
         assert all("@participant_" + f"{i:04d}" in text for i in range(100))
 
@@ -444,8 +456,8 @@ def test_country_only_caption_has_no_empty_city():
         game.random_photo.return_value = replace(PHOTO, city="")
         await game.Geoguess.process(message())
         r = game.Geoguess.rounds[1]
-        await game.Geoguess.process_cb(*query(r, "finish"))
-        text = r.message.edit_caption.call_args.args[0]
+        await process_callback(*query(r, "finish"))
+        text = r.message.edit_caption.call_args.kwargs["caption"]
         assert "<b>Норвегия</b>" in text
         assert "OpenStreetMap" in text
 

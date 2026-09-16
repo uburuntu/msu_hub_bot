@@ -4,26 +4,30 @@ import datetime
 from textwrap import dedent
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
-from aiogram.utils.callback_data import CallbackData
+from aiogram.filters.callback_data import CallbackData
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hbold
 
-from app import db
-from common.db.edb import UserDB, ChatDB, UpdateDB
+from common.db.edb import EdgeDB, UserDB, ChatDB, UpdateDB
 from common.tg.callbacks import CallbackCommandBase
 
 
+class StatsCallback(CallbackData, prefix="stats", sep=":"):
+    action: str
+
+
 class Stats(CallbackCommandBase):
-    callback_data = CallbackData('stats', 'action')
+    callback_data = StatsCallback
 
     @classmethod
     def keyboard(cls) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().row(
-            InlineKeyboardButton(text='🔄 Обновить', callback_data=cls.callback_data.new('update')),
+        keyboard = InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text='🔄 Обновить', callback_data=StatsCallback(action='update').pack()),
         )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def text(cls):
+    async def text(cls, db: EdgeDB) -> str:
         yesterday = datetime.datetime.utcnow() - datetime.timedelta(days=1)
 
         coros = [
@@ -46,20 +50,23 @@ class Stats(CallbackCommandBase):
         return text
 
     @classmethod
-    async def process(cls, message: Message):
-        return await message.reply(await cls.text(), reply_markup=cls.keyboard())
+    async def process(cls, message: Message, db: EdgeDB) -> Message | bool | None:
+        return await message.reply(await cls.text(db), reply_markup=cls.keyboard())
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery):
+    async def process_cb(cls, query: CallbackQuery, db: EdgeDB) -> Message | bool | None:
+        message = query.message
+        if not isinstance(message, Message):
+            return await query.answer('Эта кнопка уже недоступна.')
         await query.answer('✅', cache_time=1)
 
-        lock = cls.lock(query.message)
+        lock = cls.lock(message)
 
         if lock.locked():
             return True
 
         async with lock:
-            await query.message.edit_text(await cls.text(), reply_markup=cls.keyboard())
+            await message.edit_text(await cls.text(db), reply_markup=cls.keyboard())
             await asyncio.sleep(1.)
 
         return True

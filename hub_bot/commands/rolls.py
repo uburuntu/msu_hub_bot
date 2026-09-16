@@ -5,9 +5,12 @@ import string
 from collections import defaultdict
 from typing import Final, Tuple
 
-from aiogram.types import CallbackQuery, DiceEmoji, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from aiogram.utils.callback_data import CallbackData
-from aiogram.utils.markdown import hbold, hcode, quote_html
+from aiogram import html
+from aiogram.enums import DiceEmoji
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.filters.callback_data import CallbackData
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.markdown import hbold, hcode
 
 from common.tg.callbacks import CallbackCommandBase
 from common.tg.filters import MetaInfo
@@ -47,7 +50,7 @@ def get_roll(digits: int) -> Tuple[str, str]:
     return roll, name
 
 
-async def process_roll(message: Message, meta: MetaInfo):
+async def process_roll(message: Message, meta: MetaInfo) -> Message | bool:
     args = meta.arguments
     digits = min(max(int(args[0]), 1), 100) if len(args) > 0 and args[0].isdigit() else 3
 
@@ -57,7 +60,7 @@ async def process_roll(message: Message, meta: MetaInfo):
     return await message.reply(hcode(roll) + note)
 
 
-async def process_random(message: Message, meta: MetaInfo):
+async def process_random(message: Message, meta: MetaInfo) -> Message | bool:
     args = meta.arguments
     if len(args) > 1:
         n1 = min(max(int(args[0]), 0), 10 ** 100) if args[0].isdigit() else 0
@@ -71,18 +74,24 @@ async def process_random(message: Message, meta: MetaInfo):
     return await message.reply(hcode(number))
 
 
+class RandomCallback(CallbackData, prefix="random"):
+    begin: int
+    end: int
+    count: int
+
+
 class Randoms(CallbackCommandBase):
-    callback_data = CallbackData('random', 'begin', 'end', 'count')
+    callback_data = RandomCallback
 
     @classmethod
     def keyboard(cls, begin: int, end: int, count: int) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().row(
-            InlineKeyboardButton(text='RANDOM 🎲', callback_data=cls.callback_data.new(begin, end, count)),
+        keyboard = InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text='RANDOM 🎲', callback_data=RandomCallback(begin=begin, end=end, count=count).pack()),
         )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, message: Message, meta: MetaInfo):
+    async def process(cls, message: Message, meta: MetaInfo) -> Message | bool:
         args = meta.arguments
         if len(args) > 1:
             n1 = min(max(int(args[0]), 1), 10 ** 10) if args[0].isdigit() else 1
@@ -98,18 +107,20 @@ class Randoms(CallbackCommandBase):
         return await target.reply(hbold('Машина рандома') + f': числа с {begin} по {end}', reply_markup=cls.keyboard(begin, end, count))
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict):
+    async def process_cb(cls, query: CallbackQuery, callback_data: RandomCallback) -> Message | bool:
         message = query.message
+        if not isinstance(message, Message):
+            return await query.answer("Эта кнопка уже недоступна.")
 
         if outdated(message.date + cls.cache_time_long_td):
             await query.answer(text='♻️ Этот генератор слишком стар, он закрывается', show_alert=True)
-            return await message.delete_reply_markup()
+            return await message.edit_reply_markup(reply_markup=None)
 
-        begin, end, count = int(callback_data['begin']), int(callback_data['end']), int(callback_data['count'])
+        begin, end, count = callback_data.begin, callback_data.end, callback_data.count
         result = [str(random.randint(begin, end)) for _ in range(count)]
         await query.answer(text=f'🎲 Выпало: {", ".join(result)}', cache_time=cls.cache_time_long)
 
-        text_part = f'\n— {query.from_user.get_mention()}: {", ".join(hcode(r) for r in result)}'
+        text_part = f'\n— {query.from_user.mention_html()}: {", ".join(hcode(r) for r in result)}'
         text = await cls.cached_text(message, text_part)
 
         lock = cls.lock(cls.cache_key(message))
@@ -122,18 +133,23 @@ class Randoms(CallbackCommandBase):
             return await message.edit_text(text, reply_markup=cls.keyboard(begin, end, count))
 
 
+class RollCallback(CallbackData, prefix="roll"):
+    digits: int
+    count: int
+
+
 class Rolls(CallbackCommandBase):
-    callback_data = CallbackData('roll', 'digits', 'count')
+    callback_data = RollCallback
 
     @classmethod
     def keyboard(cls, digits: int, count: int) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().row(
-            InlineKeyboardButton(text='ROLL 🎲', callback_data=cls.callback_data.new(digits, count)),
+        keyboard = InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text='ROLL 🎲', callback_data=RollCallback(digits=digits, count=count).pack()),
         )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, message: Message, meta: MetaInfo):
+    async def process(cls, message: Message, meta: MetaInfo) -> Message | bool:
         args = meta.arguments
         digits = min(max(int(args[0]), 1), 10) if len(args) > 0 and args[0].isdigit() else 3
         count = min(max(int(args[1]), 1), 3) if len(args) > 1 and args[1].isdigit() else 1
@@ -142,29 +158,31 @@ class Rolls(CallbackCommandBase):
         return await target.reply(hbold('Машина рандома') + f': числа длины {digits}', reply_markup=cls.keyboard(digits, count))
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict):
+    async def process_cb(cls, query: CallbackQuery, callback_data: RollCallback) -> Message | bool:
         roll_emojis: Final = ('😎', '🤪', '😏', '😯', '😮', '😲', '🤤', '🤠', '👽')
 
         message = query.message
+        if not isinstance(message, Message):
+            return await query.answer("Эта кнопка уже недоступна.")
 
         if outdated(message.date + cls.cache_time_long_td):
             await query.answer(text='♻️ Этот генератор слишком стар, он закрывается', show_alert=True)
-            return await message.delete_reply_markup()
+            return await message.edit_reply_markup(reply_markup=None)
 
-        digits, count = int(callback_data['digits']), int(callback_data['count'])
+        digits, count = callback_data.digits, callback_data.count
 
         rolls = []
         for _ in range(count):
             roll, name = get_roll(digits)
             if name:
-                text = f'{random.choice(roll_emojis)} {hbold(name.title())} у {query.from_user.get_mention()}: {hcode(roll)}'
+                text = f'{random.choice(roll_emojis)} {hbold(name.title())} у {query.from_user.mention_html()}: {hcode(roll)}'
                 target = message.reply_to_message if message.reply_to_message else message
                 await target.reply(text)
             rolls.append(roll)
 
         await query.answer(text=f'🎲 Выпало: {", ".join(rolls)}', cache_time=cls.cache_time_long)
 
-        text_part = f'\n— {query.from_user.get_mention()}: {", ".join(hcode(r) for r in rolls)}'
+        text_part = f'\n— {query.from_user.mention_html()}: {", ".join(hcode(r) for r in rolls)}'
         text = await cls.cached_text(message, text_part)
 
         lock = cls.lock(cls.cache_key(message))
@@ -177,7 +195,7 @@ class Rolls(CallbackCommandBase):
             return await message.edit_text(text, reply_markup=cls.keyboard(digits, count))
 
 
-async def process_truth(_message: Message, meta: MetaInfo):
+async def process_truth(_message: Message, meta: MetaInfo) -> Message | bool:
     answers: Final = ('да', 'нет', 'это не важно', 'да, хотя зря', 'никогда', '100%', '1 из 100')
 
     target = meta.reply()
@@ -187,7 +205,7 @@ async def process_truth(_message: Message, meta: MetaInfo):
 pattern_or = re.compile(r'\b(?:или)|(?:or)\b', re.IGNORECASE)
 
 
-async def process_or(_message: Message, meta: MetaInfo):
+async def process_or(_message: Message, meta: MetaInfo) -> Message | bool:
     target, text = meta.extract_text()
     if not text:
         return True
@@ -201,10 +219,10 @@ async def process_or(_message: Message, meta: MetaInfo):
         return True
 
     text = random.choice(choices)
-    return await target.reply(quote_html(text))
+    return await target.reply(html.quote(text))
 
 
-async def process_mash(_message: Message, meta: MetaInfo):
+async def process_mash(_message: Message, meta: MetaInfo) -> Message | bool:
     target, text = meta.extract_text()
     if not text:
         return True
@@ -214,18 +232,18 @@ async def process_mash(_message: Message, meta: MetaInfo):
         random.shuffle(x)
         return ''.join(x)
 
-    def repl(match) -> str:
+    def repl(match: re.Match[str]) -> str:
         return match.group(1) + mash(match.group(2)) + match.group(3)
 
     result = re.sub(r'\b(\w)(\w+)(\w)\b', repl, text, flags=re.MULTILINE)
-    return await target.reply(quote_html(result))
+    return await target.reply(html.quote(result))
 
 
-async def process_d6(message: Message, meta: MetaInfo):
+async def process_d6(message: Message, meta: MetaInfo) -> Message | bool:
     d6: Final = tuple(enumerate(('⚀', '⚁', '⚂', '⚃', '⚄', '⚅'), start=1))
 
     args = meta.arguments
-    count = parse_int(args[0], 2, 1, 10) if args else 2
+    count = (parse_int(args[0], 2, 1, 10) or 2) if args else 2
 
     result = random.choices(d6, k=count)
     dices_sum = sum(r[0] for r in result)
@@ -234,33 +252,33 @@ async def process_d6(message: Message, meta: MetaInfo):
     return await message.reply(text=f'{dices} | {dices_sum} ({count * len(d6)})')
 
 
-async def process_dice(message: Message):
+async def process_dice(message: Message) -> Message | bool:
     dices = (DiceEmoji.DICE, DiceEmoji.DART, DiceEmoji.BASKETBALL, DiceEmoji.FOOTBALL, DiceEmoji.SLOT_MACHINE)
-    return await message.reply_dice(random.choice(dices))
+    return await message.reply_dice(emoji=random.choice(dices))
 
 
-async def process_others_dice(message: Message):
-    dices_max: Final = defaultdict(
+async def process_others_dice(message: Message) -> Message | bool:
+    dices_max: Final[defaultdict[str, tuple[int, ...]]] = defaultdict(
         lambda: (6,), {DiceEmoji.BASKETBALL: (5,), DiceEmoji.FOOTBALL: (5,), DiceEmoji.SLOT_MACHINE: (1, 22, 43, 64)}
     )
-    dices_success: Final = defaultdict(
+    dices_success: Final[defaultdict[str, tuple[int, ...]]] = defaultdict(
         lambda: (6,), {DiceEmoji.BASKETBALL: (4, 5, 6), DiceEmoji.FOOTBALL: (3, 4, 5, 6), DiceEmoji.SLOT_MACHINE: (1, 22, 43, 64)}
     )
 
     joy_emojis: Final = ('😇', '😎', '🤩', '🥳', '😏', '☺️', '🙂', '🙃', '💪🏻', '✨')
     sad_emojis: Final = ('🤨', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😫', '😩', '😬')
     parts_1: Final = ('молодец', 'круто', 'неплохо', 'недурно', 'класс', 'ништяк', 'чертяка', 'чётко')
-    parts_1_special: Final = defaultdict(tuple, {DiceEmoji.DART: ('в яблочко',),
+    parts_1_special: Final[defaultdict[str, tuple[str, ...]]] = defaultdict(tuple, {DiceEmoji.DART: ('в яблочко',),
                                                  DiceEmoji.BASKETBALL: ('трёхочковый',),
                                                  DiceEmoji.FOOTBALL: ('гол!',),
                                                  DiceEmoji.SLOT_MACHINE: ('ты и есть однорукий бандит',)})
     parts_2: Final = ('👍🏻', '😮', '😀', '👍🏿', '😯', '😧', '😋', '😊', '☺️', '🙂', '🙃', '💪🏻', '✊🏻', '👀', '🔥', '⭐️', '✨')
 
-    if message.is_forward():
+    if message.forward_origin is not None:
         return True
 
     d = message.dice
-    if d.emoji == DiceEmoji.DICE:
+    if d is None or d.emoji == DiceEmoji.DICE:
         return True
 
     if d.value not in dices_max[d.emoji]:
@@ -272,7 +290,9 @@ async def process_others_dice(message: Message):
 
     if percent_chance(10.):
         await message.answer('Я тоже так могу:')
-        msg = await message.answer_dice(d.emoji)
+        msg = await message.answer_dice(emoji=d.emoji)
+        if msg.dice is None:
+            return True
         reactions = joy_emojis if msg.dice.value in dices_success[msg.dice.emoji] else sad_emojis
         await asyncio.sleep(3.)
         await msg.reply(''.join(random.sample(reactions, k=3)))

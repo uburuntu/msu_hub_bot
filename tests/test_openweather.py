@@ -266,7 +266,7 @@ async def test_unknown_place_gets_feedback_without_weather_request(weather_comma
     module.get_chat = AsyncMock(return_value=SimpleNamespace(location=None))
     module.geocoding = AsyncMock(return_value=None)
     module.weather = AsyncMock()
-    message = SimpleNamespace(chat=SimpleNamespace(id=1), reply=AsyncMock())
+    message = SimpleNamespace(chat=SimpleNamespace(id=1), reply=AsyncMock(), bot=object())
 
     await module.Weather.process(message, SimpleNamespace(extract_text=lambda: (message, "No such place")))
 

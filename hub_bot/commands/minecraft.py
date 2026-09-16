@@ -2,10 +2,11 @@ import asyncio
 import socket
 from contextlib import suppress
 
-import aiogram
-from aiocache import cached
+from aiogram.exceptions import TelegramBadRequest
+from common.caching import cached_async
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.callback_data import CallbackData
+from aiogram.filters.callback_data import CallbackData
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hbold, hide_link
 from mcstatus import JavaServer, BedrockServer
 
@@ -15,8 +16,12 @@ from common.tg.utils import extract_urls
 from common.utils import random_cycle
 
 
+class MinecraftCallback(CallbackData, prefix="minecraft", sep="$"):
+    url: str
+
+
 class MinecraftStatus(CallbackCommandBase):
-    callback_data = CallbackData('minecraft', 'url', sep='$')
+    callback_data = MinecraftCallback
 
     server_url = 'minecraft.msut.me'
     screenshots = random_cycle(
@@ -35,17 +40,17 @@ class MinecraftStatus(CallbackCommandBase):
 
     @classmethod
     def keyboard(cls, url: str) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().row(
-            InlineKeyboardButton(text='🔄 Обновить', callback_data=cls.callback_data.new(url)),
+        keyboard = InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text='🔄 Обновить', callback_data=MinecraftCallback(url=url).pack()),
         )
         if url == cls.server_url:
-            keyboard.insert(
+            keyboard.add(
                 InlineKeyboardButton(text='🗒 Подробнее', url='https://vk.com/wall13628232_1332'),
             )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, _message: Message, meta: MetaInfo):
+    async def process(cls, _message: Message, meta: MetaInfo) -> Message | bool | None:
         url = cls.server_url
 
         target, _ = meta.extract_text()
@@ -56,17 +61,21 @@ class MinecraftStatus(CallbackCommandBase):
         return await target.reply(text, reply_markup=cls.keyboard(url))
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict):
+    async def process_cb(cls, query: CallbackQuery, callback_data: MinecraftCallback) -> Message | bool | None:
+        message = query.message
+        if not isinstance(message, Message):
+            return await query.answer("Эта кнопка уже недоступна.")
         await query.answer(text='✅', cache_time=30)
 
-        url = callback_data['url']
+        url = callback_data.url
         text = await cls.mc_status(url)
 
-        with suppress(aiogram.exceptions.BadRequest):
-            return await query.message.edit_text(text, reply_markup=cls.keyboard(url))
+        with suppress(TelegramBadRequest):
+            return await message.edit_text(text, reply_markup=cls.keyboard(url))
+        return None
 
     @classmethod
-    @cached(ttl=30, noself=True)
+    @cached_async(ttl=30, noself=True)
     async def mc_status(cls, url: str) -> str:
         try:
             mc = JavaServer.lookup(url)

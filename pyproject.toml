@@ -9,9 +9,7 @@ dependencies = [
     "aiogram[proxy,redis]==3.31.0",
     "aiohttp==3.14.3",
     "aiohttp-socks==0.12.0",
-    "aiojobs==1.2.1",
     "airtable-python-wrapper==0.15.3",
-    "apscheduler==3.10.4",
     "arxiv==0.5.3",
     "beautifulsoup4==4.12.3",
     "cachetools==5.3.3",
@@ -47,6 +45,9 @@ dependencies = [
     "ujson==5.9.0",
     "youtube-dl==2021.12.17",
     "pyacrcloud; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "babel==2.9.1",
+    "opentelemetry-sdk==1.44.0",
+    "opentelemetry-exporter-otlp-proto-common==1.44.0",
 ]
 
 [project.scripts]
@@ -69,6 +70,7 @@ dev = [
     "mypy==2.0.0",
     "types-pillow==10.2.0.20240822",
     "types-cachetools==5.3.0.7",
+    "types-tabulate==0.9.0.20241207",
 ]
 
 [tool.uv.sources]
@@ -86,7 +88,9 @@ show_error_codes = true
 warn_unused_configs = true
 warn_unused_ignores = true
 files = [
+    "common/caching.py",
     "common/externals/dvach.py",
+    "common/hc.py",
     "common/tg/callbacks.py",
     "common/tg/chat_actioner.py",
     "common/tg/command.py",
@@ -106,24 +110,65 @@ files = [
     "common/tg/state.py",
     "common/tg/storage.py",
     "common/tg/utils.py",
+    "common/tg/wrapper.py",
+    "common/vk/publish.py",
+    "hub_bot/app.py",
+    "hub_bot/commands/admin.py",
+    "hub_bot/commands/animate.py",
+    "hub_bot/commands/antibot.py",
+    "hub_bot/commands/arxiv.py",
+    "hub_bot/commands/camera.py",
+    "hub_bot/commands/control.py",
+    "hub_bot/commands/crypto.py",
     "hub_bot/commands/debate.py",
+    "hub_bot/commands/debug.py",
+    "hub_bot/commands/dvach.py",
     "hub_bot/commands/errors.py",
     "hub_bot/commands/excuses.py",
+    "hub_bot/commands/externals.py",
     "hub_bot/commands/figlet.py",
     "hub_bot/commands/fun.py",
     "hub_bot/commands/genders.py",
+    "hub_bot/commands/geoguess.py",
     "hub_bot/commands/help.py",
+    "hub_bot/commands/infra.py",
+    "hub_bot/commands/latex.py",
     "hub_bot/commands/likes.py",
     "hub_bot/commands/lingvanex.py",
+    "hub_bot/commands/lobster.py",
     "hub_bot/commands/location.py",
+    "hub_bot/commands/minecraft.py",
     "hub_bot/commands/other.py",
     "hub_bot/commands/personal.py",
+    "hub_bot/commands/posting.py",
+    "hub_bot/commands/prog.py",
     "hub_bot/commands/raffle.py",
     "hub_bot/commands/rate.py",
+    "hub_bot/commands/rolls.py",
+    "hub_bot/commands/sed.py",
     "hub_bot/commands/settings.py",
+    "hub_bot/commands/song.py",
+    "hub_bot/commands/stats.py",
+    "hub_bot/commands/sticker.py",
+    "hub_bot/commands/tenet.py",
+    "hub_bot/commands/tesseract.py",
+    "hub_bot/commands/tts.py",
+    "hub_bot/commands/tyan.py",
+    "hub_bot/commands/vk.py",
     "hub_bot/commands/votes.py",
+    "hub_bot/commands/weather.py",
     "hub_bot/commands/zalgo.py",
     "hub_bot/events.py",
+    "hub_bot/routing.py",
+    "hub_bot/utils/caption_layout.py",
+    "hub_bot/utils/ffmpeg.py",
+    "hub_bot/utils/jdoodle.py",
+    "hub_bot/utils/sed.py",
+    "hub_bot/utils/sticker_media.py",
+    "hub_bot/utils/sticker_sets.py",
+    "hub_bot/utils/wit.py",
+    "hub_bot/utils/wolfram.py",
+    "msu_hub_bot/cli.py",
     "msu_hub_bot/health.py",
     "msu_hub_bot/settings.py",
     "tools/check_types.py",
@@ -131,7 +176,7 @@ files = [
 
 [[tool.mypy.overrides]]
 # Remove each provider/native exception when its SDK ships types; adapters remain checked.
-module = ["aiocache", "arxiv", "gtts", "pytesseract", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "pydub", "pydub.effects", "throttler", "transliterate", "pyfiglet", "airtable"]
+module = ["aiocache", "arxiv", "gtts", "pytesseract", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "pydub", "pydub.effects", "throttler", "transliterate", "pyfiglet", "airtable", "ccxt", "ccxt.async_support"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -143,7 +188,6 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.uv]
 # Freeze the observed runtime without making transitive packages direct dependencies.
 constraint-dependencies = [
-    "APScheduler==3.10.4",
     "Babel==2.9.1",
     "Brotli==1.1.0",
     "Jinja2==3.1.3",
@@ -156,7 +200,6 @@ constraint-dependencies = [
     "aiogram==3.31.0",
     "aiohttp==3.14.3",
     "aiohttp-socks==0.12.0",
-    "aiojobs==1.2.1",
     "aiosignal==1.4.0",
     "airtable-python-wrapper==0.15.3",
     "arxiv==0.5.3",

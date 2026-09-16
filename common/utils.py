@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from functools import wraps, lru_cache
 from itertools import chain, islice, tee
 from operator import itemgetter
-from typing import Callable, Hashable, Iterable, List, Optional, TypeVar, AnyStr, Tuple
+from typing import Generic, Iterator, Callable, Hashable, Iterable, List, Optional, TypeVar, AnyStr, Tuple
 
 import aiohttp
 import pendulum
@@ -166,7 +166,7 @@ def strip_blank_rows(s: str) -> str:
     return text
 
 
-def random_cycle(*args):
+def random_cycle(*args: T) -> Iterator[T]:
     it = list(args)
     random.shuffle(it)
     return itertools.cycle(it)
@@ -231,24 +231,24 @@ def is_finished(it) -> bool:
     return False
 
 
-class PriorityQueue:
-    def __init__(self):
-        self._data = []
+class PriorityQueue(Generic[T]):
+    def __init__(self) -> None:
+        self._data: list[tuple[int, T]] = []
 
-    def head(self, default=None):
+    def head(self, default: T | None = None) -> T | None:
         if self._data:
             return self._data[0][1]
         return default
 
-    def head_with_priority(self, default=None, default_priority=0) -> tuple:
+    def head_with_priority(self, default: T | None = None, default_priority: int = 0) -> tuple[T | None, int]:
         if self._data:
             return self._data[0][1], self._data[0][0]
         return default, default_priority
 
-    def put(self, priority: int, value):
+    def put(self, priority: int, value: T) -> None:
         heapq.heappush(self._data, (priority, value))
 
-    def pop(self):
+    def pop(self) -> T:
         return heapq.heappop(self._data)[1]
 
 

@@ -5,22 +5,25 @@ from contextlib import suppress
 from copy import copy
 from typing import Tuple
 
-import aiogram
+from aiogram import Bot, html
+from aiogram.exceptions import TelegramBadRequest
 import cachetools
-from aiocache import cached
-from aiogram.types import Message, Chat, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-from aiogram.utils.callback_data import CallbackData
-from aiogram.utils.markdown import hbold, hitalic, hcode, quote_html
+from common.caching import cached_async
+from aiogram.types import Message, ChatFullInfo, CallbackQuery, InputFile, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.filters.callback_data import CallbackData
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.markdown import hbold, hitalic, hcode
 
-from app import bot
+from common.tg.context import bot_for
+from common.tg.files import input_file
 from common.externals.owm import WeatherForecast, WeatherReading, weather, id_to_emoji, weather_map, \
     coordinates_to_xy, geocoding
 from common.tg.callbacks import CallbackCommandBase
 from common.tg.filters import MetaInfo
 
 
-@cached(ttl=10 * 60)
-async def get_chat(chat_id: int) -> Chat:
+@cached_async(ttl=10 * 60)
+async def get_chat(chat_id: int, bot: Bot) -> ChatFullInfo:
     return await bot.get_chat(chat_id)
 
 
@@ -56,7 +59,7 @@ def parse_response(forecast: WeatherForecast, location_name: str) -> str:
         return f'{hbold(description)}: {temp_text}'
 
     lines = [
-        f'{hbold("Погода")}: {quote_html(location_name)}, {pretty_date(today)}',
+        f'{hbold("Погода")}: {html.quote(location_name)}, {pretty_date(today)}',
         '',
         f'{hbold("Сейчас")}: {temp(curr.temp)} | ощущается как {temp(curr.feels_like)}, {condition(curr)}',
     ]
@@ -74,24 +77,29 @@ def parse_response(forecast: WeatherForecast, location_name: str) -> str:
     return '\n'.join(lines)
 
 
+class WeatherCallback(CallbackData, prefix="weather"):
+    lat: float
+    lon: float
+
+
 class Weather(CallbackCommandBase):
     Moscow = (55.7522, 37.6155)
 
-    replies = cachetools.LRUCache(maxsize=128)
-    location_refreshes = cachetools.LRUCache(maxsize=128)
+    replies: cachetools.LRUCache[tuple[int, int], int] = cachetools.LRUCache(maxsize=128)
+    location_refreshes: cachetools.LRUCache[tuple[int, int], float] = cachetools.LRUCache(maxsize=128)
     location_refresh_interval = 15 * 60
-    callback_data = CallbackData('weather', 'lat', 'lon')
+    callback_data = WeatherCallback
 
     @classmethod
     def keyboard(cls, coordinates: Tuple[float, float]) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().row(
-            InlineKeyboardButton(text='🔄 Обновить', callback_data=cls.callback_data.new(coordinates[0], coordinates[1])),
+        keyboard = InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text='🔄 Обновить', callback_data=WeatherCallback(lat=coordinates[0], lon=coordinates[1]).pack()),
         )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, message: Message, meta: MetaInfo):
-        chat = await get_chat(message.chat.id)
+    async def process(cls, message: Message, meta: MetaInfo) -> Message | bool | None:
+        chat = await get_chat(message.chat.id, bot_for(message))
         target, text = meta.extract_text()
 
         if text:
@@ -101,16 +109,11 @@ class Weather(CallbackCommandBase):
             coordinates, location_name = result
 
         elif loc := chat.location or target.venue:
-            if isinstance(loc, dict):
-                # Todo: Remove this if, when aiogram will be fixed
-                coordinates = loc['location']['latitude'], loc['location']['longitude']
-                location_name = loc['address']
-            else:
-                coordinates = loc.location.latitude, loc.location.longitude
-                location_name = loc.address
+            coordinates = loc.location.latitude, loc.location.longitude
+            location_name = loc.address
 
-        elif loc := target.location:
-            coordinates = loc.latitude, loc.longitude
+        elif target.location:
+            coordinates = target.location.latitude, target.location.longitude
             location_name = None
 
         else:
@@ -124,11 +127,13 @@ class Weather(CallbackCommandBase):
         return await target.reply(text, reply_markup=cls.keyboard(coordinates), disable_web_page_preview=True)
 
     @classmethod
-    async def process_location(cls, message: Message):
+    async def process_location(cls, message: Message) -> Message | bool | None:
         location, location_name = message.location, None
         if venue := message.venue:
             location, location_name = venue.location, venue.address
 
+        if location is None:
+            return True
         coordinates = (location.latitude, location.longitude)
         response = await weather(coordinates, location_name)
         if response is None:
@@ -142,7 +147,7 @@ class Weather(CallbackCommandBase):
         return result
 
     @classmethod
-    async def process_location_edited(cls, message: Message):
+    async def process_location_edited(cls, message: Message) -> Message | bool | None:
         key = cls.cache_key(message)
         if key not in cls.replies:
             return True
@@ -170,24 +175,26 @@ class Weather(CallbackCommandBase):
                 if response is None:
                     return True
 
-                with suppress(aiogram.exceptions.BadRequest):
+                with suppress(TelegramBadRequest):
                     text = parse_response(*response)
-                    return await message.bot.edit_message_text(text, message.chat.id, message_id,
+                    return await bot_for(message).edit_message_text(text, chat_id=message.chat.id, message_id=message_id,
                                                                reply_markup=cls.keyboard(coordinates), disable_web_page_preview=True)
             finally:
                 # Include provider/edit latency in the interval between completed refreshes.
                 if key in cls.replies:
                     cls.location_refreshes[key] = time.monotonic()
 
+        return None
+
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict):
+    async def process_cb(cls, query: CallbackQuery, callback_data: WeatherCallback) -> Message | bool | None:
         try:
-            coordinates = float(callback_data['lat']), float(callback_data['lon'])
+            coordinates = float(callback_data.lat), float(callback_data.lon)
             if not all(math.isfinite(value) for value in coordinates) or not (-90 <= coordinates[0] <= 90 and -180 <= coordinates[1] <= 180):
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             return await query.answer('Не удалось прочитать координаты. Пришлите геопозицию заново.', show_alert=True)
-        if query.message is None:
+        if not isinstance(query.message, Message):
             return await query.answer('Сообщение с погодой больше недоступно.', show_alert=True)
 
         await query.answer(text='✅', cache_time=2 * 60)
@@ -197,27 +204,36 @@ class Weather(CallbackCommandBase):
             return True
 
         text = parse_response(*response)
-        with suppress(aiogram.exceptions.BadRequest):
+        with suppress(TelegramBadRequest):
             return await query.message.edit_text(text, reply_markup=cls.keyboard(coordinates), disable_web_page_preview=True)
+
+        return None
+
+
+class WeatherMapCallback(CallbackData, prefix="map"):
+    action: str
+    lat: float
+    lon: float
+    zoom: int
 
 
 class WeatherMap(CallbackCommandBase):
     MSU = (55.7031, 37.5311)
 
-    file_ids = cachetools.TTLCache(maxsize=512, ttl=30 * 60)
-    callback_data = CallbackData('map', 'action', 'lat', 'lon', 'zoom')
+    file_ids: cachetools.TTLCache[tuple[int, int, int], str] = cachetools.TTLCache(maxsize=512, ttl=30 * 60)
+    callback_data = WeatherMapCallback
 
     @classmethod
     def keyboard(cls, coordinates: Tuple[float, float], zoom: int) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().row(
-            InlineKeyboardButton(text='➕', callback_data=cls.callback_data.new('zoom_in', coordinates[0], coordinates[1], zoom)),
-            InlineKeyboardButton(text='🔄', callback_data=cls.callback_data.new('update', coordinates[0], coordinates[1], zoom)),
-            InlineKeyboardButton(text='➖', callback_data=cls.callback_data.new('zoom_out', coordinates[0], coordinates[1], zoom)),
+        keyboard = InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text='➕', callback_data=WeatherMapCallback(action="zoom_in", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()),
+            InlineKeyboardButton(text='🔄', callback_data=WeatherMapCallback(action="update", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()),
+            InlineKeyboardButton(text='➖', callback_data=WeatherMapCallback(action="zoom_out", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()),
         )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, message: Message):
+    async def process(cls, message: Message) -> Message | bool | None:
         coordinates = cls.MSU
 
         if reply_to := message.reply_to_message:
@@ -228,23 +244,20 @@ class WeatherMap(CallbackCommandBase):
                 loc = reply_to.venue.location
                 coordinates = loc.latitude, loc.longitude
             else:
-                chat = await get_chat(message.chat.id)
+                chat = await get_chat(message.chat.id, bot_for(message))
 
-                if loc := chat.location:
-                    if isinstance(loc, dict):
-                        # Todo: Remove this if, when aiogram will be fixed
-                        coordinates = loc['location']['latitude'], loc['location']['longitude']
-                    else:
-                        coordinates = loc.location.latitude, loc.location.longitude
+                if chat.location:
+                    coordinates = chat.location.location.latitude, chat.location.location.longitude
 
         zoom = 13
         x, y = coordinates_to_xy(coordinates, zoom)
         key = (x, y, zoom)
 
+        file: InputFile | str
         if key in cls.file_ids:
             file = cls.file_ids[key]
         else:
-            file = copy(await weather_map(x, y, zoom))
+            file = input_file(copy(await weather_map(x, y, zoom)), "weather-map.png")
 
         text = f'{hbold("Latitude")}: {hcode(coordinates[0])}\n' \
                f'{hbold("Longitude")}: {hcode(coordinates[1])}\n' \
@@ -252,15 +265,18 @@ class WeatherMap(CallbackCommandBase):
 
         result = await message.reply_photo(file, caption=text, reply_markup=cls.keyboard(coordinates, zoom))
 
-        if key not in cls.file_ids:
+        if key not in cls.file_ids and result.photo:
             cls.file_ids[(x, y, zoom)] = result.photo[-1].file_id
 
         return result
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict):
-        action, zoom = callback_data['action'], int(callback_data['zoom'])
-        coordinates = float(callback_data['lat']), float(callback_data['lon'])
+    async def process_cb(cls, query: CallbackQuery, callback_data: WeatherMapCallback) -> Message | bool | None:
+        message = query.message
+        if not isinstance(message, Message):
+            return await query.answer("Сообщение с картой больше недоступно.")
+        action, zoom = callback_data.action, int(callback_data.zoom)
+        coordinates = float(callback_data.lat), float(callback_data.lon)
 
         if action == 'zoom_in':
             zoom += 1
@@ -276,10 +292,11 @@ class WeatherMap(CallbackCommandBase):
         x, y = coordinates_to_xy(coordinates, zoom)
         key = (x, y, zoom)
 
+        file: InputFile | str
         if key in cls.file_ids:
             file = cls.file_ids[key]
         else:
-            file = copy(await weather_map(x, y, zoom))
+            file = input_file(copy(await weather_map(x, y, zoom)), "weather-map.png")
 
         await query.answer(text='✅', cache_time=1)
 
@@ -288,10 +305,10 @@ class WeatherMap(CallbackCommandBase):
                f'{hbold("Zoom Level")}: {hcode(zoom)}'
 
         result = None
-        with suppress(aiogram.exceptions.BadRequest):
-            result = await query.message.edit_media(InputMediaPhoto(file, caption=text), reply_markup=cls.keyboard(coordinates, zoom))
+        with suppress(TelegramBadRequest):
+            result = await message.edit_media(InputMediaPhoto(media=file, caption=text), reply_markup=cls.keyboard(coordinates, zoom))
 
-        if result and key not in cls.file_ids:
+        if isinstance(result, Message) and result.photo and key not in cls.file_ids:
             cls.file_ids[(x, y, zoom)] = result.photo[-1].file_id
 
         return result
