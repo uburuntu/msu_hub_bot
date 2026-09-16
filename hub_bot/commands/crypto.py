@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import suppress
 from typing import Tuple, List
 
@@ -14,6 +13,7 @@ from aiogram.utils.markdown import hbold, hitalic
 
 from common.tg.callbacks import CallbackCommandBase
 from common.tg.filters import MetaInfo
+from common.tg.runtime import gather_complete
 
 
 class CryptoCallback(CallbackData, prefix="crypto", sep=":"):
@@ -42,9 +42,11 @@ class Crypto(CallbackCommandBase):
         async def prices(e: ccxt.Exchange, symbol: str) -> Tuple[int, int, int]:
             diff_1d = (pendulum.now('UTC') - pendulum.duration(days=1)).int_timestamp * 1000
             diff_7d = (pendulum.now('UTC') - pendulum.duration(days=7)).int_timestamp * 1000
-            curr, *prev = await asyncio.gather(e.fetch_ohlcv(symbol, timeframe='1m', limit=1),
-                                               e.fetch_ohlcv(symbol, timeframe='1m', limit=1, since=diff_1d),
-                                               e.fetch_ohlcv(symbol, timeframe='1m', limit=1, since=diff_7d))
+            curr, *prev = await gather_complete(
+                e.fetch_ohlcv(symbol, timeframe='1m', limit=1),
+                e.fetch_ohlcv(symbol, timeframe='1m', limit=1, since=diff_1d),
+                e.fetch_ohlcv(symbol, timeframe='1m', limit=1, since=diff_7d),
+            )
             return curr[0][4], prev[0][0][4], prev[1][0][4]
 
         def line(p: Tuple[int, int, int], symbol: str) -> str:
@@ -60,8 +62,10 @@ class Crypto(CallbackCommandBase):
             text += line(usd, '$')
         else:
             try:
-                usd, btc = await asyncio.gather(prices(crypto_exchange, f'{ticker}/USDT'),
-                                                prices(crypto_exchange, f'{ticker}/BTC'))
+                usd, btc = await gather_complete(
+                    prices(crypto_exchange, f'{ticker}/USDT'),
+                    prices(crypto_exchange, f'{ticker}/BTC'),
+                )
                 text += line(usd, '$')
                 text += line(btc, '₿')
             except ccxt.BadSymbol:

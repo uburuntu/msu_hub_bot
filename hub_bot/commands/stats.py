@@ -10,6 +10,7 @@ from aiogram.utils.markdown import hbold
 
 from common.db.edb import EdgeDB, UserDB, ChatDB, UpdateDB
 from common.tg.callbacks import CallbackCommandBase
+from common.tg.runtime import gather_complete
 
 
 class StatsCallback(CallbackData, prefix="stats", sep=":"):
@@ -37,7 +38,7 @@ class Stats(CallbackCommandBase):
             UpdateDB.query(db).count(f'.created > to_datetime({int(yesterday.timestamp())})'),
         ]
 
-        users, chats, updates_handled, updates = await asyncio.gather(*coros)
+        users, chats, updates_handled, updates = await gather_complete(*coros)
 
         text = dedent(f"""
             {hbold("Статистика @msu_hub_bot")}

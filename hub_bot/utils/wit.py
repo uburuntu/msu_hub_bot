@@ -20,6 +20,7 @@ from msu_hub_bot.telemetry import Boundary, Provider, Telemetry
 from common.executor import TPExecutor
 from common.externals.exceptions import ExternalServiceError
 from common.tg.middlewares.settings import Settings
+from common.tg.runtime import gather_complete
 from common.tg.utils import send_super_reply
 from common.tg.context import bot_for
 from common.utils import megabytes, FakeBytesIO
@@ -193,7 +194,7 @@ class Wit(ManyWitAPI):
         if timeouted or not chunks or any(chunk is None for chunk in chunks):
             return None
 
-        texts: List[str] = await asyncio.gather(
+        texts: List[str] = await gather_complete(
             *[
                 self.instance.speech(chunk, content_type="audio/raw;encoding=signed-integer;bits=16;rate=16000;endian=little")
                 for chunk in chunks

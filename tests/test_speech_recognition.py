@@ -1,11 +1,13 @@
 """Speech selection and preprocessing checks use synthetic audio without providers."""
 
+import asyncio
 import io
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from common.tg.runtime import Supervisor
 from msu_hub_bot.settings import MissingIntegration
 
 from hub_bot.utils import wit
@@ -120,3 +122,43 @@ async def test_failed_preprocessing_never_submits_an_empty_request(result):
 
     assert await client.stt(io.BytesIO(b"audio"), duration=1) is None
     client.instances[0].speech.assert_not_awaited()
+
+
+async def test_failed_chunk_keeps_sibling_requests_owned_until_they_finish():
+    chunks = [io.BytesIO(b"first"), io.BytesIO(b"second")]
+    client = wit.Wit(["synthetic"], executor=SimpleNamespace(run=AsyncMock(return_value=(chunks, False))))
+    supervisor = Supervisor()
+    entered, release, settled = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original = wit.WitAPIError(503, "synthetic failure")
+
+    async def speech(chunk, **kwargs):
+        if chunk is chunks[0]:
+            raise original
+        entered.set()
+        try:
+            await release.wait()
+            return "transcript"
+        finally:
+            settled.set()
+
+    client.instances[0].speech = speech
+
+    async def worker():
+        supervisor.admit_current_update()
+        return await client.stt(io.BytesIO(b"audio"), duration=40)
+
+    task = asyncio.create_task(worker())
+    drain = None
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        drain = asyncio.create_task(supervisor.drain(1, cancel_timeout=0.1))
+        done, _ = await asyncio.wait({task, drain}, timeout=0.01)
+        assert not done and supervisor.update_count == 1
+        release.set()
+        with pytest.raises(wit.WitAPIError) as caught:
+            await task
+        assert caught.value is original and settled.is_set()
+        await drain
+    finally:
+        release.set()
+        await asyncio.gather(task, *([drain] if drain is not None else []), return_exceptions=True)

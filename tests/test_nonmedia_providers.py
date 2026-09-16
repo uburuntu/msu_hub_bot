@@ -11,7 +11,7 @@ from aiogram import Bot
 from aiogram.types import BufferedInputFile, CallbackQuery
 
 from common.tg.runtime import Supervisor
-from hub_bot.commands import crypto, geoguess, weather
+from hub_bot.commands import crypto, geoguess, stats, weather
 from telegram_helpers import RecordingSession, make_message
 
 
@@ -77,6 +77,60 @@ async def test_crypto_uses_injected_exchange_and_preserves_three_price_lookups()
     assert exchange.fetch_ohlcv.await_count == 3
     assert "25.000" in text and "100.000" in text
     assert all(call.args == ("BTC/USDT",) for call in exchange.fetch_ohlcv.await_args_list)
+
+
+@pytest.mark.parametrize("ticker", ["BTC", "ETH"])
+async def test_crypto_failure_waits_for_other_price_requests(ticker):
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = RuntimeError("synthetic price failure")
+
+    async def fetch(symbol, **kwargs):
+        if (ticker == "BTC" and "since" not in kwargs) or (ticker == "ETH" and symbol.endswith("/BTC")):
+            raise original
+        entered.set()
+        await release.wait()
+        return [[0, 0, 0, 0, 100]]
+
+    task = asyncio.create_task(crypto.Crypto.text.__wrapped__(crypto.Crypto, ticker, SimpleNamespace(fetch_ohlcv=fetch)))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        done, _ = await asyncio.wait({task}, timeout=0.01)
+        assert not done
+        release.set()
+        with pytest.raises(RuntimeError) as caught:
+            await task
+        assert caught.value is original
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_stats_failure_waits_for_other_database_queries(monkeypatch):
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = RuntimeError("synthetic count failure")
+    completed = []
+
+    async def count(*args):
+        entered.set()
+        await release.wait()
+        completed.append(True)
+        return 1
+
+    monkeypatch.setattr(stats.UserDB, "query", lambda db: SimpleNamespace(count=AsyncMock(side_effect=original)))
+    for model in (stats.ChatDB, stats.UpdateDB):
+        monkeypatch.setattr(model, "query", lambda db: SimpleNamespace(count=count))
+    task = asyncio.create_task(stats.Stats.text(SimpleNamespace()))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        done, _ = await asyncio.wait({task}, timeout=0.01)
+        assert not done
+        release.set()
+        with pytest.raises(RuntimeError) as caught:
+            await task
+        assert caught.value is original and len(completed) == 3
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_weather_map_snapshots_upload_and_keeps_topic(monkeypatch):
