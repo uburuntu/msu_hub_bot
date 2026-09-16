@@ -135,8 +135,14 @@ class SettingsMiddleware(BaseMiddleware):
             self._trim()
 
     async def close(self) -> None:
+        failures: list[Exception] = []
         for preferences in list(self.proxies.values()):
-            await self._save(preferences)
+            try:
+                await self._save(preferences)
+            except Exception as error:
+                failures.append(error)
+        if failures:
+            raise ExceptionGroup("Chat preferences failed to save during shutdown", failures)
 
     async def _save(self, preferences: Settings) -> None:
         if preferences._is_dirty:

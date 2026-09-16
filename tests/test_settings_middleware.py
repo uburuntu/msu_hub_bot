@@ -177,6 +177,29 @@ async def test_cancellation_still_saves_preferences(storage):
     assert rows[100].metadata["settings"]["with_nsfw"] is True
 
 
+async def test_shutdown_attempts_other_dirty_chats_after_one_save_fails(storage):
+    db, rows, query = storage
+    middleware = SettingsMiddleware(db)
+    first = await middleware.proxy(message(100).chat)
+    second = await middleware.proxy(message(200).chat)
+    first.with_nsfw = second.with_nsfw = True
+    original = RuntimeError("one chat save failed")
+    update = query.update
+
+    async def save(chat_id, **values):
+        if chat_id == 100:
+            raise original
+        await update(chat_id, **values)
+
+    query.update = save
+    with pytest.raises(ExceptionGroup) as caught:
+        await middleware.close()
+    assert caught.value.exceptions == (original,)
+    assert first._is_dirty
+    assert rows[200].metadata["settings"]["with_nsfw"] is True
+    assert not second._is_dirty
+
+
 def test_preferences_do_not_read_environment_and_validate_assignment(monkeypatch):
     monkeypatch.setenv("AUTO_VIDEO_LINKS", "false")
     preferences = Settings(future_option={"value": 1})
