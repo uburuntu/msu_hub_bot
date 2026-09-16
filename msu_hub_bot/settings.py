@@ -9,7 +9,8 @@ import os
 import re
 from typing import Any
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def load_runtime_environment() -> None:
@@ -63,7 +64,7 @@ class Settings(BaseSettings):
     pookie_chat_id: int = 0
     echo_chat_id: int = 0
     excluded_chat_id: int = 0
-    dvach_chat_ids: list[int] = Field(default_factory=lambda: [0] * 5, min_items=5, max_items=5)
+    dvach_chat_ids: list[int] = Field(default_factory=lambda: [0] * 5, min_length=5, max_length=5)
     antibot_user_id: int = 0
     posting_tb_chat_id: int = 0
     posting_main_chat_id: int = 0
@@ -87,10 +88,7 @@ class Settings(BaseSettings):
     supporters_table: str = ""
     supporters_api_key: str = ""
 
-    class Config:
-        env_prefix = "HUB_"
-        case_sensitive = False
-        extra = "forbid"
+    model_config = SettingsConfigDict(env_prefix="HUB_", case_sensitive=False, extra="forbid", hide_input_in_errors=True)
 
     def __repr_args__(self) -> list[tuple[str, str]]:
         return [("values", "<redacted>")]

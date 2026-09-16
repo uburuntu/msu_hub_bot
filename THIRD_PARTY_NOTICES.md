@@ -17,3 +17,9 @@ The ACRCloud Python SDK remains an external, pinned Git dependency. Its native
 binaries are not vendored in this repository. Deployment images are transferred
 privately and are not published for redistribution. All other dependencies
 retain their respective upstream licenses.
+
+## Imageboard SDK
+
+The imageboard integration includes [api2ch 1.2.1](https://github.com/uburuntu/api2ch), copyright 2020 Ramzan Bekbulatov, under the [MIT license](common/externals/_api2ch/LICENSE).
+
+Its source is isolated in `common/externals/_api2ch`. Imports use the local package namespace and `pydantic.v1`; the SDK implementation is otherwise unchanged. The adjacent partial type stub describes the operations used by this bot. Application code imports the boundary in `common/externals/dvach.py` and uses Pydantic 2 for its own models.

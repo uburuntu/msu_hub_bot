@@ -19,9 +19,9 @@ class EcosystemChat(MSUHubModule):
     name: str
     section: str
     is_hidden: bool
-    username_alias: Optional[str]
-    members: Optional[int]
-    pinned_message_id: Optional[int]
+    username_alias: Optional[str] = None
+    members: Optional[int] = None
+    pinned_message_id: Optional[int] = None
 
 
 class VkTgModule(EDBModelBase, ABC):
@@ -37,4 +37,4 @@ class VkWallPosting(VkTgModule):
     with_reposts: bool
     with_header: bool
     is_suspended: bool
-    description: Optional[str]
+    description: Optional[str] = None

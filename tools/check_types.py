@@ -11,6 +11,8 @@ from typing import cast
 
 ROOT = Path(__file__).resolve().parents[1]
 APPLICATION_ROOTS = ("msu_hub_bot", "common", "hub_bot")
+# Third-party source is verified by test_api2ch_compat.py and has a narrow API stub.
+VENDORED_PREFIX = "common/externals/_api2ch/"
 
 
 def table(value: object) -> Mapping[str, object]:
@@ -99,7 +101,11 @@ def main() -> int:
         tracked = set(filter(None, git("ls-files", "-z").split("\0")))
         existing = {path for path in tracked | scope if (ROOT / path).is_file()}
         baseline = set(filter(None, git("ls-tree", "-r", "--name-only", "-z", base, "--", *APPLICATION_ROOTS).split("\0")))
-        application = {path for path in tracked if path.endswith(".py") and path.split("/", 1)[0] in APPLICATION_ROOTS}
+        application = {
+            path
+            for path in tracked
+            if path.endswith(".py") and path.split("/", 1)[0] in APPLICATION_ROOTS and not path.startswith(VENDORED_PREFIX)
+        }
         errors = policy_errors(options, scope) + coverage_errors(scope, previous, existing, application - baseline)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Type scope check could not complete: {type(error).__name__}")

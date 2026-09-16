@@ -1,0 +1,19 @@
+{
+  "version": "1.2.1",
+  "files": {
+    "__init__.py": "e3e05f7f9671716544c44e9dfbd8a06cf758d25ba0f4d7927c3daa9ee804515a",
+    "api.py": "c39b0cfe0d611420cad06c6ff3650864075e56fe74a52a837c5248985d66cb11",
+    "config.py": "7667de1161e7e0c4491f1ed39e9e918eae87bb2701e17f0440dbaac1ee0bfe8b",
+    "helpers.py": "952070393acde528072355504000c4485da978a010571072922af439b60689b4",
+    "models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "models/auxiliary.py": "e2c567117bc90b1d6454aef9ba308a4f91177c465d45374a54122feda506fb7b",
+    "models/base.py": "b9bf3d3ffd1e0b57724f03039343d9ee991531384a338677a8c055dde71757c9",
+    "models/board.py": "f360f30953c309662e1429d83729b3e00ecb209b9d4d79fa2fd3351f0dcece28",
+    "models/file.py": "f3b241903698756f7d1287b42d609e1c3247f21d3fc948916845b168bc6ae91e",
+    "models/post.py": "d1749df1d5b2590ef3b96dd74024498386e487387112b85a43ecd79efa1e7c2b",
+    "models/request.py": "363ff4941ce8ba2fd642af765b414307e82f45daf3ea8509d5955acae29b4ae9",
+    "models/response.py": "5002e11e871fddadb88f511fa4d03ee1d06b573cd64c1d96e165c19319dd099b",
+    "models/thread.py": "fe7c8d0deaa5e9e0f9ccc5dacc06b91bd41708dcab9d1fbda6c7983d2d669d0c",
+    "utils.py": "5235564c868e709b086da2c0d14c08f946fb46c2efffedd45c1435a3fbf2035e"
+  }
+}

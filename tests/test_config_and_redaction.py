@@ -99,7 +99,7 @@ def test_local_logger_preserves_levels_and_redacts_both_outputs(monkeypatch, tmp
 
 def test_example_and_deployment_cover_current_settings():
     root = Path(__file__).resolve().parents[1]
-    configured = {"HUB_" + name.upper() for name in Settings.__fields__}
+    configured = {"HUB_" + name.upper() for name in Settings.model_fields}
     example = set(re.findall(r"^(HUB_[A-Z0-9_]+)=", (root / ".env.example").read_text(), re.MULTILINE))
     deployed = set(re.findall(r"^\s+(HUB_[A-Z0-9_]+):", (root / ".github/workflows/deploy.yml").read_text(), re.MULTILINE))
     assert example == configured

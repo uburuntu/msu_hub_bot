@@ -3,13 +3,14 @@ from msu_hub_bot.settings import settings
 import datetime
 from abc import ABC
 from functools import lru_cache
-from typing import List, Optional, TypeVar, Generic, Dict, Type
+from typing import Any, List, Optional, TypeVar, Generic, Dict, Type
 from uuid import UUID
 
 import edgedb
 import pytz
 from aiocache import cached
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, GetCoreSchemaHandler
+from pydantic_core import core_schema
 
 from common import json
 
@@ -207,11 +208,11 @@ class QueryBuilder(Generic[T]):
 
     async def get_all(self) -> List[T]:
         raws = await self._get_all()
-        return [self.model_class.parse_obj(obj_to_dict(raw)) for raw in raws]
+        return [self.model_class.model_validate(obj_to_dict(raw)) for raw in raws]
 
     async def get(self, pk: V) -> T:
         raw = await self._get_by_pk(pk)
-        return self.model_class.parse_obj(obj_to_dict(raw))
+        return self.model_class.model_validate(obj_to_dict(raw))
 
     async def insert(self, **kwargs):
         return await self.db.insert(self.type_name, **kwargs)
@@ -257,10 +258,11 @@ class QueryBuilder(Generic[T]):
         return bool(await self._get_by_pk(pk))
 
 
-class EDBDict(dict):
+class EDBDict(dict[str, Any]):
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
+        # Stored JSON historically accepts objects, arrays, scalars and null.
+        return core_schema.no_info_plain_validator_function(cls.validate)
 
     @classmethod
     def validate(cls, v):
@@ -270,11 +272,13 @@ class EDBDict(dict):
 
 
 class EDBModelBase(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True, hide_input_in_errors=True)
+
     id: UUID
 
     @classmethod
     def fields(cls):
-        return ', '.join(cls.__fields__.keys())
+        return ', '.join(cls.model_fields)
 
     @classmethod
     def type_name(cls) -> str:
@@ -329,9 +333,9 @@ class UserDB(TelegramModule):
     user_id: int
     is_bot: bool
     first_name: str
-    last_name: Optional[str]
-    username: Optional[str]
-    language_code: Optional[str]
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    language_code: Optional[str] = None
 
 
 class ChatDB(TelegramModule):
@@ -345,8 +349,8 @@ class ChatDB(TelegramModule):
 
     chat_id: int
     type: str
-    title: Optional[str]
-    username: Optional[str]
-    first_name: Optional[str]
-    last_name: Optional[str]
+    title: Optional[str] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     metadata: EDBDict
