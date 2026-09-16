@@ -26,10 +26,8 @@ class Settings(BaseSettings):
     @classmethod
     async def create(cls, db: EdgeDB, chat_id: int) -> 'Settings':
         chat_db = await ChatDB.query(db).get(chat_id)
-        if isinstance(chat_db.metadata, str):
-            # баг бля с '{}'
-            chat_db.metadata = {}
-        settings = chat_db.metadata.get('settings', {})
+        metadata = chat_db.metadata if isinstance(chat_db.metadata, dict) else {}
+        settings = dict(metadata.get('settings') or {})
         settings['_chat_id'] = chat_id
         obj = cls.parse_obj(settings)
         obj.__dict__['_is_dirty'] = False  # to skip validator
@@ -43,8 +41,7 @@ class Settings(BaseSettings):
     async def save(self, db: EdgeDB, force=False) -> 'Settings':
         if self._is_dirty or force:
             chat_db = await ChatDB.query(db).get(self._chat_id)
-            if isinstance(chat_db.metadata, str):
-                # баг бля с '{}'
+            if not isinstance(chat_db.metadata, dict):
                 chat_db.metadata = {}
             chat_db.metadata['settings'] = self.dict(exclude={'_is_dirty', '_chat_id'})
             await ChatDB.query(db).update(self._chat_id, metadata=chat_db.metadata)
@@ -61,17 +58,24 @@ class SettingsMiddleware(LifetimeControllerMiddleware):
         self.proxies = cachetools.LRUCache(maxsize=128)
         self.throttler = ThrottlerSimultaneous(count=1)
 
-    async def proxy(self, chat_id: int) -> Settings:
+    async def proxy(self, chat: Chat) -> Settings:
         async with self.throttler:
-            if chat_id not in self.proxies:
-                self.proxies[chat_id] = await Settings.create(self.db, chat_id)
-        return self.proxies[chat_id]
+            if chat.id not in self.proxies:
+                # Settings are needed before the asynchronous update archive runs.
+                # Insert-on-conflict preserves preferences already stored by another update.
+                await self.db.insert_skip_conflict(
+                    'telegram::Chat', 'chat_id', chat_id=chat.id, type=chat.type,
+                    title=chat.title, username=chat.username,
+                    first_name=chat.first_name, last_name=chat.last_name,
+                )
+                self.proxies[chat.id] = await Settings.create(self.db, chat.id)
+        return self.proxies[chat.id]
 
     async def pre_process(self, obj, data, *args):
-        chat = Chat.get_current()
+        chat = getattr(obj, 'chat', None) or getattr(getattr(obj, 'message', None), 'chat', None)
         if not isinstance(chat, Chat):
             return
-        data['settings'] = await self.proxy(chat.id)
+        data['settings'] = await self.proxy(chat)
 
     async def post_process(self, obj, data, *args):
         proxy = data.get('settings', None)

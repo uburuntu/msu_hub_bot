@@ -78,16 +78,36 @@ class AntiBot(CallbackCommandBase):
 
     @classmethod
     async def process_cb(cls, query: CallbackQuery, callback_data: dict):
+        try:
+            chat_id, user_id = int(callback_data['chat_id']), int(callback_data['user_id'])
+            action = callback_data['action']
+        except (KeyError, TypeError, ValueError):
+            return await query.answer('Эта кнопка больше не работает.')
+        if not query.message or query.message.chat.id != chat_id or user_id <= 0 or action not in {'ban', 'kick', 'ignore', 'close'}:
+            return await query.answer('Эта кнопка больше не работает.')
+        async with cls.lock(cls.cache_key(query.message)):
+            return await cls._process_cb_locked(query, callback_data)
+
+    @classmethod
+    async def _process_cb_locked(cls, query: CallbackQuery, callback_data: dict):
         action, chat_id, user_id = callback_data['action'], int(callback_data['chat_id']), int(callback_data['user_id'])
         reply = query.message
 
         member = await reply.bot.get_chat_member(chat_id, query.from_user.id)
         if not member.is_chat_admin():
-            return await query.answer('❇️ Вам нужно быть администратором в чате', cache_time=cls.cache_time_long)
+            return await query.answer('❇️ Вам нужно быть администратором в чате')
+
+        if action in {'ban', 'kick'} and not (member.is_chat_creator() or member.can_restrict_members):
+            return await query.answer('❇️ Для этого нужно право блокировать участников', show_alert=True)
+
+        key = cls.cache_key(reply)
+        if action != 'close' and key in cls.cache:
+            return await query.answer('Решение уже принято.')
 
         if action == 'ignore':
             await reply.edit_text(reply.html_text + f'\n\n{query.from_user.get_mention()} вынес вердикт: {hbold("проигнорировать")}',
                                   reply_markup=cls.keyboard_after_decision(chat_id, user_id))
+            cls.cache[key] = action
             await redis.mark_message_to_delete(reply, after=60)
             return await query.answer('✅')
 
@@ -105,6 +125,12 @@ class AntiBot(CallbackCommandBase):
             return await query.answer('❇️ Боту нужны права на бан и удаление сообщений в этом чате',
                                       cache_time=cls.cache_time_10s, show_alert=True)
 
+        target = await reply.bot.get_chat_member(chat_id, user_id)
+        if target.is_chat_admin():
+            return await query.answer('Администраторов нельзя заблокировать этой кнопкой.', show_alert=True)
+        if not target.is_chat_member():
+            return await query.answer('Этот участник уже покинул чат.')
+
         await query.answer('✅', cache_time=cls.cache_time_10s)
 
         if action == 'kick':
@@ -115,6 +141,7 @@ class AntiBot(CallbackCommandBase):
             verdict = f'🔨 {hbold("бан")}'
 
         await reply.bot.kick_chat_member(chat_id, user_id, until_date=until_date)
+        cls.cache[key] = action
         if reply.reply_to_message:
             with suppress(aiogram.exceptions.BadRequest):
                 await reply.reply_to_message.delete()

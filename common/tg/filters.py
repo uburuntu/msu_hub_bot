@@ -28,7 +28,7 @@ class SimpleExtractor:
         if m.document:
             return doc(m.document)
         if m.sticker:
-            if not m.sticker.is_animated:
+            if not (m.sticker.is_animated or m.sticker.is_video):
                 return m.sticker
 
         return None
@@ -309,7 +309,7 @@ class MetaCommand(Filter):
 
     async def check(self, message: types.Message):
         text = message.text or (message.caption if not self.ignore_caption else None)
-        if not text:
+        if not text or not text.strip():
             return False
         me = await message.bot.me
 
@@ -327,7 +327,7 @@ class MetaCommand(Filter):
 
             if self.args is None:
                 arguments = split[1:]
-                text = t.replace(full_command, '')
+                text = t.lstrip()[len(full_command):]
             else:
                 firsts = 1 + self.args
                 arguments = split[1:firsts]
@@ -337,11 +337,11 @@ class MetaCommand(Filter):
             return MetaInfo(message=message, command=command, arguments=arguments, text=text)
 
         def check_hashtag(t: str) -> Optional[MetaInfo]:
-            hashtags = self.hashtags_pattern.findall(t)
-            if hashtags:
-                h, args = hashtags[0]
+            match = self.hashtags_pattern.search(t)
+            if match:
+                h, args = match.groups()
                 arguments = [arg for arg in args.split('_') if arg][:self.args]
-                return MetaInfo(message=message, hashtag=h, arguments=arguments, text=t.replace(f'#{h}{args}', ''))
+                return MetaInfo(message=message, hashtag=h, arguments=arguments, text=t[:match.start()] + t[match.end():])
 
             return None
 
