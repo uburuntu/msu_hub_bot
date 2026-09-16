@@ -51,4 +51,3 @@ def config(**changes):
         TelemetryConfig(export=True, token="synthetic-project-write-token", environment=Environment.TEST, sample_rate=1, interval=60),
         **changes,
     )
-
