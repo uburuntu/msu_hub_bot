@@ -85,8 +85,12 @@ class Extractor:
     async def extract(
         cls, message: Message, extractors: Iterable[tuple[ReplyPolicy, Callable[[Message], Awaitable[T | None]]]]
     ) -> tuple[Message, T | None]:
-        pairs = await cls.extract_many(message, extractors)
-        return pairs[0] if pairs else (message, None)
+        for policy, extractor in extractors:
+            for target in cls.targets(message, policy):
+                result = await extractor(target)
+                if result is not None:
+                    return target, result
+        return message, None
 
     @classmethod
     def image_extractors(
