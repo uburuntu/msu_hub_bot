@@ -3,6 +3,7 @@
 import io
 import json
 import logging
+import os
 import re
 import sys
 import traceback
@@ -43,7 +44,7 @@ def _strings(value, sensitive=False):
 def redact(value: object) -> str:
     text = str(value)
     variants = set()
-    for secret in _strings(settings.model_dump()):
+    for secret in _strings({"settings": settings.model_dump(), "logfire_token": os.environ.get("LOGFIRE_TOKEN", "")}):
         variants.update(
             (secret, quote(secret, safe=""), quote_plus(secret), json.dumps(secret, ensure_ascii=False)[1:-1], repr(secret)[1:-1])
         )

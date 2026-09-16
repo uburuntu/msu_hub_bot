@@ -23,8 +23,14 @@ def load_runtime_environment() -> None:
         if not isinstance(values, dict):
             raise ValueError
         for key, value in values.items():
-            if not re.fullmatch(r"HUB_[A-Z0-9_]+", key) or key == "HUB_CONFIG_JSON" or not isinstance(value, str):
+            if (
+                not (re.fullmatch(r"HUB_[A-Z0-9_]+", key) or key == "LOGFIRE_TOKEN")
+                or key == "HUB_CONFIG_JSON"
+                or not isinstance(value, str)
+                or "\0" in value
+            ):
                 raise ValueError
+        for key, value in values.items():
             os.environ.setdefault(key, value)
     except (TypeError, ValueError):
         raise ValueError("Invalid HUB_CONFIG_JSON deployment configuration") from None

@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 
 PUBLIC_STATUS = {
@@ -17,6 +18,16 @@ PUBLIC_STATUS = {
     "Rollback completed",
     "Rollback failed; restoring the current release",
 }
+
+
+def runtime_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    """The project write token is the only non-HUB runtime credential."""
+    export_enabled = environment.get("HUB_TELEMETRY_ENABLED", "").casefold() in {"1", "true", "yes"}
+    return {
+        key: value
+        for key, value in environment.items()
+        if (re.fullmatch(r"HUB_[A-Z0-9_]+", key) or (export_enabled and key == "LOGFIRE_TOKEN")) and key != "HUB_CONFIG_JSON" and value
+    }
 
 
 def report_result(result):
@@ -44,7 +55,7 @@ def main():
             raise SystemExit("Image archive does not match the deployment revision")
         payload.update(
             metadata,
-            environment={key: value for key, value in os.environ.items() if key.startswith("HUB_") and value},
+            environment=runtime_environment(os.environ),
         )
     with tempfile.TemporaryDirectory(prefix="msu-hub-ssh-") as directory:
         directory = Path(directory)

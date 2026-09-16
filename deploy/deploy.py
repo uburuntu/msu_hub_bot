@@ -55,7 +55,13 @@ def validate_payload(payload):
     if not isinstance(values, dict) or not values:
         raise DeploymentError("Missing runtime configuration")
     for key, value in values.items():
-        if not re.fullmatch(r"HUB_[A-Z0-9_]+", key) or key == "HUB_CONFIG_JSON" or not isinstance(value, str) or "\0" in value:
+        if (
+            not isinstance(key, str)
+            or not (re.fullmatch(r"HUB_[A-Z0-9_]+", key) or key == "LOGFIRE_TOKEN")
+            or key == "HUB_CONFIG_JSON"
+            or not isinstance(value, str)
+            or "\0" in value
+        ):
             raise DeploymentError("Invalid runtime configuration")
     if not all(values.get(key) for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", "HUB_EDGEDB_DSN")):
         raise DeploymentError("Missing core runtime settings")
@@ -107,7 +113,9 @@ def validate_archive(path, state):
             raise DeploymentError("Image source revision mismatch")
         if runtime.get("User") != "10001:10001" or runtime.get("Entrypoint") != ["/opt/msu_hub_bot/.venv/bin/msu-hub-bot"]:
             raise DeploymentError("Image does not match this service's runtime contract")
-        if any(value.startswith(("HUB_", "DEPLOY_", "GH_TOKEN=", "GITHUB_TOKEN=")) for value in runtime.get("Env", [])):
+        if any(
+            value.startswith(("HUB_", "DEPLOY_", "LOGFIRE_", "OTEL_", "GH_TOKEN=", "GITHUB_TOKEN=")) for value in runtime.get("Env", [])
+        ):
             raise DeploymentError("Image contains runtime configuration")
         if not isinstance(manifest.get("Layers"), list) or any(
             layer not in members or not members[layer].isfile() for layer in manifest["Layers"]

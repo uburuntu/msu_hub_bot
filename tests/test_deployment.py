@@ -131,7 +131,7 @@ def test_failed_manual_rollback_restores_current_release(tmp_path):
     assert deployer.read_state("current.json") == current
 
 
-def make_archive(path, *, foreign_tag=False, traversal=False, contains_env=False):
+def make_archive(path, *, foreign_tag=False, traversal=False, contains_env=False, runtime_env=None):
     state = payload()
     config = {
         "architecture": "amd64",
@@ -140,7 +140,7 @@ def make_archive(path, *, foreign_tag=False, traversal=False, contains_env=False
             "User": "10001:10001",
             "Entrypoint": ["/opt/msu_hub_bot/.venv/bin/msu-hub-bot"],
             "Labels": {"org.opencontainers.image.revision": state["revision"]},
-            "Env": ["HUB_BOT_TOKEN=synthetic"] if contains_env else [],
+            "Env": runtime_env if runtime_env is not None else (["HUB_BOT_TOKEN=synthetic"] if contains_env else []),
         },
     }
     raw = json.dumps(config).encode()
@@ -182,3 +182,38 @@ def test_interrupted_upload_removes_partial_image(tmp_path):
     with pytest.raises(deployment.DeploymentError, match="interrupted"):
         deployer.receive_image(payload(), tmp_path, io.BytesIO(b"partial"))
     assert not (tmp_path / "image.tar.gz").exists()
+
+
+def test_write_token_payload_is_accepted_and_saved_only_in_private_runtime_file(tmp_path):
+    request = payload()
+    request["environment"]["LOGFIRE_TOKEN"] = "write-token-canary"
+    deployment.validate_payload(request)
+    deployer = deployment.Deployer(tmp_path)
+    deployer.run = lambda *args, **kwargs: ""
+    deployer.inspect = lambda name: None
+    deployer.receive_image = lambda *args: None
+    deployer.compose = lambda *args, **kwargs: ""
+    deployer.wait_healthy = lambda: None
+    deployer.deploy(request)
+    runtime = next((tmp_path / "releases").glob("*/runtime.env"))
+    assert runtime.stat().st_mode & 0o777 == 0o600
+    assert json.loads(runtime.read_text().split("=", 1)[1])["LOGFIRE_TOKEN"] == "write-token-canary"
+    assert "write-token-canary" not in (tmp_path / "current.json").read_text()
+
+
+@pytest.mark.parametrize("key", ["LOGFIRE_API_KEY", "LOGFIRE_READ_TOKEN", "LOGFIRE_TOKEN_EXTRA", "OTEL_EXPORTER_OTLP_HEADERS"])
+def test_host_rejects_management_and_arbitrary_telemetry_variables(key):
+    request = payload()
+    request["environment"][key] = "private-canary"
+    with pytest.raises(deployment.DeploymentError, match="Invalid runtime configuration") as caught:
+        deployment.validate_payload(request)
+    assert "private-canary" not in str(caught.value)
+
+
+@pytest.mark.parametrize("variable", ["LOGFIRE_TOKEN", "LOGFIRE_API_KEY", "LOGFIRE_READ_TOKEN", "OTEL_EXPORTER_OTLP_HEADERS"])
+def test_archive_rejects_baked_telemetry_configuration(tmp_path, variable):
+    path = tmp_path / "image.tar.gz"
+    state = make_archive(path, runtime_env=[variable + "=private-canary"])
+    with pytest.raises(deployment.DeploymentError, match="Image contains runtime configuration") as caught:
+        deployment.validate_archive(path, state)
+    assert "private-canary" not in str(caught.value)

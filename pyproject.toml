@@ -89,6 +89,7 @@ warn_unused_configs = true
 warn_unused_ignores = true
 files = [
     "common/caching.py",
+    "common/executor.py",
     "common/externals/dvach.py",
     "common/hc.py",
     "common/tg/callbacks.py",
@@ -104,6 +105,7 @@ files = [
     "common/tg/middlewares/logs.py",
     "common/tg/middlewares/settings.py",
     "common/tg/middlewares/skip777000.py",
+    "common/tg/middlewares/telemetry.py",
     "common/tg/middlewares/updates.py",
     "common/tg/middlewares/viewer.py",
     "common/tg/runtime.py",
@@ -169,8 +171,10 @@ files = [
     "hub_bot/utils/wit.py",
     "hub_bot/utils/wolfram.py",
     "msu_hub_bot/cli.py",
+    "msu_hub_bot/fsm_reset.py",
     "msu_hub_bot/health.py",
     "msu_hub_bot/settings.py",
+    "msu_hub_bot/telemetry.py",
     "tools/check_types.py",
 ]
 

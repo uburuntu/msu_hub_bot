@@ -50,6 +50,11 @@ jobs:
           DEPLOY_PORT: ${{ secrets.SSH_PORT }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+          HUB_TELEMETRY_ENABLED: ${{ vars.HUB_TELEMETRY_ENABLED || 'false' }}
+          HUB_TELEMETRY_SAMPLE_RATE: ${{ vars.HUB_TELEMETRY_SAMPLE_RATE || '0.1' }}
+          HUB_ENVIRONMENT: production
+          HUB_RELEASE: ${{ github.sha }}
           HUB_NAME: ${{ secrets.HUB_NAME }}
           HUB_BOT_TOKEN: ${{ secrets.HUB_BOT_TOKEN }}
           HUB_REDIS_HOST: ${{ secrets.HUB_REDIS_HOST }}

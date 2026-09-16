@@ -31,7 +31,10 @@ Required reviewers are intentionally not enabled.
 
 | Setting | Storage |
 | --- | --- |
-| `HUB_*` application configuration from `.env.example` | Production environment secrets |
+| `HUB_*` application configuration from `.env.example`, except telemetry controls below | Production environment secrets |
+| `LOGFIRE_TOKEN` (optional project write token) | Production environment secret; sent only when export is enabled |
+| `HUB_TELEMETRY_ENABLED`, `HUB_TELEMETRY_SAMPLE_RATE` | Production environment variables; defaults `false` and `0.1` |
+| `HUB_ENVIRONMENT`, `HUB_RELEASE` | Set by the workflow to `production` and the public release revision |
 | `DEPLOY_SSH_KEY` | Production environment secret; dedicated private deployment key |
 | `SSH_HOST`, `SSH_USER`, `SSH_PORT` | Production environment secrets |
 | `SSH_KNOWN_HOSTS` | Production environment secret; independently verified host keys |
@@ -52,6 +55,16 @@ The workflow sends configuration over authenticated SSH. The wrapper stores a
 mode-600 `runtime.env` for each release, outside any checkout. Its single JSON
 envelope is read using Compose's raw environment-file mode, preserving quotes,
 dollar signs, and multiline values without interpolation.
+
+Optional telemetry uses the same private envelope and remains disabled unless
+`HUB_TELEMETRY_ENABLED` explicitly enables it. Disabled deployments omit
+`LOGFIRE_TOKEN`; a saved token alone cannot enable export. Before the first
+enabled deployment, install the reviewed `deploy/deploy.py` host wrapper that
+accepts this exact additional variable. Older wrappers reject it. Keep
+management API keys, read tokens and CLI credentials out of runtime settings;
+`LOGFIRE_API_KEY` and arbitrary `LOGFIRE_*`/`OTEL_*` variables are not accepted.
+Build and image-validation steps receive no project token. See the
+[observability contract](observability.md) before enabling export.
 
 ## Cutover and rollback
 
@@ -85,6 +98,38 @@ can reload the preceding image if it was removed from Docker's local cache.
 Older generated release directories and unused application images are cleaned
 up after a successful deployment. Shared database containers and other
 applications are outside this cleanup.
+
+## Conversation resets across FSM generations
+
+Ordinary restarts preserve pending conversations. When upgrading from the
+legacy FSM to the topic-aware FSM, or rolling back across that boundary, start
+with clean conversations instead. Pause deployment and rollback jobs, stop
+every poller using the configuration, and wait for shutdown before resetting.
+Use the administrator connection; the restricted deployment key cannot run
+maintenance commands.
+
+Use a reviewed, locally available application image containing
+`msu_hub_bot.fsm_reset`. The older rollback image may not contain this tool.
+Supply the existing private release environment file without printing it:
+
+```sh
+docker run --rm --network msu_db \
+  --env-file /private/release/runtime.env \
+  --entrypoint python REVIEWED_IMAGE \
+  -m msu_hub_bot.fsm_reset --generation legacy
+```
+
+Repeat with `--generation v3` before starting the target release. Each command
+prints only the number of removed keys and exits nonzero on failure; a failed
+reset may have removed some keys and can be repeated while polling stays
+stopped. Then deploy or roll back normally and verify one healthy poller.
+
+The command reads only `HUB_NAME` and `HUB_REDIS_*` from the deployment envelope
+or environment. It opens only Redis: no Telegram requests, EdgeDB connection or
+schema migration. `legacy` matches the namespace's chat/user FSM state/data;
+`v3` matches its `fsm3` topic FSM state/data. Settings, delayed deletions,
+GeoGuess scores and other namespaces remain intact. Never use `FLUSHDB` for
+this operation. Startup, Deploy and Rollback do not run the reset automatically.
 
 ## Moving VPSs
 

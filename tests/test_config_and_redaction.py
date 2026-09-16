@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from urllib.parse import quote
@@ -25,7 +26,12 @@ def test_required_configuration_and_optional_providers(monkeypatch):
 
 def test_json_collections_and_deployment_roundtrip(monkeypatch):
     secret = 'test-value-with-$quotes"-and\\slashes\nsecond-line'
-    payload = {"HUB_REDIS_PASSWORD": secret, "HUB_FOUNDER_IDS": "[101, 202]", "HUB_JDOODLE_TOKENS": '[["client", "secret"]]'}
+    payload = {
+        "HUB_REDIS_PASSWORD": secret,
+        "HUB_FOUNDER_IDS": "[101, 202]",
+        "HUB_JDOODLE_TOKENS": '[["client", "secret"]]',
+        "LOGFIRE_TOKEN": secret + "-write-token",
+    }
     for key in payload:
         monkeypatch.setenv(key, "")
         monkeypatch.delenv(key)
@@ -38,6 +44,8 @@ def test_json_collections_and_deployment_roundtrip(monkeypatch):
     assert config.redis_password == secret
     assert config.founder_ids == [101, 202]
     assert config.jdoodle_tokens == [("client", "secret")]
+    assert os.environ["LOGFIRE_TOKEN"] == payload["LOGFIRE_TOKEN"]
+    assert "logfire_token" not in config.model_dump()
     assert secret not in repr(config)
     for key in payload:
         monkeypatch.delenv(key)
@@ -100,7 +108,58 @@ def test_local_logger_preserves_levels_and_redacts_both_outputs(monkeypatch, tmp
 def test_example_and_deployment_cover_current_settings():
     root = Path(__file__).resolve().parents[1]
     configured = {"HUB_" + name.upper() for name in Settings.model_fields}
+    configured.update({"HUB_TELEMETRY_ENABLED", "HUB_TELEMETRY_SAMPLE_RATE", "HUB_ENVIRONMENT", "HUB_RELEASE"})
     example = set(re.findall(r"^(HUB_[A-Z0-9_]+)=", (root / ".env.example").read_text(), re.MULTILINE))
     deployed = set(re.findall(r"^\s+(HUB_[A-Z0-9_]+):", (root / ".github/workflows/deploy.yml").read_text(), re.MULTILINE))
     assert example == configured
     assert deployed == configured
+
+
+def test_project_write_token_is_redacted_outside_application_settings(monkeypatch):
+    token = 'synthetic-project-write-$"/with-newline\nsecond-write-canary'
+    monkeypatch.setenv("LOGFIRE_TOKEN", token)
+    for rendered in (token, quote(token, safe=""), json.dumps(token)[1:-1], repr(token)[1:-1]):
+        assert rendered not in redact(rendered)
+    stream = io.StringIO()
+    writer = RedactingStream(stream)
+    writer.write(token[:15])
+    writer.write(token[15:] + "\n")
+    writer.flush()
+    assert "synthetic-project-write" not in stream.getvalue()
+    assert "second-write-canary" not in stream.getvalue()
+    error = RuntimeError(token)
+    record = logging.LogRecord("test", logging.ERROR, __file__, 1, "%s", (token,), (RuntimeError, error, None))
+    assert "synthetic-project-write" not in RedactingFormatter().format(record)
+
+
+@pytest.mark.parametrize("key", ["LOGFIRE_API_KEY", "LOGFIRE_READ_TOKEN", "LOGFIRE_TOKENS", "OTEL_EXPORTER_OTLP_HEADERS"])
+def test_runtime_envelope_rejects_management_and_arbitrary_telemetry_credentials(monkeypatch, key):
+    monkeypatch.delenv("LOGFIRE_TOKEN", raising=False)
+    monkeypatch.setenv("HUB_CONFIG_JSON", json.dumps({"LOGFIRE_TOKEN": "write-canary", key: "private-canary"}))
+    with pytest.raises(ValueError, match="Invalid HUB_CONFIG_JSON") as caught:
+        load_runtime_environment()
+    assert "private-canary" not in str(caught.value)
+    assert "LOGFIRE_TOKEN" not in os.environ
+
+
+def test_runtime_envelope_keeps_explicit_write_token_precedence(monkeypatch):
+    monkeypatch.setenv("LOGFIRE_TOKEN", "explicit-canary")
+    monkeypatch.setenv("HUB_CONFIG_JSON", json.dumps({"LOGFIRE_TOKEN": "envelope-canary"}))
+    load_runtime_environment()
+    assert os.environ["LOGFIRE_TOKEN"] == "explicit-canary"
+
+
+def test_telemetry_workflow_is_opt_in_and_token_stays_out_of_build_steps():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/deploy.yml").read_text()
+    before, deployment = workflow.split("      - name: Deploy with automatic rollback", 1)
+    assert "LOGFIRE_TOKEN" not in before
+    assert "LOGFIRE_API_KEY" not in workflow and "OTEL_" not in workflow
+    assert "HUB_TELEMETRY_ENABLED: ${{ vars.HUB_TELEMETRY_ENABLED || 'false' }}" in deployment
+    assert "HUB_TELEMETRY_SAMPLE_RATE: ${{ vars.HUB_TELEMETRY_SAMPLE_RATE || '0.1' }}" in deployment
+    assert "HUB_ENVIRONMENT: production" in deployment
+    assert "HUB_RELEASE: ${{ github.sha }}" in deployment
+    assert "LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}" in deployment
+    example = (root / ".env.example").read_text()
+    assert re.search(r"^LOGFIRE_TOKEN=$", example, re.MULTILINE)
+    assert re.search(r"^HUB_TELEMETRY_ENABLED=false$", example, re.MULTILINE)

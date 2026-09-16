@@ -49,7 +49,7 @@ def main():
             stdin=source,
         )
     metadata = json.loads(run("docker", "image", "inspect", image, capture_output=True, text=True).stdout)[0]
-    if any(value.startswith(("HUB_", "DEPLOY_", "GITHUB_TOKEN=", "GH_TOKEN=")) for value in metadata["Config"]["Env"]):
+    if any(value.startswith(("HUB_", "DEPLOY_", "LOGFIRE_", "OTEL_", "GITHUB_TOKEN=", "GH_TOKEN=")) for value in metadata["Config"]["Env"]):
         raise SystemExit("Image contains runtime configuration")
     directory = Path(tempfile.mkdtemp(prefix="msu-hub-release-", dir=os.environ["RUNNER_TEMP"]))
     archive = directory / "image.tar.gz"

@@ -178,9 +178,10 @@ async def test_v3_reset_matches_real_key_builder_and_leaves_other_records():
     assert set(client.values) == protected
 
 
+@pytest.mark.parametrize("operation", [reset_legacy_fsm, reset_v3_fsm])
 @pytest.mark.parametrize("prefix", ["", "*", "hub?", "hub[1]", "hub\\"])
-async def test_reset_rejects_ambiguous_namespace(prefix):
+async def test_reset_rejects_ambiguous_namespace(operation, prefix):
     client = MemoryRedis()
     with pytest.raises(ValueError):
-        await reset_legacy_fsm(client, prefix=prefix)
+        await operation(client, prefix=prefix)
     assert client.deleted == []
