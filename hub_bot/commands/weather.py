@@ -157,14 +157,19 @@ class Weather(CallbackCommandBase):
             # No timer or location data survives the bounded reply cache/restart.
             cls.location_refreshes[key] = now
             coordinates = (location.latitude, location.longitude)
-            response = await weather(coordinates, location_name)
-            if response is None:
-                return True
+            try:
+                response = await weather(coordinates, location_name)
+                if response is None:
+                    return True
 
-            with suppress(aiogram.exceptions.BadRequest):
-                text = parse_response(*response)
-                return await message.bot.edit_message_text(text, message.chat.id, message_id,
-                                                           reply_markup=cls.keyboard(coordinates), disable_web_page_preview=True)
+                with suppress(aiogram.exceptions.BadRequest):
+                    text = parse_response(*response)
+                    return await message.bot.edit_message_text(text, message.chat.id, message_id,
+                                                               reply_markup=cls.keyboard(coordinates), disable_web_page_preview=True)
+            finally:
+                # Include provider/edit latency in the interval between completed refreshes.
+                if key in cls.replies:
+                    cls.location_refreshes[key] = time.monotonic()
 
     @classmethod
     async def process_cb(cls, query: CallbackQuery, callback_data: dict):

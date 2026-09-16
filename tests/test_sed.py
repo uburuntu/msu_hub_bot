@@ -41,6 +41,7 @@ async def test_pathological_regex_is_killed_and_worker_slot_recovers(monkeypatch
         with pytest.raises(sed.SedTimeout):
             await asyncio.wait_for(executor.run(sed.sed_calc, 'a' * 1000 + '!', ['s/(a+)+$/x/']), 2)
         assert time.monotonic() - started < 2
+        monkeypatch.setattr(sed, 'SED_TIMEOUT', 2)
         result, timed_out = await executor.run(sed.sed_calc, 'hello', ['s/hello/bye/'], timeout=2)
         assert (result, timed_out) == ('bye', False)
     finally:

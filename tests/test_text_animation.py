@@ -1,6 +1,7 @@
 import gzip
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -12,8 +13,8 @@ from hub_bot import resources
 
 @pytest.fixture
 def animation(monkeypatch):
-    monkeypatch.setitem(__import__('sys').modules, 'app', SimpleNamespace(cpu_executor=SimpleNamespace(run=AsyncMock())))
-    monkeypatch.setitem(__import__('sys').modules, 'resources', resources)
+    monkeypatch.setitem(sys.modules, 'app', SimpleNamespace(cpu_executor=SimpleNamespace(run=AsyncMock())))
+    monkeypatch.setitem(sys.modules, 'resources', resources)
     spec = importlib.util.spec_from_file_location('text_animation_test', Path(__file__).resolve().parents[1] / 'hub_bot/commands/animate.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -192,10 +192,12 @@ async def process_atmta(message: Message, meta: MetaInfo):
             percent = min(1., max(0., float(meta.arguments[0])))
         except ValueError:
             pass
+    if percent <= 0:
+        return await message.reply('Укажи долю больше 0 и не больше 1.')
 
     async with ChatActioner(message.chat, action_by_type(ContentType.PHOTO)):
         image = Image.open(file).convert('RGBA')
-        crop_size = int(image.width * percent)
+        crop_size = max(1, int(image.width * percent))
 
         im1 = image.crop((0, 0, crop_size, image.height))
         im2 = im1.transpose(Image.FLIP_LEFT_RIGHT)
@@ -218,10 +220,12 @@ async def process_atmta_v(message: Message, meta: MetaInfo):
             percent = min(1., max(0., float(meta.arguments[0])))
         except ValueError:
             pass
+    if percent <= 0:
+        return await message.reply('Укажи долю больше 0 и не больше 1.')
 
     async with ChatActioner(message.chat, action_by_type(ContentType.PHOTO)):
         image = Image.open(file).convert('RGBA')
-        crop_size = int(image.height * percent)
+        crop_size = max(1, int(image.height * percent))
 
         im1 = image.crop((0, 0, image.width, crop_size))
         im2 = im1.transpose(Image.FLIP_TOP_BOTTOM)
@@ -231,4 +235,3 @@ async def process_atmta_v(message: Message, meta: MetaInfo):
 
     return await target.reply_photo(image_bytes_io(dst, ext='png'),
                                     reply_markup=rate_keyboard() if message.chat.type != ChatType.PRIVATE else None)
-

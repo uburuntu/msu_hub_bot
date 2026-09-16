@@ -101,6 +101,26 @@ async def test_failed_refresh_does_not_retry_on_every_location_edit(weather_modu
     original.bot.edit_message_text.assert_not_awaited()
 
 
+async def test_interval_starts_after_slow_refresh_finishes(weather_module):
+    module = weather_module
+    original = message()
+    await module.Weather.process_location(original)
+    module.clock = 900
+
+    async def slow_provider(*args):
+        module.clock += 30
+        return 'forecast', 'place'
+
+    module.weather.side_effect = slow_provider
+    await module.Weather.process_location_edited(original)
+    module.clock = 1800
+    await module.Weather.process_location_edited(original)
+    assert module.weather.await_count == 2
+    module.clock = 1830
+    await module.Weather.process_location_edited(original)
+    assert module.weather.await_count == 3
+
+
 async def test_explicit_refresh_is_not_limited_by_live_location_timer(weather_module):
     module = weather_module
     await module.Weather.process_location(message())
