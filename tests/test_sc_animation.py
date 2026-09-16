@@ -1,9 +1,7 @@
 """Offline tests: no bot token, Telegram connection or sticker mutations."""
 
-import ast
 import asyncio
 import gzip
-import importlib.util
 import io
 import json
 import shutil
@@ -14,45 +12,64 @@ from unittest.mock import AsyncMock
 
 import pytest
 from PIL import Image
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
+from aiogram.methods import GetStickerSet
+from aiogram.fsm.storage.base import StorageKey
 
-from hub_bot.utils.sticker_sets import StickerSetClient, UploadedSticker
+from common.tg.state import ReleasableEventIsolation, UpdateStateContext
+from hub_bot.utils import sticker_media as media
+
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("sticker_media", ROOT / "hub_bot/utils/sticker_media.py")
-media = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(media)
 
 
 @pytest.fixture
 def handlers():
-    # Load the actual module, substituting only unrelated application imports.
+    # Each test owns its provider and worker stubs; application state is never imported.
     source = (ROOT / "hub_bot/commands/sticker.py").read_text()
-    tree = ast.parse(source)
-    tree.body = [
-        n for n in tree.body if not isinstance(n, ast.ImportFrom) or (n.module != "app" and not n.module.startswith(("common.", "utils.")))
-    ]
+    ns = {"__name__": "synthetic_sticker"}
+    exec(compile(source, "<sticker>", "exec"), ns)
 
-    async def download(file):
+    async def download(file, bot):
         return io.BytesIO(file.data)
 
     async def execute(function, *args):
         return function(*args), False
 
-    ns = dict(
-        MetaInfo=object,
-        MAX_INPUT_BYTES=media.MAX_INPUT_BYTES,
-        StickerMediaError=media.StickerMediaError,
-        prepare_media=media.prepare_media,
-        StickerSetClient=StickerSetClient,
-        UploadedSticker=UploadedSticker,
-        download=download,
-        extract_image=AsyncMock(return_value=(None, None)),
-        image_bytes_io=None,
-        FakeBytesIO=io.BytesIO,
-        cpu_executor=SimpleNamespace(run=AsyncMock(side_effect=execute)),
-    )
-    exec(compile(tree, "<sticker>", "exec"), ns)
+    ns["download"] = download
+    ns["cpu_executor"] = SimpleNamespace(run=AsyncMock(side_effect=execute))
+    original = ns["process_sticker_chat"]
+
+    async def process_sticker_chat(message, meta, state):
+        return await original(message, meta, state, message.bot, ns["cpu_executor"])
+
+    ns["process_sticker_chat"] = process_sticker_chat
+    deletion = ns["process_sticker_delete"]
+
+    async def process_sticker_delete(message):
+        return await deletion(message, message.bot)
+
+    ns["process_sticker_delete"] = process_sticker_delete
+    ns["extract_image"] = AsyncMock(return_value=(None, None))
+    # The extractor itself stays real in integration tests.
+    ns["Extractor"] = SimpleNamespace(image=ns["extract_image"])
+
+    async def finish_chat_set(message, state, data):
+        data.setdefault("sticker_origin_message_id", message.message_id)
+        data.setdefault("sticker_upload", {})
+        state.key = StorageKey(bot_id=1, chat_id=message.chat.id, user_id=message.from_user.id)
+        state.get_data = AsyncMock(return_value=data)
+        state.get_state = AsyncMock(return_value=ns["StickerStates"].sticker_set_name.state)
+        return await ns["Stickers"].finish_chat_set(
+            message, state, data, message.bot, UpdateStateContext(eligible=True), ReleasableEventIsolation()
+        )
+
+    ns["finish_chat_set"] = finish_chat_set
     return ns
+
+
+def error(text, *, network=False):
+    return (TelegramNetworkError if network else TelegramBadRequest)(method=GetStickerSet(name="pack"), message=text)
 
 
 @pytest.mark.parametrize("duration,accelerated", [(0.1, False), (3, False), (3.001, True), (6, True), (7, True), (7.001, True), (60, True)])
@@ -152,6 +169,7 @@ def message(admin=True, kind="static"):
     )
     return SimpleNamespace(
         chat=chat,
+        message_id=1,
         from_user=SimpleNamespace(id=1),
         sender_chat=None,
         reply_to_message=target,
@@ -164,7 +182,11 @@ def message(admin=True, kind="static"):
         reply=AsyncMock(),
         reply_sticker=AsyncMock(),
         bot=SimpleNamespace(
-            request=AsyncMock(return_value={"file_id": "uploaded", "file_unique_id": "unique-uploaded"}),
+            upload_sticker_file=AsyncMock(return_value=SimpleNamespace(file_id="uploaded", file_unique_id="unique-uploaded")),
+            add_sticker_to_set=AsyncMock(return_value=True),
+            create_new_sticker_set=AsyncMock(return_value=True),
+            delete_sticker_from_set=AsyncMock(return_value=True),
+            get_chat_administrators=chat.get_administrators,
             get_sticker_set=AsyncMock(return_value=registered_pack(kind)),
             get_file=AsyncMock(return_value=SimpleNamespace(file_unique_id="unique-uploaded")),
         ),
@@ -195,20 +217,20 @@ def test_source_types(handlers, kind):
 def test_delete_all_formats(handlers, kind):
     m = message(kind=kind)
     asyncio.run(handlers["process_sticker_delete"](m))
-    m.reply_to_message.sticker.delete_from_set.assert_awaited_once()
+    m.bot.delete_sticker_from_set.assert_awaited_once()
 
 
 def test_delete_non_admin(handlers):
     m = message(admin=False, kind="video")
     asyncio.run(handlers["process_sticker_delete"](m))
-    m.reply_to_message.sticker.delete_from_set.assert_not_awaited()
+    m.bot.delete_sticker_from_set.assert_not_awaited()
 
 
 def test_delete_without_set(handlers):
     m = message()
     m.reply_to_message.sticker.set_name = None
     asyncio.run(handlers["process_sticker_delete"](m))
-    m.reply_to_message.sticker.delete_from_set.assert_not_awaited()
+    m.bot.delete_sticker_from_set.assert_not_awaited()
 
 
 def test_invalid_media_never_uploaded(handlers):
@@ -219,14 +241,18 @@ def test_invalid_media_never_uploaded(handlers):
 
     handlers["prepare_media"] = reject
     asyncio.run(handlers["process_sticker_chat"](m, None, None))
-    m.bot.request.assert_not_awaited()
+    m.bot.upload_sticker_file.assert_not_awaited()
+    m.bot.add_sticker_to_set.assert_not_awaited()
+    m.bot.create_new_sticker_set.assert_not_awaited()
     assert "длительность" in m.reply.call_args.args[0]
 
 
 def test_non_admin_cannot_add(handlers):
     m = message(admin=False)
     asyncio.run(handlers["process_sticker_chat"](m, None, None))
-    m.bot.request.assert_not_awaited()
+    m.bot.upload_sticker_file.assert_not_awaited()
+    m.bot.add_sticker_to_set.assert_not_awaited()
+    m.bot.create_new_sticker_set.assert_not_awaited()
 
 
 @pytest.mark.parametrize("kind", ["static", "animated", "video"])
@@ -236,9 +262,10 @@ def test_upload_and_add_modern_api(handlers, kind):
     meta = SimpleNamespace(extract_text=lambda: (m, "😎"))
     asyncio.run(handlers["process_sticker_chat"](m, meta, None))
     handlers["cpu_executor"].run.assert_awaited_once_with(handlers["prepare_media"], b"data", kind)
-    calls = m.bot.request.call_args_list
-    assert [c.args[0] for c in calls] == ["uploadStickerFile", "addStickerToSet"]
-    assert json.loads(calls[1].args[1]["sticker"]) == dict(sticker="uploaded", format=kind, emoji_list=["😎"])
+    m.bot.upload_sticker_file.assert_awaited_once()
+    m.bot.add_sticker_to_set.assert_awaited_once()
+    added = m.bot.add_sticker_to_set.call_args.kwargs["sticker"]
+    assert added.sticker == "uploaded" and added.format == kind and added.emoji_list == ["😎"]
     m.reply_sticker.assert_awaited_once_with("registered-sticker")
     m.reply.assert_not_awaited()
 
@@ -256,7 +283,9 @@ def test_executor_timeout_never_uploads(handlers):
     m = message(kind="video")
     handlers["cpu_executor"].run = AsyncMock(return_value=(None, True))
     asyncio.run(handlers["process_sticker_chat"](m, None, None))
-    m.bot.request.assert_not_awaited()
+    m.bot.upload_sticker_file.assert_not_awaited()
+    m.bot.add_sticker_to_set.assert_not_awaited()
+    m.bot.create_new_sticker_set.assert_not_awaited()
     assert "слишком много времени" in m.reply.call_args.args[0]
 
 
@@ -264,26 +293,25 @@ def test_executor_timeout_never_uploads(handlers):
 def test_new_pack_preserves_prepared_video(handlers, trimmed):
     m = message(kind="video")
     m.bot.get_sticker_set.side_effect = [
-        handlers["aiogram"].exceptions.InvalidStickersSet("invalid"),
-        handlers["aiogram"].exceptions.InvalidStickersSet("invalid"),
+        error("STICKERSET_INVALID"),
+        error("STICKERSET_INVALID"),
         registered_pack("video"),
     ]
     handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared", trimmed=trimmed)
-    state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock(), finish=AsyncMock())
+    state = SimpleNamespace(set_data=AsyncMock(), set_state=AsyncMock(), clear=AsyncMock())
     meta = SimpleNamespace(extract_text=lambda: (m, ""))
     asyncio.run(handlers["process_sticker_chat"](m, meta, state))
-    data = state.update_data.call_args.kwargs
+    data = state.set_data.call_args.args[0]
     assert data["mixed_sticker"]["format"] == "video"
     assert data["sticker_upload"]["file_unique_id"] == "unique-uploaded"
     assert data["sticker_trimmed"] is trimmed
     m.text = "Наш пак"
     m.caption = None
-    m.bot.request.reset_mock()
-    asyncio.run(handlers["Stickers"].finish_chat_set(m, state, data))
-    call = m.bot.request.call_args
-    assert call.args[0] == "createNewStickerSet"
-    assert json.loads(call.args[1]["stickers"])[0]["sticker"] == "uploaded"
-    state.finish.assert_awaited_once()
+    m.bot.upload_sticker_file.reset_mock()
+    asyncio.run(handlers["finish_chat_set"](m, state, data))
+    call = m.bot.create_new_sticker_set.call_args
+    assert call.kwargs["stickers"][0].sticker == "uploaded"
+    state.clear.assert_awaited_once()
     m.reply_sticker.assert_awaited_once_with("registered-sticker")
     assert (handlers["trimmed_sticker_notice"] in m.reply.call_args.args[0]) is trimmed
 
@@ -292,51 +320,58 @@ def test_creation_error_keeps_pending_state(handlers):
     m = message()
     m.text = "Пак"
     m.caption = None
-    m.bot.get_sticker_set.side_effect = handlers["aiogram"].exceptions.InvalidStickersSet("invalid")
-    m.bot.request.side_effect = handlers["aiogram"].exceptions.BadRequest("failure")
-    state = SimpleNamespace(finish=AsyncMock())
+    m.bot.get_sticker_set.side_effect = error("STICKERSET_INVALID")
+    m.bot.create_new_sticker_set.side_effect = error("failure")
+    state = SimpleNamespace(clear=AsyncMock())
     data = dict(
         sticker_chat_id=-100,
         sticker_user_id=1,
         sticker_set_name="pack",
         mixed_sticker={"sticker": "uploaded", "format": "static", "emoji_list": ["✨"]},
     )
-    with pytest.raises(handlers["aiogram"].exceptions.BadRequest):
-        asyncio.run(handlers["Stickers"].finish_chat_set(m, state, data))
-    state.finish.assert_not_awaited()
+    with pytest.raises(TelegramBadRequest):
+        asyncio.run(handlers["finish_chat_set"](m, state, data))
+    state.clear.assert_not_awaited()
 
 
 def test_delete_other_chat_pack(handlers):
     m = message(kind="video")
     m.reply_to_message.sticker.set_name = "with_love_for_999_by_msu_hub_bot"
     asyncio.run(handlers["process_sticker_delete"](m))
-    m.reply_to_message.sticker.delete_from_set.assert_not_awaited()
+    m.bot.delete_sticker_from_set.assert_not_awaited()
 
 
 def test_revoked_admin_cannot_finish_pack(handlers):
     m = message(admin=False)
     m.text = "Пак"
     m.caption = None
-    state = SimpleNamespace(finish=AsyncMock())
-    data = dict(sticker_chat_id=-100, sticker_user_id=1, sticker_set_name="pack", mixed_sticker={})
-    asyncio.run(handlers["Stickers"].finish_chat_set(m, state, data))
-    m.bot.request.assert_not_awaited()
-
-
-def test_creation_reuses_concurrently_created_pack(handlers):
-    m = message(kind="video")
-    m.text = "Пак"
-    m.caption = None
-    state = SimpleNamespace(finish=AsyncMock())
+    state = SimpleNamespace(clear=AsyncMock())
     data = dict(
         sticker_chat_id=-100,
         sticker_user_id=1,
         sticker_set_name="pack",
         mixed_sticker={"sticker": "file", "format": "video", "emoji_list": ["✨"]},
     )
-    asyncio.run(handlers["Stickers"].finish_chat_set(m, state, data))
-    assert m.bot.request.call_args.args[0] == "addStickerToSet"
-    state.finish.assert_awaited_once()
+    asyncio.run(handlers["finish_chat_set"](m, state, data))
+    m.bot.upload_sticker_file.assert_not_awaited()
+    m.bot.add_sticker_to_set.assert_not_awaited()
+    m.bot.create_new_sticker_set.assert_not_awaited()
+
+
+def test_creation_reuses_concurrently_created_pack(handlers):
+    m = message(kind="video")
+    m.text = "Пак"
+    m.caption = None
+    state = SimpleNamespace(clear=AsyncMock())
+    data = dict(
+        sticker_chat_id=-100,
+        sticker_user_id=1,
+        sticker_set_name="pack",
+        mixed_sticker={"sticker": "file", "format": "video", "emoji_list": ["✨"]},
+    )
+    asyncio.run(handlers["finish_chat_set"](m, state, data))
+    m.bot.add_sticker_to_set.assert_awaited_once()
+    state.clear.assert_awaited_once()
     m.reply_sticker.assert_awaited_once_with("registered-sticker")
 
 
@@ -346,11 +381,13 @@ def test_saved_sticker_preview_failure_never_repeats_the_addition(handlers, fail
     handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared", trimmed=True)
     meta = SimpleNamespace(extract_text=lambda: (m, ""))
     if failure == "lookup":
-        m.bot.get_sticker_set.side_effect = [registered_pack("video"), handlers["aiogram"].exceptions.NetworkError("unavailable")]
+        m.bot.get_sticker_set.side_effect = [registered_pack("video"), error("unavailable", network=True)]
     else:
-        m.reply_sticker.side_effect = handlers["aiogram"].exceptions.BadRequest("preview rejected")
+        m.reply_sticker.side_effect = error("preview rejected")
     asyncio.run(handlers["process_sticker_chat"](m, meta, None))
-    assert [call.args[0] for call in m.bot.request.await_args_list] == ["uploadStickerFile", "addStickerToSet"]
+    m.bot.upload_sticker_file.assert_awaited_once()
+    m.bot.add_sticker_to_set.assert_awaited_once()
+    m.bot.create_new_sticker_set.assert_not_awaited()
     assert "Стикер добавлен" in m.reply.call_args.args[0]
     assert "https://t.me/addstickers/" in m.reply.call_args.args[0]
     assert m.reply.call_args.args[0].count(handlers["trimmed_sticker_notice"]) == 1
@@ -365,10 +402,10 @@ def test_successful_creation_clears_pending_state_even_when_preview_fails(handle
     m.text = "Наш пак"
     m.caption = None
     m.bot.get_sticker_set.side_effect = [
-        handlers["aiogram"].exceptions.InvalidStickersSet("missing"),
-        handlers["aiogram"].exceptions.NetworkError("preview unavailable"),
+        error("STICKERSET_INVALID"),
+        error("preview unavailable", network=True),
     ]
-    state = SimpleNamespace(finish=AsyncMock())
+    state = SimpleNamespace(clear=AsyncMock())
     data = dict(
         sticker_chat_id=-100,
         sticker_user_id=1,
@@ -376,9 +413,10 @@ def test_successful_creation_clears_pending_state_even_when_preview_fails(handle
         mixed_sticker={"sticker": "uploaded", "format": "video", "emoji_list": ["✨"]},
         sticker_trimmed=True,
     )
-    asyncio.run(handlers["Stickers"].finish_chat_set(m, state, data))
-    state.finish.assert_awaited_once()
-    assert [call.args[0] for call in m.bot.request.await_args_list] == ["createNewStickerSet"]
+    asyncio.run(handlers["finish_chat_set"](m, state, data))
+    state.clear.assert_awaited_once()
+    m.bot.create_new_sticker_set.assert_awaited_once()
+    m.bot.add_sticker_to_set.assert_not_awaited()
     m.reply_sticker.assert_not_awaited()
     assert "Стикер добавлен" in m.reply.call_args.args[0]
     assert handlers["trimmed_sticker_notice"] in m.reply.call_args.args[0]
@@ -434,7 +472,9 @@ def test_unsupported_document_never_uses_avatar(handlers, mime):
     m.reply_to_message.document = SimpleNamespace(mime_type=mime)
     asyncio.run(handlers["process_sticker_chat"](m, None, None))
     handlers["extract_image"].assert_not_awaited()
-    m.bot.request.assert_not_awaited()
+    m.bot.upload_sticker_file.assert_not_awaited()
+    m.bot.add_sticker_to_set.assert_not_awaited()
+    m.bot.create_new_sticker_set.assert_not_awaited()
     assert m.reply.call_count == 1
 
 
@@ -459,7 +499,9 @@ def test_oversized_metadata_rejected_before_download(handlers):
     asyncio.run(handlers["process_sticker_chat"](m, None, None))
     handlers["download"].assert_not_awaited()
     handlers["cpu_executor"].run.assert_not_awaited()
-    m.bot.request.assert_not_awaited()
+    m.bot.upload_sticker_file.assert_not_awaited()
+    m.bot.add_sticker_to_set.assert_not_awaited()
+    m.bot.create_new_sticker_set.assert_not_awaited()
 
 
 @pytest.mark.parametrize("data", [b"x" * (64 * 1024 + 1), gzip.compress(b"x" * (2 * 1024 * 1024 + 1))])

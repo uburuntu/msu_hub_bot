@@ -3,17 +3,34 @@
 import asyncio
 import hashlib
 import io
-import json
 import logging
 from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from typing import Any
 
-from aiogram.utils.exceptions import BadRequest, InvalidStickersSet, TelegramAPIError
+from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
+from aiogram.types import InputSticker, Sticker
+from pydantic import BaseModel
+
+from common.tg.files import input_file
 
 logger = logging.getLogger(__name__)
 LOOKUP_TIMEOUT = 5
 LOOKUP_DELAYS = (0, 0.2, 0.5)
 MAX_CONTENT_LOOKUPS = 3
 MAX_STICKER_BYTES = 512 * 1024
+
+
+def sticker_error(error: TelegramBadRequest, code: str) -> bool:
+    """Bot API error codes distinguish the v2 exceptions merged into BadRequest."""
+    return code.casefold() in error.message.casefold()
+
+
+class UploadMetadata(BaseModel):
+    file_unique_id: str | None = None
+    sha256: str | None = None
+    size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -25,68 +42,66 @@ class UploadedSticker:
     sha256: str | None = None
     size: int | None = None
 
-    def input_sticker(self):
-        return {"sticker": self.file_id, "format": self.format, "emoji_list": list(self.emojis)}
+    def input_sticker(self) -> InputSticker:
+        return InputSticker(sticker=self.file_id, format=self.format, emoji_list=list(self.emojis))
 
-    def metadata(self):
+    def metadata(self) -> dict[str, str | int | None]:
         return {"file_unique_id": self.file_unique_id, "sha256": self.sha256, "size": self.size}
 
     @classmethod
-    def from_pending(cls, data):
-        # Preserve title prompts created before upload metadata was stored.
-        sticker = data["mixed_sticker"]
-        metadata = data.get("sticker_upload", {})
-        return cls(sticker["sticker"], sticker["format"], tuple(sticker["emoji_list"]), **metadata)
+    def from_pending(cls, data: Mapping[str, Any]) -> "UploadedSticker":
+        sticker = InputSticker.model_validate(data["mixed_sticker"])
+        metadata = UploadMetadata.model_validate(data.get("sticker_upload", {}))
+        if not isinstance(sticker.sticker, str):
+            raise ValueError("Pending stickers must reference an uploaded file")
+        return cls(sticker.sticker, sticker.format, tuple(sticker.emoji_list), metadata.file_unique_id, metadata.sha256, metadata.size)
 
 
 class StickerSetClient:
-    def __init__(self, bot):
+    def __init__(self, bot: Bot) -> None:
         self.bot = bot
 
-    async def upload(self, user_id, payload, kind, emojis):
+    async def upload(self, user_id: int, payload: bytes, kind: str, emojis: Sequence[str]) -> UploadedSticker:
         suffix = {"static": "webp", "animated": "tgs", "video": "webm"}[kind]
-        uploaded = await self.bot.request(
-            "uploadStickerFile",
-            {"user_id": user_id, "sticker_format": kind},
-            files={"sticker": (f"sticker.{suffix}", io.BytesIO(payload))},
+        uploaded = await self.bot.upload_sticker_file(
+            user_id=user_id,
+            sticker=input_file(payload, f"sticker.{suffix}"),
+            sticker_format=kind,
         )
         return UploadedSticker(
-            uploaded["file_id"], kind, tuple(emojis), uploaded["file_unique_id"], hashlib.sha256(payload).hexdigest(), len(payload)
+            uploaded.file_id, kind, tuple(emojis), uploaded.file_unique_id, hashlib.sha256(payload).hexdigest(), len(payload)
         )
 
-    async def _add(self, name, user_id, sticker):
-        await self.bot.request(
-            "addStickerToSet",
-            {"user_id": user_id, "name": name, "sticker": json.dumps(sticker.input_sticker(), ensure_ascii=False)},
-        )
+    async def _add(self, name: str, user_id: int, sticker: UploadedSticker) -> None:
+        await self.bot.add_sticker_to_set(user_id=user_id, name=name, sticker=sticker.input_sticker())
 
-    async def save(self, name, user_id, sticker, title=None):
+    async def save(self, name: str, user_id: int, sticker: UploadedSticker, title: str | None = None) -> bool:
         """Return False if a title is needed; True after a confirmed save.
 
         An uncertain network result is never retried as a mutation.
         """
         try:
             await self.bot.get_sticker_set(name)
-        except InvalidStickersSet:
+        except TelegramBadRequest as lookup_error:
+            if not sticker_error(lookup_error, "STICKERSET_INVALID"):
+                raise
             if title is None:
                 return False
             try:
-                await self.bot.request(
-                    "createNewStickerSet",
-                    {
-                        "user_id": user_id,
-                        "name": name,
-                        "title": title,
-                        "stickers": json.dumps([sticker.input_sticker()], ensure_ascii=False),
-                        "sticker_type": "regular",
-                    },
+                await self.bot.create_new_sticker_set(
+                    user_id=user_id,
+                    name=name,
+                    title=title,
+                    stickers=[sticker.input_sticker()],
+                    sticker_type="regular",
                 )
-            except BadRequest as creation_error:
+            except TelegramBadRequest as creation_error:
                 # A concurrent admin may have created this exact chat pack.
-                # Check its existence instead of parsing Telegram's error wording.
                 try:
                     await self.bot.get_sticker_set(name)
-                except InvalidStickersSet:
+                except TelegramBadRequest as retry_error:
+                    if not sticker_error(retry_error, "STICKERSET_INVALID"):
+                        raise
                     raise creation_error
                 await self._add(name, user_id, sticker)
         else:
@@ -94,18 +109,18 @@ class StickerSetClient:
         return True
 
     @staticmethod
-    def _same_format(sticker, kind):
+    def _same_format(sticker: Sticker, kind: str) -> bool:
         actual = "animated" if sticker.is_animated else "video" if sticker.is_video else "static"
         return actual == kind and sticker.type == "regular"
 
-    async def resolve(self, name, uploaded):
+    async def resolve(self, name: str, uploaded: UploadedSticker) -> str | None:
         """Return a verified pack sticker ID, or None; never fall back to the upload.
 
         file_unique_id handles reordering and duplicates. If Telegram assigns a
         new identity, an exact byte comparison can still identify the media.
         Missing/ambiguous results fall back to a pack link at the caller.
         """
-        checked = set()
+        checked: set[str] = set()
         try:
             async with asyncio.timeout(LOOKUP_TIMEOUT):
                 unique_id = uploaded.file_unique_id
@@ -127,7 +142,8 @@ class StickerSetClient:
                             if sticker.file_size != uploaded.size or sticker.file_unique_id in checked:
                                 continue
                             checked.add(sticker.file_unique_id)
-                            data = await self.bot.download_file_by_id(sticker.file_id, io.BytesIO())
+                            data = io.BytesIO()
+                            await self.bot.download(sticker.file_id, destination=data)
                             payload = data.getvalue()
                             if len(payload) == uploaded.size and hashlib.sha256(payload).hexdigest() == uploaded.sha256:
                                 return sticker.file_id

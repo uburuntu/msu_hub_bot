@@ -27,10 +27,11 @@ def external_handlers():
         yield
 
     namespace["ChatActioner"] = no_chat_action
-    input_file = namespace["InputFile"]
-    namespace["InputFile"] = SimpleNamespace(
-        from_url=lambda url, filename: input_file(io.BytesIO(b"synthetic video"), filename=filename),
-    )
+
+    async def reply_album(target, media):
+        return await target.reply_media_group(media)
+
+    namespace["reply_album"] = reply_album
     return namespace
 
 
@@ -65,7 +66,7 @@ async def test_anime_results_use_valid_delivery(external_handlers, count):
         target.reply.assert_not_awaited()
         target.reply_video.assert_not_awaited()
         target.reply_media_group.assert_awaited_once()
-        media = target.reply_media_group.call_args.args[0].media
+        media = target.reply_media_group.call_args.args[0]
         assert len(media) == min(count, 3)
         assert "Episode &lt;0&gt;" in media[0].caption
         assert all(not item.caption for item in media[1:])
@@ -378,7 +379,7 @@ async def test_anime_caption_fits_with_long_unicode_filenames(external_handlers)
         }
     )
     await external_handlers["process_which_anime"](message)
-    media = target.reply_media_group.call_args.args[0].media
+    media = target.reply_media_group.call_args.args[0]
     caption = media[0].caption
     parsed = "".join(element_tree.fromstring("<root>" + caption + "</root>").itertext())
     assert len(parsed.encode("utf-16-le")) // 2 <= 1024

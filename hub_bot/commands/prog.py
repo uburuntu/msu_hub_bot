@@ -23,9 +23,9 @@ from hub_bot.utils.jdoodle import LANGUAGES, JDoodleError, ManyJDoodle
 CompilerHandler = Callable[..., Awaitable[Message | bool]]
 
 
-def _register(router: Router, handler: CompilerHandler, *aliases: str) -> None:
+def _register(router: Router, handler: CompilerHandler, handler_key: str, *aliases: str) -> None:
     for observer in (router.message, router.edited_message):
-        observer.register(handler, StateFilter(None), MetaCommand(*aliases), flags={"fsm_release": True})
+        observer.register(handler, StateFilter(None), MetaCommand(*aliases), flags={"fsm_release": True, "handler_key": handler_key})
 
 
 def register_code_submitters(router: Router) -> Router:
@@ -38,13 +38,13 @@ def register_code_submitters(router: Router) -> Router:
             StateFilter(None),
             F.text.regexp(explicit_stdin) | F.caption.regexp(explicit_stdin),
             MetaCommand("py_stdin", "python_stdin"),
-            flags={"fsm_release": True},
+            flags={"fsm_release": True, "handler_key": "compile.stdin_prompt.python3"},
         )
     for lang in LANGUAGES:
-        _register(router, ProgCompiler.process_builder(lang), lang)
-    _register(router, ProgCompiler.process_builder("python2"), "py2")
-    _register(router, ProgCompiler.process_builder("python3"), "py", "python")
-    _register(router, ProgCompiler.process_builder("nodejs"), "js", "javascript")
+        _register(router, ProgCompiler.process_builder(lang), f"compile.{lang}", lang)
+    _register(router, ProgCompiler.process_builder("python2"), "compile.python2", "py2")
+    _register(router, ProgCompiler.process_builder("python3"), "compile.python3", "py", "python")
+    _register(router, ProgCompiler.process_builder("nodejs"), "compile.nodejs", "js", "javascript")
     return router
 
 
@@ -53,10 +53,14 @@ def register_code_submitters_with_stdin(router: Router) -> Router:
         return s + "_stdin", s + "s"
 
     for lang in LANGUAGES:
-        _register(router, ProgCompiler.process_stdin_builder(lang), *with_stdin(lang))
-    _register(router, ProgCompiler.process_stdin_builder("python2"), *with_stdin("py2"))
-    _register(router, ProgCompiler.process_stdin_builder("python3"), *with_stdin("py"), *with_stdin("python"))
-    _register(router, ProgCompiler.process_stdin_builder("nodejs"), *with_stdin("js"), *with_stdin("javascript"))
+        _register(router, ProgCompiler.process_stdin_builder(lang), f"compile.stdin_prompt.{lang}", *with_stdin(lang))
+    _register(router, ProgCompiler.process_stdin_builder("python2"), "compile.stdin_prompt.python2", *with_stdin("py2"))
+    _register(
+        router, ProgCompiler.process_stdin_builder("python3"), "compile.stdin_prompt.python3", *with_stdin("py"), *with_stdin("python")
+    )
+    _register(
+        router, ProgCompiler.process_stdin_builder("nodejs"), "compile.stdin_prompt.nodejs", *with_stdin("js"), *with_stdin("javascript")
+    )
     return router
 
 

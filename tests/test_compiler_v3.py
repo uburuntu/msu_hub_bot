@@ -121,3 +121,15 @@ async def test_closing_unused_compiler_client_does_not_open_a_session():
     client = JDoodle("synthetic", "synthetic")
     await client.close()
     assert "session" not in client.__dict__
+
+
+def test_compiler_route_keys_are_stable_across_aliases_and_events():
+    router = Router()
+    register_code_submitters(router)
+    register_code_submitters_with_stdin(router)
+    for observer in (router.message, router.edited_message):
+        keys = [handler.flags["handler_key"] for handler in observer.handlers]
+        assert keys.count("compile.python3") == 2
+        assert keys.count("compile.stdin_prompt.python3") == 3
+        assert keys[0] == "compile.stdin_prompt.python3"
+        assert all(key.startswith("compile.") for key in keys)

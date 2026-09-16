@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, cast
 
 from PIL import Image, ImageOps
 
@@ -27,7 +28,7 @@ class PreparedMedia:
     trimmed: bool = False
 
 
-def speed_factor(duration):
+def speed_factor(duration: float) -> float:
     if not math.isfinite(duration) or duration <= 0:
         raise StickerMediaError("Не удалось определить длительность анимации.")
     duration = min(duration, MAX_SOURCE_SECONDS)
@@ -35,7 +36,7 @@ def speed_factor(duration):
     return duration / 2.95 if duration > 3 else 1.0
 
 
-def _run(command):
+def _run(command: list[str]) -> bytes:
     try:
         return subprocess.run(command, check=True, capture_output=True, timeout=60).stdout
     except FileNotFoundError as exc:
@@ -46,8 +47,8 @@ def _run(command):
         raise StickerMediaError("Не удалось прочитать или преобразовать анимацию.") from exc
 
 
-def _probe(path):
-    info = json.loads(
+def _probe(path: Path) -> tuple[dict[str, Any], dict[str, Any], float]:
+    info: dict[str, Any] = json.loads(
         _run(
             [
                 "ffprobe",
@@ -73,7 +74,7 @@ def _probe(path):
     return info, video, duration
 
 
-def prepare_video(data):
+def prepare_video(data: bytes) -> PreparedMedia:
     """Convert up to the first seven source seconds to a silent VP9 sticker."""
     if len(data) > MAX_INPUT_BYTES:
         raise StickerMediaError("Файл больше 20 МБ. Стикер не добавлен.")
@@ -148,14 +149,14 @@ def prepare_video(data):
         raise StickerMediaError("После одной попытки сжатия стикер превышает 256 КБ. Стикер не добавлен.")
 
 
-def prepare_static(data):
+def prepare_static(data: bytes) -> PreparedMedia:
     with Image.open(io.BytesIO(data)) as source:
         if getattr(source, "is_animated", False):
             return prepare_video(data)
         image = ImageOps.exif_transpose(source).convert("RGBA")
         ratio = 512 / max(image.size)
         size = tuple(max(1, round(value * ratio)) for value in image.size)
-        image = image.resize(size, Image.Resampling.LANCZOS)
+        image = image.resize(cast(tuple[int, int], size), Image.Resampling.LANCZOS)
         output = io.BytesIO()
         image.save(output, format="WEBP", lossless=True)
         if output.tell() > 512 * 1024:
@@ -163,7 +164,7 @@ def prepare_static(data):
         return PreparedMedia("static", output.getvalue())
 
 
-def prepare_tgs(data):
+def prepare_tgs(data: bytes) -> bytes:
     # Only existing Telegram TGS stickers are accepted, not arbitrary Lottie files.
     if len(data) > 64 * 1024:
         raise StickerMediaError("TGS-стикер больше 64 КБ.")
@@ -186,7 +187,7 @@ def prepare_tgs(data):
     return data
 
 
-def prepare_media(data, kind):
+def prepare_media(data: bytes, kind: str) -> PreparedMedia:
     if len(data) > MAX_INPUT_BYTES:
         raise StickerMediaError("Файл больше 20 МБ. Стикер не добавлен.")
     if kind == "animated":

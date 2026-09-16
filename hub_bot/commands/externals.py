@@ -1,7 +1,13 @@
+from collections.abc import Awaitable, Callable
+from io import BytesIO
+from typing import Any
 from urllib import parse
 
-from aiogram.types import ChatActions, Message, ContentType, InputFile, MediaGroup
-from aiogram.utils.markdown import hitalic, quote_html, hbold, hlink, hcode
+from aiogram import html
+
+from aiogram.enums import ChatAction, ContentType
+from aiogram.types import Message, InputFile, InputMediaPhoto, InputMediaVideo, URLInputFile, LinkPreviewOptions
+from aiogram.utils.markdown import hitalic, hbold, hlink, hcode
 from yarl import URL
 
 from common.constants import TELEGRAM_MESSAGE_MAX_LEN
@@ -12,6 +18,8 @@ from common.externals.topdf import convert_to_pdf
 from common.externals.urbandictionary import urban_dictionary
 from common.tg.chat_actioner import ChatActioner
 from common.tg.filters import MetaInfo
+from common.tg.delivery import reply_album
+from common.tg.files import input_file
 from common.tg.utils import download, extract_image, action_by_type, send_super_reply
 from common.utils import one_liner, prettify_bytes, cut_long_text
 
@@ -19,217 +27,237 @@ from common.utils import one_liner, prettify_bytes, cut_long_text
 def _escaped_excerpt(text: str, limit: int, *, tail: bool = False) -> str:
     parts, size = [], 0
     for character in reversed(text) if tail else text:
-        escaped = quote_html(character)
-        width = len(escaped.encode('utf-16-le')) // 2
+        escaped = html.quote(character)
+        width = len(escaped.encode("utf-16-le")) // 2
         if size + width > max(0, limit - 1):
             break
         parts.append(escaped)
         size += width
     clipped = len(parts) < len(text)
     if tail:
-        return ('…' if clipped else '') + ''.join(reversed(parts))
-    return ''.join(parts) + ('…' if clipped else '')
+        return ("…" if clipped else "") + "".join(reversed(parts))
+    return "".join(parts) + ("…" if clipped else "")
 
 
-async def process_external(message: Message, function, output_type: str = ContentType.PHOTO, handler=lambda x: x, async_handler=None, error_text=None):
+def _upload(value: bytes | BytesIO | str | InputFile) -> str | InputFile:
+    return value if isinstance(value, (str, InputFile)) else input_file(value)
+
+
+async def process_external(
+    message: Message,
+    function: Callable[[BytesIO], Awaitable[Any]],
+    output_type: str = ContentType.PHOTO,
+    handler: Callable[[Any], Any] | None = None,
+    async_handler: Callable[[Any], Awaitable[Any]] | None = None,
+    error_text: str | None = None,
+) -> Message | list[Message] | bool:
     target, dest = await extract_image(message, with_profile_photo=True)
     file = await download(dest)
     if file is None:
         return True
 
     try:
-        async with ChatActioner(message.chat, action_by_type(output_type)):
+        async with ChatActioner(message, action_by_type(output_type) or ChatAction.TYPING):
             result = await function(file)
     except ExternalServiceError as e:
-        return await message.reply(error_text or hitalic(f'🤷🏻‍♂️ {e.text}'))
+        return await message.reply(error_text or hitalic(f"🤷🏻‍♂️ {e.text}"))
 
-    result = handler(result)
-    if async_handler:
+    if handler is not None:
+        result = handler(result)
+    if async_handler is not None:
         result = await async_handler(result)
 
     if output_type == ContentType.TEXT:
         return await target.reply(result)
-
     if output_type == ContentType.DOCUMENT:
-        return await target.reply_document(result)
-
+        return await target.reply_document(_upload(result))
     if output_type == ContentType.VIDEO:
-        return await target.reply_video(result)
-
+        return await target.reply_video(_upload(result))
     if output_type == ContentType.ANIMATION:
-        return await target.reply_animation(result)
-
-    if output_type == 'list[photo]':
-        media = MediaGroup()
-        for b_io in result:
-            media.attach_photo(b_io)
-        return await target.reply_media_group(media)
-
-    return await target.reply_photo(result)
+        return await target.reply_animation(_upload(result))
+    if output_type == "list[photo]":
+        return await reply_album(target, [InputMediaPhoto(media=_upload(value)) for value in result])
+    return await target.reply_photo(_upload(result))
 
 
-async def process_which_anime(message: Message):
+async def process_which_anime(message: Message) -> Message | list[Message] | bool:
     target, dest = await extract_image(message, with_profile_photo=True)
     file = await download(dest)
     if file is None:
         return True
 
-    async with ChatActioner(message.chat, action_by_type(ContentType.TEXT)):
+    async with ChatActioner(message, ChatAction.TYPING):
         try:
             result = await which_anime(file)
         except ExternalServiceError as e:
-            return await message.reply(hitalic(f'🤷🏻‍♂️ {e.text}'))
+            return await message.reply(hitalic(f"🤷🏻‍♂️ {e.text}"))
 
-        caption = ''
+        caption = ""
         files = []
-        for anime in result['result'][:3]:
-            link = hlink('Anilist', f'https://anilist.co/anime/{anime["anilist"]}')
-            filename = anime['filename']
+        for anime in result["result"][:3]:
+            link = hlink("Anilist", f"https://anilist.co/anime/{anime['anilist']}")
+            filename = anime["filename"]
             if len(filename) > 100:
-                filename = filename[:99] + '…'
-            caption += f'— {hcode(filename)}, {link}, похожесть: {float(anime["similarity"]):.2}\n\n'
-            files.append(anime['video'])
+                filename = filename[:99] + "…"
+            caption += f"— {hcode(filename)}, {link}, похожесть: {float(anime['similarity']):.2}\n\n"
+            files.append(anime["video"])
 
         if not files:
-            return await target.reply('Не удалось найти аниме по этому кадру. Попробуйте другой.')
+            return await target.reply("Не удалось найти аниме по этому кадру. Попробуйте другой.")
 
         if len(files) == 1:
-            file = files[0]
-            return await target.reply_video(InputFile.from_url(file, filename=URL(file).name), caption=caption)
+            url = files[0]
+            return await target.reply_video(URLInputFile(url, filename=URL(url).name), caption=caption)
 
-        media = MediaGroup()
-        for file in files:
-            media.attach_video(InputFile.from_url(file, filename=URL(file).name), caption=caption)
-            caption = ''
+        media = []
+        for url in files:
+            media.append(InputMediaVideo(media=URLInputFile(url, filename=URL(url).name), caption=caption))
+            caption = ""
 
-        return await target.reply_media_group(media)
-
-
-async def process_bg(message: Message):
-    return await process_external(message, remove_bg, output_type=ContentType.DOCUMENT,
-                                  error_text='Не удалось убрать фон. Попробуйте другое фото или повторите позже.')
+        return await reply_album(target, media)
 
 
-async def process_duckduckgo(message: Message, meta: MetaInfo):
+async def process_bg(message: Message) -> Message | list[Message] | bool:
+    return await process_external(
+        message,
+        remove_bg,
+        output_type=ContentType.DOCUMENT,
+        error_text="Не удалось убрать фон. Попробуйте другое фото или повторите позже.",
+    )
+
+
+async def process_duckduckgo(message: Message, meta: MetaInfo) -> Message | bool | None:
     target, query = meta.extract_text()
 
-    query = one_liner(cut_long_text(query, hard_max_len=100)[0]).strip().replace('\u200b', '')
+    query = one_liner(cut_long_text(query, hard_max_len=100)[0]).strip().replace("\u200b", "")
 
     if not query:
         return True
 
     def lines(t: str) -> str:
         if t:
-            return '\n' + t + '\n'
-        return ''
+            return "\n" + t + "\n"
+        return ""
 
-    async with ChatActioner(message.chat, action_by_type(ContentType.TEXT)):
-        search_url = 'https://duckduckgo.com/?' + parse.urlencode({'q': query})
+    async with ChatActioner(message, ChatAction.TYPING):
+        search_url = "https://duckduckgo.com/?" + parse.urlencode({"q": query})
         try:
             r = await duckduckgo(query)
         except ExternalServiceError:
-            return await target.reply('Поиск сейчас недоступен. Попробуйте ' + hlink('DuckDuckGo', search_url),
-                                      disable_web_page_preview=True)
+            return await target.reply(
+                "Поиск сейчас недоступен. Попробуйте " + hlink("DuckDuckGo", search_url),
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
 
-        if r['Redirect']:
-            return await target.reply(hlink(r['Redirect'], r['Redirect']), disable_web_page_preview=True)
+        if r["Redirect"]:
+            return await target.reply(hlink(r["Redirect"], r["Redirect"]), link_preview_options=LinkPreviewOptions(is_disabled=True))
 
-        heading = '<b>' + _escaped_excerpt(r['Heading'], 500) + '</b>'
-        abstract = _escaped_excerpt(r['AbstractText'], 2500)
-        source = _escaped_excerpt(parse.unquote(r['AbstractURL']), 500)
-        text = f'{heading}\n{lines(abstract)}\n{source}'.strip()
+        heading = "<b>" + _escaped_excerpt(r["Heading"], 500) + "</b>"
+        abstract = _escaped_excerpt(r["AbstractText"], 2500)
+        source = _escaped_excerpt(parse.unquote(r["AbstractURL"]), 500)
+        text = f"{heading}\n{lines(abstract)}\n{source}".strip()
 
-        if not text or text == '<b></b>':
-            return await message.reply('🤷🏻‍♂️ Ничего не найдено\n\nИскать на ' + hlink('DuckDuckGo', search_url),
-                                       disable_web_page_preview=False)
+        if not text or text == "<b></b>":
+            return await message.reply(
+                "🤷🏻‍♂️ Ничего не найдено\n\nИскать на " + hlink("DuckDuckGo", search_url),
+                link_preview_options=LinkPreviewOptions(is_disabled=False),
+            )
 
-        preview = r['AbstractURL']
-        if not preview and r['Image']:
-            preview = 'https://api.duckduckgo.com/' + r['Image']
+        preview = r["AbstractURL"]
+        if not preview and r["Image"]:
+            preview = "https://api.duckduckgo.com/" + r["Image"]
 
         return await send_super_reply(target, text=text, web_preview=preview)
 
 
-async def process_imgur(message: Message):
-    def handler(r: dict) -> str:
-        return quote_html(r['link']) + ' | ' + str(r['width']) + 'x' + str(r['height']) + ' | ' + prettify_bytes(r['size'])
+async def process_imgur(message: Message) -> Message | list[Message] | bool:
+    def handler(r: dict[str, Any]) -> str:
+        return html.quote(r["link"]) + " | " + str(r["width"]) + "x" + str(r["height"]) + " | " + prettify_bytes(r["size"])
 
-    return await process_external(message, imgur_upload, output_type=ContentType.TEXT, handler=handler,
-                                  error_text='Не удалось загрузить файл на Imgur. Попробуйте позже.')
+    return await process_external(
+        message,
+        imgur_upload,
+        output_type=ContentType.TEXT,
+        handler=handler,
+        error_text="Не удалось загрузить файл на Imgur. Попробуйте позже.",
+    )
 
 
-async def process_ud(message: Message, meta: MetaInfo):
+async def process_ud(message: Message, meta: MetaInfo) -> Message | bool:
     target, text = meta.extract_text()
     if text is None:
         return True
 
     try:
-        async with ChatActioner(message.chat, action_by_type(ContentType.TEXT)):
+        async with ChatActioner(message, ChatAction.TYPING):
             result = await urban_dictionary(text)
     except ExternalServiceError as e:
-        return await message.reply(hitalic(f'🤷🏻‍♂️ {e.text}'))
+        return await message.reply(hitalic(f"🤷🏻‍♂️ {e.text}"))
 
     if not result:
-        return await target.reply('В Urban Dictionary ничего не нашлось. Попробуйте другое слово.')
+        return await target.reply("В Urban Dictionary ничего не нашлось. Попробуйте другое слово.")
 
-    texts = []
+    texts: list[str] = []
     prev_header, total_len = None, 0
     for r in result[:3]:
-        text = ''
-        text += f"{hbold(r['header'])}\n\n" if r['header'].casefold() != prev_header else ''
-        text += f"{quote_html(r['meaning'])}\n\n"
+        text = ""
+        text += f"{hbold(r['header'])}\n\n" if r["header"].casefold() != prev_header else ""
+        text += f"{html.quote(r['meaning'])}\n\n"
         text += f"Example:\n{hitalic(r['example'])}\n\n"
         text += f"👍🏻 {hbold(r['up'])} 👎🏻 {hbold(r['down'])}\n"
         text += f"{hbold('———')}\n"
 
-        prev_header = r['header'].casefold()
-        text_length = len(text.encode('utf-16-le')) // 2
+        prev_header = r["header"].casefold()
+        text_length = len(text.encode("utf-16-le")) // 2
         if total_len + text_length + bool(texts) > TELEGRAM_MESSAGE_MAX_LEN:
             if not texts:
-                header = hbold(r['header'][:100]) + '\n\n'
-                url = 'https://www.urbandictionary.com/define.php?' + parse.urlencode({'term': r['header'][:100]})
-                footer = '\n\n' + hlink('Полное определение', url)
+                header = hbold(r["header"][:100]) + "\n\n"
+                url = "https://www.urbandictionary.com/define.php?" + parse.urlencode({"term": r["header"][:100]})
+                footer = "\n\n" + hlink("Полное определение", url)
                 # Escaping expands one character to at most five; keep the excerpt and HTML intact.
-                overhead = len((header + footer).encode('utf-16-le')) // 2
+                overhead = len((header + footer).encode("utf-16-le")) // 2
                 limit = max(1, (TELEGRAM_MESSAGE_MAX_LEN - overhead - 1) // 5)
-                texts.append(header + quote_html(r['meaning'][:limit]) + '…' + footer)
+                texts.append(header + html.quote(r["meaning"][:limit]) + "…" + footer)
             break
         texts.append(text)
         total_len += text_length + (len(texts) > 1)
 
-    result = f"\n".join(texts)
-    return await target.reply(result)
+    return await target.reply("\n".join(texts))
 
 
-async def process_topdf(message: Message, meta: MetaInfo):
+async def process_topdf(message: Message, meta: MetaInfo) -> Message | bool:
     target, dest = await meta.extract_doc()
     if dest is None:
         return True
 
     try:
-        async with ChatActioner(message.chat, action_by_type(ContentType.DOCUMENT)):
+        async with ChatActioner(message, ChatAction.UPLOAD_DOCUMENT):
             file = await download(dest)
-            url, thumb, convert_name = await convert_to_pdf(file, dest.file_name, dest.mime_type)
+            if file is None:
+                return await message.reply("Не удалось скачать файл. Попробуйте ещё раз.")
+            url, thumb, convert_name = await convert_to_pdf(
+                file, dest.file_name or "document", dest.mime_type or "application/octet-stream"
+            )
     except TimeoutError:
-        return await message.reply('Конвертация заняла слишком много времени. Попробуйте ещё раз позже.')
+        return await message.reply("Конвертация заняла слишком много времени. Попробуйте ещё раз позже.")
     except ExternalServiceError:
-        return await message.reply('Не удалось преобразовать файл в PDF. Попробуйте позже.')
+        return await message.reply("Не удалось преобразовать файл в PDF. Попробуйте позже.")
 
-    return await target.reply_document(InputFile.from_url(url, convert_name), thumb=InputFile.from_url(thumb))
+    return await target.reply_document(URLInputFile(url, filename=convert_name), thumbnail=URLInputFile(thumb))
 
 
-async def process_porfirevich(message: Message, meta: MetaInfo):
+async def process_porfirevich(message: Message, meta: MetaInfo) -> Message | bool:
     target, text = meta.extract_text()
     if not text:
         return True
 
     try:
-        async with ChatActioner(message.chat, ChatActions.TYPING):
+        async with ChatActioner(message, ChatAction.TYPING):
             result = await porfirevich(text)
     except ExternalServiceError as e:
-        return await message.reply(hitalic(f'🤷🏻‍♂️ {e.text}'))
+        return await message.reply(hitalic(f"🤷🏻‍♂️ {e.text}"))
 
     continuation = _escaped_excerpt(result, 4000)
-    remaining = TELEGRAM_MESSAGE_MAX_LEN - len(continuation.encode('utf-16-le')) // 2 - len('<b></b>')
-    result = '<b>' + _escaped_excerpt(text, remaining, tail=True) + '</b>' + continuation
+    remaining = TELEGRAM_MESSAGE_MAX_LEN - len(continuation.encode("utf-16-le")) // 2 - len("<b></b>")
+    result = "<b>" + _escaped_excerpt(text, remaining, tail=True) + "</b>" + continuation
     return await target.reply(result)
