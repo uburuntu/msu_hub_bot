@@ -1,5 +1,4 @@
 import io
-import json
 
 import aiogram
 import emoji
@@ -14,6 +13,7 @@ from common.tg.filters import MetaInfo
 from common.tg.utils import extract_image, download, download_by_file_id
 from common.utils import image_bytes_io, FakeBytesIO
 from utils.sticker_media import MAX_INPUT_BYTES, StickerMediaError, prepare_media
+from utils.sticker_sets import StickerSetClient, UploadedSticker
 
 sticker_set_name_template = 'with_love_for_{id}_by_msu_hub_bot'
 sticker_set_name_template_a = 'with_love_for_{id}a_by_msu_hub_bot'
@@ -173,24 +173,14 @@ class Stickers:
                 raise StickerMediaError('Обработка заняла слишком много времени. Стикер не добавлен.')
             kind, payload = prepared
             emojis = list(dict.fromkeys(e['emoji'] for e in emoji.emoji_list(meta.extract_text()[1])))[:5] or ['✨']
-            suffix = {'static': 'webp', 'animated': 'tgs', 'video': 'webm'}[kind]
-            # Modern InputSticker supports mixed packs without migrating aiogram 2.
-            uploaded = await message.bot.request('uploadStickerFile', {
-                'user_id': message.from_user.id, 'sticker_format': kind,
-            }, files={'sticker': (f'sticker.{suffix}', io.BytesIO(payload))})
-            sticker = {'sticker': uploaded['file_id'], 'format': kind, 'emoji_list': emojis}
-            try:
-                await message.bot.get_sticker_set(name)
-            except aiogram.exceptions.InvalidStickersSet:
-                await state.update_data(mixed_sticker=sticker, sticker_set_name=name,
+            client = StickerSetClient(message.bot)
+            uploaded = await client.upload(message.from_user.id, payload, kind, emojis)
+            if not await client.save(name, message.from_user.id, uploaded):
+                await state.update_data(mixed_sticker=uploaded.input_sticker(), sticker_upload=uploaded.metadata(), sticker_set_name=name,
                                         sticker_chat_id=message.chat.id, sticker_user_id=message.from_user.id)
                 await state.set_state(StickerStates.sticker_set_name.state)
                 return await message.reply('🎈 Пришлите название стикерпака (1–64 символа) или /cancel.')
-            await message.bot.request('addStickerToSet', {
-                'user_id': message.from_user.id, 'name': name,
-                'sticker': json.dumps(sticker, ensure_ascii=False),
-            })
-            return await message.reply_sticker(uploaded['file_id'])
+            return await cls.reply_saved_sticker(message, client, name, uploaded)
         except StickerMediaError as exc:
             return await message.reply(str(exc))
         except aiogram.exceptions.InvalidPeerID:
@@ -198,6 +188,22 @@ class Stickers:
         except aiogram.exceptions.BadRequest:
             await message.reply('Не удалось добавить стикер. Подробнее в /error_stickers.')
             raise
+
+    @classmethod
+    async def reply_saved_sticker(cls, message, client, name, uploaded, show_link=False):
+        # Saving and preview delivery are separate: never add again after a lookup/send failure.
+        file_id = await client.resolve(name, uploaded)
+        link = hlink('стикерпак', f'https://t.me/addstickers/{name}')
+        if file_id is not None:
+            try:
+                reply = await message.reply_sticker(file_id)
+            except aiogram.exceptions.BadRequest:
+                pass
+            else:
+                if show_link:
+                    await message.reply(f'✨ Стикерпак чата: {link}')
+                return reply
+        return await message.reply(f'✨ Стикер добавлен в {link}. Откройте его в паке.')
 
     @classmethod
     async def finish_chat_set(cls, message, state, data):
@@ -210,29 +216,17 @@ class Stickers:
         if not 1 <= len(title) <= 64:
             return await message.reply('Название должно содержать от 1 до 64 символов. Или /cancel.')
         name = data['sticker_set_name']
+        client = StickerSetClient(message.bot)
+        uploaded = UploadedSticker.from_pending(data)
         try:
-            # Another admin may have created the shared pack while we awaited a title.
-            try:
-                await message.bot.get_sticker_set(name)
-            except aiogram.exceptions.InvalidStickersSet:
-                await message.bot.request('createNewStickerSet', {
-                    'user_id': message.from_user.id, 'name': name, 'title': title,
-                    'stickers': json.dumps([data['mixed_sticker']], ensure_ascii=False),
-                    'sticker_type': 'regular',
-                })
-            else:
-                await message.bot.request('addStickerToSet', {
-                    'user_id': message.from_user.id, 'name': name,
-                    'sticker': json.dumps(data['mixed_sticker'], ensure_ascii=False),
-                })
+            await client.save(name, message.from_user.id, uploaded, title=title)
         except aiogram.exceptions.InvalidPeerID:
             return await message.reply('Начните личный чат со мной и снова пришлите название.')
         except aiogram.exceptions.BadRequest:
             await message.reply('Не удалось сохранить стикер. Попробуйте ещё раз или /cancel. Подробнее в /error_stickers.')
             raise
         await state.finish()
-        await message.reply(hlink('✨ Стикерпак чата', f'https://t.me/addstickers/{name}'))
-        return await message.reply_sticker(data['mixed_sticker']['sticker'])
+        return await cls.reply_saved_sticker(message, client, name, uploaded, show_link=True)
 
     @classmethod
     async def make_sticker_png(cls, message: Message, meta: MetaInfo, state: FSMContext, sticker_set_name: str):
