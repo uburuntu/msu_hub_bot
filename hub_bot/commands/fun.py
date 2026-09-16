@@ -6,7 +6,7 @@ from itertools import permutations
 from typing import Final, Tuple
 
 import pendulum
-from aiogram.dispatcher.handler import SkipHandler
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.types import Message
 from aiogram.utils.markdown import hpre, hbold
 
@@ -40,22 +40,25 @@ lyrics = '''(Припев):
 '''
 
 
-async def process_beer(message: Message):
+async def process_beer(message: Message) -> Message | bool | None:
     return await message.reply_audio(audio='https://t.me/mechmath/625715', caption=hpre(lyrics))
 
 
 class PokakatsData:
     tz = pendulum.timezone('Europe/Moscow')
 
-    def __init__(self):
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
         self.until_ts = pendulum.tomorrow(tz=self.tz).timestamp()
-        self.users = defaultdict(int)
-        self.chats = defaultdict(int)
+        self.users: defaultdict[int, int] = defaultdict(int)
+        self.chats: defaultdict[int, int] = defaultdict(int)
 
     def plus(self, user_id: int, chat_id: int, count: int = 1) -> Tuple[int, int]:
         curr_ts = time.time()
         if curr_ts > self.until_ts:
-            self.__init__()
+            self.reset()
         self.users[user_id] += count
         self.chats[chat_id] += count
         return self.users[user_id], self.chats[chat_id]
@@ -64,7 +67,7 @@ class PokakatsData:
 pokakats = PokakatsData()
 
 
-async def process_pokakats(message: Message):
+async def process_pokakats(message: Message) -> Message | bool | None:
     emojis: Final = ('💩', '🧻', '🚽', '🚻', '🚾')
 
     def postfix(count: int) -> str:
@@ -104,12 +107,14 @@ async def process_pokakats(message: Message):
     if percent_chance(5.):
         count, note = 3, '+3, очень хорошо покакали!'
 
+    if message.from_user is None:
+        raise SkipHandler()
     user_count, chat_count = pokakats.plus(message.from_user.id, message.chat.id, count)
     text = f'{random.choice(emojis)} Сегодня у тебя {hbold(user_count)} {postfix(user_count)} и {hbold(chat_count)} {postfix(chat_count)} у чата\n\n{note}'
     return await message.reply(text)
 
 
-async def process_puk(_message: Message, meta: MetaInfo):
+async def process_puk(_message: Message, meta: MetaInfo) -> Message | bool | None:
     target, text = meta.extract_text()
     if not text:
         return True

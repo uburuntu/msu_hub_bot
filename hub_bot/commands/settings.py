@@ -1,14 +1,16 @@
-from aiogram.types import Message, ChatType
+from aiogram.enums import ChatType, ChatMemberStatus
+from aiogram.types import Message
 from aiogram.utils.markdown import hcode, hbold, hitalic
 
 from common.tg.filters import MetaInfo
 from common.tg.middlewares.settings import Settings
+from common.tg.context import bot_for
 from common.tg.utils import chat_link
 
 
-async def process_settings(message: Message, meta: MetaInfo, settings: Settings):
+async def process_settings(message: Message, meta: MetaInfo, settings: Settings) -> Message | bool | None:
     args = meta.arguments
-    schema = settings.schema()
+    schema = settings.model_json_schema()
 
     if not args:
         text = hbold('Настройки чата') + f' {await chat_link(message.chat)}\n\n'
@@ -31,8 +33,10 @@ async def process_settings(message: Message, meta: MetaInfo, settings: Settings)
         return await message.reply(text)
 
     if message.chat.type != ChatType.PRIVATE:
-        member = await message.chat.get_member(message.from_user.id)
-        if not member.is_chat_admin():
+        if message.from_user is None:
+            return await message.reply('Изменять настройки чата могут только админы.')
+        member = await bot_for(message).get_chat_member(message.chat.id, message.from_user.id)
+        if member.status not in (ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR):
             text = f'🤷🏻‍♂️ Изменять настройки чата могут только админы.'
             return await message.reply(text)
 
@@ -48,3 +52,5 @@ async def process_settings(message: Message, meta: MetaInfo, settings: Settings)
 
         text = f'🆗 Настройка {hcode(key)} поставлена в {hcode(getattr(settings, key))}'
         return await message.reply(text)
+
+    return None

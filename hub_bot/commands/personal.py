@@ -1,11 +1,13 @@
 import random
 
-from aiogram.types import Message, ContentType
+from aiogram.enums import ContentType
+from aiogram.types import Message
 
+from common.tg.context import bot_for
 from common.tg.utils import chat_link
 
 
-async def process_sanya(message: Message):
+async def process_sanya(message: Message) -> Message | bool | None:
     target = message.reply_to_message or message
     stickers = (
         'CAACAgIAAxkBAALaXV-ZaJ7v72HlhakrY676v6XS0B1HAAL0BAACYVerAbPyU2VqvBkZGwQ',
@@ -20,19 +22,19 @@ async def process_sanya(message: Message):
     return await target.reply_sticker(random.choice(stickers))
 
 
-async def process_dyubs(message: Message):
+async def process_dyubs(message: Message) -> Message | bool | None:
     target = message.reply_to_message or message
-    sticker_set = await message.bot.get_sticker_set('with_love_for_471376384_by_msu_hub_bot')
+    sticker_set = await bot_for(message).get_sticker_set('with_love_for_471376384_by_msu_hub_bot')
     return await target.reply_sticker(random.choice(sticker_set.stickers).file_id)
 
 
-async def process_popov(message: Message):
+async def process_popov(message: Message) -> Message | bool | None:
     target = message.reply_to_message or message
-    sticker_set = await message.bot.get_sticker_set('popovble')
+    sticker_set = await bot_for(message).get_sticker_set('popovble')
     return await target.reply_sticker(random.choice(sticker_set.stickers).file_id)
 
 
-async def process_pookie_pook(message: Message):
+async def process_pookie_pook(message: Message) -> Message | bool | None:
     if message.content_type not in (
             ContentType.ANIMATION,
             ContentType.AUDIO,
@@ -43,11 +45,11 @@ async def process_pookie_pook(message: Message):
     ):
         return True
 
-    if message.is_forward():
+    if message.forward_origin is not None:
         return True
 
     if message.text or message.caption:
         return True
 
     texts = (await chat_link(message.chat), f'@{message.chat.username}')
-    return await message.edit_caption(random.choice(texts))
+    return await message.edit_caption(caption=random.choice(texts))

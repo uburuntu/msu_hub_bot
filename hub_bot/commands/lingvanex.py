@@ -1,5 +1,6 @@
 from aiogram.types import Message
-from aiogram.utils.markdown import hcode, quote_html, hbold
+from aiogram import html
+from aiogram.utils.markdown import hcode, hbold
 from aiohttp import ClientError
 
 from common.externals.exceptions import ExternalServiceError
@@ -7,20 +8,22 @@ from common.externals.lingvanex import languages_list, translate, translate_imag
 from common.tg.filters import MetaInfo
 
 
-async def _reply_text(target: Message, text: str):
-    parts, size = [], 0
+async def _reply_text(target: Message, text: str) -> Message:
+    parts: list[str] = []
+    size = 0
     for character in text:
-        escaped = quote_html(character)
+        escaped = html.quote(character)
         width = max(len(escaped), len(character.encode('utf-16-le')) // 2)
         if size + width > 4000:
             await target.reply(''.join(parts))
-            parts, size = [], 0
+            parts = []
+            size = 0
         parts.append(escaped)
         size += width
     return await target.reply(''.join(parts))
 
 
-async def tr(meta: MetaInfo, src: str, dest: str):
+async def tr(meta: MetaInfo, src: str, dest: str) -> Message | None:
     translated = ''
     failed = []
 
@@ -52,15 +55,16 @@ async def tr(meta: MetaInfo, src: str, dest: str):
         return await _reply_text(target, translated)
     if failed:
         return await target.reply('Не удалось выполнить перевод. Попробуйте ещё раз позже.')
+    return None
 
 
-async def process_langs(message: Message):
+async def process_langs(message: Message) -> Message:
     langs = await languages_list()
     text = hbold('Поддерживаемые языки') + '\n\n'
     for lang in langs:
-        code = quote_html(str(lang.get('code_alpha_1') or '')[:30])
-        full_code = quote_html(str(lang.get('full_code') or '')[:30])
-        name = quote_html(str(lang.get('englishName') or '')[:100])
+        code = html.quote(str(lang.get('code_alpha_1') or '')[:30])
+        full_code = html.quote(str(lang.get('full_code') or '')[:30])
+        name = html.quote(str(lang.get('englishName') or '')[:100])
         line = f'• {name} — {code}, {full_code}\n'
         if len(text.encode('utf-16-le')) // 2 + len(line.encode('utf-16-le')) // 2 > 4000:
             await message.reply(text)
@@ -75,15 +79,15 @@ async def process_langs(message: Message):
     return await message.reply(text)
 
 
-async def process_en(_message: Message, meta: MetaInfo):
+async def process_en(_message: Message, meta: MetaInfo) -> Message | None:
     return await tr(meta, 'ru', 'en_GB')
 
 
-async def process_ru(_message: Message, meta: MetaInfo):
+async def process_ru(_message: Message, meta: MetaInfo) -> Message | None:
     return await tr(meta, 'en_GB', 'ru')
 
 
-async def process_translate(message: Message, meta: MetaInfo):
+async def process_translate(message: Message, meta: MetaInfo) -> Message | None:
     args = meta.arguments
     if len(args) != 2:
         return await message.reply('Использование: ' + hcode('/tr en ru') + ' — перевод с английского на русский, '

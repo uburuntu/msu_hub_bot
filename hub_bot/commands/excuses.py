@@ -139,7 +139,7 @@ class Excuses:
     )
 
     @classmethod
-    def random(cls, name: str = None) -> str:
+    def random(cls, name: str | None = None) -> str:
         c = random.choice
 
         if not name:
@@ -155,11 +155,11 @@ class Excuses:
         return text
 
 
-async def process_excuse(message: Message, meta: MetaInfo):
+async def process_excuse(message: Message, meta: MetaInfo) -> Message:
     target, text = meta.extract_text()
 
     if reply_to := message.reply_to_message:
-        name = sender_mention(reply_to) if reply_to.sender_chat else reply_to.from_user.get_mention(reply_to.from_user.first_name)
+        name = sender_mention(reply_to) if reply_to.sender_chat else reply_to.from_user.mention_html(reply_to.from_user.first_name) if reply_to.from_user else sender_mention(reply_to)
     else:
         name = text
 

@@ -7,7 +7,7 @@ from transliterate import translit
 
 from common.tg.filters import MetaInfo
 
-figlets = (
+figlet_fonts = (
     Figlet(font='3-d'),
     Figlet(font='alphabet'),
     Figlet(font='banner3'),
@@ -24,10 +24,10 @@ figlets = (
     Figlet(font='speed'),
     Figlet(font='standard'),
 )
-figlets = cycle(figlets)
+figlets = cycle(figlet_fonts)
 
 
-async def process_figlet(_message: Message, meta: MetaInfo):
+async def process_figlet(_message: Message, meta: MetaInfo) -> Message:
     target, text = meta.extract_text()
     if not text:
         text = 'kek'

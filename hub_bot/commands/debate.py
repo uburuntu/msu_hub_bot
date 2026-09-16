@@ -2,17 +2,18 @@ import csv
 
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import Message
-from aiogram.utils.callback_data import CallbackData
+from aiogram.filters.callback_data import CallbackData
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hitalic
 
 from common.tg.callbacks import CallbackCommandBase
 from common.tg.utils import sender_mention
 from common.utils import RandomizerForDay
-from resources import debate
+from hub_bot.resources import debate
 
 
-def generate_resolutions():
-    class ExcelDialect:
+def generate_resolutions() -> dict[str, tuple[str, str, str, str, str, str]]:
+    class ExcelDialect(csv.Dialect):
         delimiter = ';'
         quotechar = '"'
         escapechar = None
@@ -36,33 +37,38 @@ resolutions = generate_resolutions()
 resolution_ids = tuple(resolutions)
 
 
+class DebateCallback(CallbackData, prefix="debate"):
+    action: str
+    uid: str
+
+
 class Debate(CallbackCommandBase):
-    callback_data = CallbackData('debate', 'action', 'uid')
+    callback_data = DebateCallback
 
     @classmethod
     def keyboard(cls, uid: str) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().row(
-            InlineKeyboardButton(text='🏁 Из турнира', callback_data=cls.callback_data.new('tournament', uid)),
+        keyboard = InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text='🏁 Из турнира', callback_data=DebateCallback(action='tournament', uid=uid).pack()),
         ).row(
-            InlineKeyboardButton(text='📜 Правила', callback_data=cls.callback_data.new('rules', uid)),
-            InlineKeyboardButton(text='🔤 Сокращения', callback_data=cls.callback_data.new('abbreviations', uid)),
+            InlineKeyboardButton(text='📜 Правила', callback_data=DebateCallback(action='rules', uid=uid).pack()),
+            InlineKeyboardButton(text='🔤 Сокращения', callback_data=DebateCallback(action='abbreviations', uid=uid).pack()),
         )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, message: Message):
+    async def process(cls, message: Message) -> Message | bool | None:
         target = message.reply_to_message or message
 
         name = sender_mention(target)
-        uid = RandomizerForDay.random(target.sender_chat and target.sender_chat.id or target.from_user.id).choice(resolution_ids)
+        uid = RandomizerForDay.random(target.sender_chat.id if target.sender_chat else target.from_user.id if target.from_user else target.chat.id).choice(resolution_ids)
         resolution = resolutions[uid][-1]
 
         return await target.reply(f'🗣 {name}, твоя резолюция на сегодня:\n\n{hitalic(resolution)}',
                                   reply_markup=cls.keyboard(uid), disable_web_page_preview=True)
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict):
-        action, uid = callback_data['action'], callback_data['uid']
+    async def process_cb(cls, query: CallbackQuery, callback_data: DebateCallback) -> Message | bool | None:
+        action, uid = callback_data.action, callback_data.uid
 
         if action == 'rules':
             return await query.answer('📜 Нужно отстоять резолюцию, а остальным её опровергнуть', cache_time=cls.cache_time_long, show_alert=True)

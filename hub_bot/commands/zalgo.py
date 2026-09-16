@@ -2,7 +2,7 @@ import random
 from itertools import islice
 
 from aiogram.types import Message
-from aiogram.utils.markdown import quote_html
+from aiogram import html
 
 from common.tg.filters import MetaInfo
 
@@ -46,8 +46,8 @@ class Zalgo:
         return ''.join(result)
 
 
-async def process_zalgo(_message: Message, meta: MetaInfo):
+async def process_zalgo(_message: Message, meta: MetaInfo) -> Message | bool | None:
     target, text = meta.extract_text()
     if not text:
         return True
-    return await target.reply(quote_html(Zalgo.zalgofy(text))[:4096])
+    return await target.reply(html.quote(Zalgo.zalgofy(text))[:4096])

@@ -4,7 +4,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.markdown import hcode
 
 from common.tg.filters import MetaInfo
-from common.utils import two
+from itertools import pairwise
 
 pattern_fp = re.compile(r'[-+]?[0-9]*\.?[0-9]+')
 
@@ -26,16 +26,14 @@ def emoji_by_longitude(lon: float) -> str:
     return '🌎'
 
 
-async def process_location(message: Message, meta: MetaInfo):
+async def process_location(message: Message, meta: MetaInfo) -> Message | bool | None:
     def maps_keyboard(latitude: float, longitude: float) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().add(
+        return InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text='Google Maps', url=f'https://maps.google.com/maps?q={latitude},{longitude}&z=16'),
             InlineKeyboardButton(text='Yandex Maps', url=f'https://yandex.ru/maps/?pt={longitude},{latitude}&z=16'),
-        )
-        keyboard.add(
+        ], [
             InlineKeyboardButton(text='2GIS', url=f'https://2gis.ru/geo/{longitude},{latitude}'),
-        )
-        return keyboard
+        ]])
 
     target, text = meta.extract_text()
 
@@ -45,8 +43,8 @@ async def process_location(message: Message, meta: MetaInfo):
                                    reply_markup=maps_keyboard(lat, lon))
 
     if text:
-        for lat, lon in two(pattern_fp.findall(text)):
-            lat, lon = float(lat), float(lon)
+        for raw_lat, raw_lon in pairwise(pattern_fp.findall(text)):
+            lat, lon = float(raw_lat), float(raw_lon)
             if valid_lat_lon(lat, lon):
                 break
         else:

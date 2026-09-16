@@ -1,49 +1,60 @@
 import asyncio
 from contextlib import suppress
 
-import aiogram
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatType
-from aiogram.utils.callback_data import CallbackData
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from aiogram.enums import ChatType
+from aiogram.filters.callback_data import CallbackData
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from common.tg.callbacks import CallbackCommandBase
 from common.tg.filters import MetaInfo
-from texts import cmd_help
+from common.tg.runtime import Supervisor
+from hub_bot.texts import cmd_help
+
+
+class HelpCallback(CallbackData, prefix="help"):
+    action: str
 
 
 class HelpMessage(CallbackCommandBase):
-    callback_data = CallbackData('help', 'action')
+    callback_data = HelpCallback
     compressed_text = '📝 Команды и возможности бота'
 
     @classmethod
     def keyboard(cls) -> InlineKeyboardMarkup:
-        keyboard = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(text='⏬ Развернуть помощь', callback_data=cls.callback_data.new('open'))
+        keyboard = InlineKeyboardBuilder().add(
+            InlineKeyboardButton(text='⏬ Развернуть помощь', callback_data=HelpCallback(action='open').pack())
         )
-        return keyboard
+        return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, message: Message, meta: MetaInfo):
+    async def process(cls, message: Message, meta: MetaInfo, supervisor: Supervisor) -> Message:
         target = meta.reply()
         result = await target.reply(cmd_help, disable_web_page_preview=True)
         if message.chat.type != ChatType.PRIVATE:
-            asyncio.create_task(cls.edit(result))
+            supervisor.create_job(lambda: cls.edit(result))
         return result
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: dict):
-        action = callback_data['action']
+    async def process_cb(cls, query: CallbackQuery, callback_data: HelpCallback, supervisor: Supervisor) -> bool:
+        message = query.message
+        if not isinstance(message, Message):
+            return await query.answer('Эта кнопка уже недоступна.')
+        action = callback_data.action
 
         await query.answer(text='✅', cache_time=1 * 60)
 
         if action == 'open':
-            with suppress(aiogram.exceptions.BadRequest):
-                result = await query.message.edit_text(cmd_help, disable_web_page_preview=True)
-                return asyncio.create_task(cls.edit(result))
+            with suppress(TelegramBadRequest):
+                result = await message.edit_text(cmd_help, disable_web_page_preview=True)
+                if isinstance(result, Message):
+                    supervisor.create_job(lambda: cls.edit(result))
 
         return True
 
     @classmethod
-    async def edit(cls, message: Message):
+    async def edit(cls, message: Message) -> None:
         await asyncio.sleep(60.)
-        with suppress(aiogram.exceptions.BadRequest):
-            return await message.edit_text(cls.compressed_text, reply_markup=cls.keyboard(), disable_web_page_preview=True)
+        with suppress(TelegramBadRequest):
+            await message.edit_text(cls.compressed_text, reply_markup=cls.keyboard(), disable_web_page_preview=True)

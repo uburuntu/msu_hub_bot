@@ -87,6 +87,7 @@ warn_unused_configs = true
 warn_unused_ignores = true
 files = [
     "common/externals/dvach.py",
+    "common/tg/callbacks.py",
     "common/tg/chat_actioner.py",
     "common/tg/command.py",
     "common/tg/context.py",
@@ -95,9 +96,34 @@ files = [
     "common/tg/files.py",
     "common/tg/filters.py",
     "common/tg/keyboards.py",
+    "common/tg/middlewares/check_gets.py",
+    "common/tg/middlewares/logs.py",
+    "common/tg/middlewares/settings.py",
+    "common/tg/middlewares/skip777000.py",
+    "common/tg/middlewares/updates.py",
+    "common/tg/middlewares/viewer.py",
     "common/tg/runtime.py",
     "common/tg/state.py",
+    "common/tg/storage.py",
     "common/tg/utils.py",
+    "hub_bot/commands/debate.py",
+    "hub_bot/commands/errors.py",
+    "hub_bot/commands/excuses.py",
+    "hub_bot/commands/figlet.py",
+    "hub_bot/commands/fun.py",
+    "hub_bot/commands/genders.py",
+    "hub_bot/commands/help.py",
+    "hub_bot/commands/likes.py",
+    "hub_bot/commands/lingvanex.py",
+    "hub_bot/commands/location.py",
+    "hub_bot/commands/other.py",
+    "hub_bot/commands/personal.py",
+    "hub_bot/commands/raffle.py",
+    "hub_bot/commands/rate.py",
+    "hub_bot/commands/settings.py",
+    "hub_bot/commands/votes.py",
+    "hub_bot/commands/zalgo.py",
+    "hub_bot/events.py",
     "msu_hub_bot/health.py",
     "msu_hub_bot/settings.py",
     "tools/check_types.py",
@@ -105,7 +131,7 @@ files = [
 
 [[tool.mypy.overrides]]
 # Remove each provider/native exception when its SDK ships types; adapters remain checked.
-module = ["arxiv", "gtts", "pytesseract", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen"]
+module = ["aiocache", "arxiv", "gtts", "pytesseract", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "pydub", "pydub.effects", "throttler", "transliterate", "pyfiglet", "airtable"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

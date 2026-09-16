@@ -20,7 +20,7 @@ error_stickers = f'''{hbold('Типы ошибок со стикерами')}:
 '''
 
 
-async def process_error_stickers(message: Message):
+async def process_error_stickers(message: Message) -> Message:
     return await message.reply(error_stickers, disable_web_page_preview=True)
 
 
@@ -37,11 +37,11 @@ donate = f'''👋🏻 {hbold('Привет')}! Я — @rm_bk — создате�
 '''
 
 
-async def process_donate(message: Message):
+async def process_donate(message: Message) -> Message:
     return await message.reply(donate, disable_web_page_preview=True)
 
 
-async def process_supporters(message: Message):
+async def process_supporters(message: Message) -> Message:
     raw = Airtable(settings.require('supporters_base'), settings.require('supporters_table'), settings.require('supporters_api_key')).get_all()
     supporters = {
         s['fields']['Name']: s['fields'].get('Details')
