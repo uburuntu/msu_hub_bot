@@ -291,3 +291,170 @@ async def test_job_timeout_has_actionable_command_reply(external_handlers, kind)
         await external_handlers["process_topdf"](target, meta)
         assert "Конвертация заняла слишком много времени" in target.reply.call_args.args[0]
     target.reply.assert_awaited_once()
+
+
+async def test_urban_empty_result_has_clear_reply(external_handlers):
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    meta = SimpleNamespace(extract_text=lambda: (target, "synthetic"))
+    external_handlers["urban_dictionary"] = AsyncMock(return_value=[])
+    await external_handlers["process_ud"](target, meta)
+    assert "ничего не нашлось" in target.reply.call_args.args[0]
+
+
+@pytest.mark.parametrize("meaning", ["<&>" * 2500, "😀" * 3000])
+async def test_urban_long_first_definition_keeps_valid_bounded_excerpt(external_handlers, meaning):
+    import xml.etree.ElementTree as element_tree
+
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    meta = SimpleNamespace(extract_text=lambda: (target, "synthetic"))
+    external_handlers["urban_dictionary"] = AsyncMock(
+        return_value=[{"header": "Synthetic <&>", "meaning": meaning, "example": "<example>", "up": 5, "down": 2}]
+    )
+    await external_handlers["process_ud"](target, meta)
+    text = target.reply.call_args.args[0]
+    assert 0 < len(text.encode("utf-16-le")) // 2 <= 4096
+    element_tree.fromstring("<root>" + text + "</root>")
+    assert "Полное определение" in text
+    assert "Synthetic &lt;&amp;&gt;" in text
+
+
+async def test_search_provider_text_is_escaped(external_handlers):
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    meta = SimpleNamespace(extract_text=lambda: (target, "a & b"))
+    external_handlers["duckduckgo"] = AsyncMock(
+        return_value={
+            "Redirect": "",
+            "Heading": "<Heading>",
+            "AbstractText": "<b>literal</b> & text",
+            "AbstractURL": "https://example.org/%3Cvalue%3E",
+            "Image": "",
+        }
+    )
+    external_handlers["send_super_reply"] = AsyncMock()
+    await external_handlers["process_duckduckgo"](target, meta)
+    text = external_handlers["send_super_reply"].call_args.kwargs["text"]
+    assert "&lt;Heading&gt;" in text
+    assert "&lt;b&gt;literal&lt;/b&gt; &amp; text" in text
+    assert "/&lt;value&gt;" in text
+
+
+async def test_search_failure_offers_encoded_search_link(external_handlers):
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    meta = SimpleNamespace(extract_text=lambda: (target, "a & b"))
+    external_handlers["duckduckgo"] = AsyncMock(side_effect=ExternalServiceError("private provider detail"))
+    await external_handlers["process_duckduckgo"](target, meta)
+    text = target.reply.call_args.args[0]
+    assert "Поиск сейчас недоступен" in text
+    assert "q=a+%26+b" in text
+    assert "private provider detail" not in text
+
+
+@pytest.mark.parametrize(
+    "command,provider,expected",
+    [
+        ("process_bg", "remove_bg", "Не удалось убрать фон"),
+        ("process_imgur", "imgur_upload", "Не удалось загрузить файл на Imgur"),
+    ],
+)
+async def test_upload_provider_failure_has_feature_message(external_handlers, command, provider, expected):
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    external_handlers["extract_image"] = AsyncMock(return_value=(target, object()))
+    external_handlers["download"] = AsyncMock(return_value=io.BytesIO(b"image"))
+    external_handlers[provider] = AsyncMock(side_effect=ExternalServiceError("private provider detail"))
+    await external_handlers[command](target)
+    text = target.reply.call_args.args[0]
+    assert expected in text
+    assert "private provider detail" not in text
+
+
+@pytest.mark.parametrize("source", ["<text> & " * 2000, "😀" * 5000])
+async def test_long_translation_preserves_all_text_in_safe_replies(monkeypatch, source):
+    import html
+
+    target, meta = translation_input(image=False)
+    monkeypatch.setattr(lingvanex, "translate", AsyncMock(return_value=source))
+    await lingvanex.process_ru(target, meta)
+    texts = [call.args[0] for call in target.reply.call_args_list]
+    assert len(texts) > 1
+    assert all(0 < len(text.encode("utf-16-le")) // 2 <= 4096 for text in texts)
+    assert "".join(html.unescape(text) for text in texts) == source
+
+
+async def test_language_list_is_escaped_and_split(monkeypatch):
+    target = SimpleNamespace(reply=AsyncMock())
+    languages = [{"code_alpha_1": str(i), "full_code": f"en_{i}", "englishName": f"Language <{i}>"} for i in range(500)]
+    monkeypatch.setattr(lingvanex, "languages_list", AsyncMock(return_value=languages))
+    await lingvanex.process_langs(target)
+    texts = [call.args[0] for call in target.reply.call_args_list]
+    assert len(texts) > 1
+    assert all(0 < len(text) <= 4096 for text in texts)
+    assert all(f"Language &lt;{i}&gt;" in "".join(texts) for i in range(500))
+    assert "Использование:" in texts[-1]
+
+
+async def test_anime_caption_fits_with_long_unicode_filenames(external_handlers):
+    import xml.etree.ElementTree as element_tree
+
+    target = SimpleNamespace(reply_media_group=AsyncMock())
+    message = SimpleNamespace(chat=object())
+    external_handlers["extract_image"] = AsyncMock(return_value=(target, object()))
+    external_handlers["download"] = AsyncMock(return_value=io.BytesIO(b"image"))
+    external_handlers["which_anime"] = AsyncMock(
+        return_value={
+            "result": [
+                {"filename": "😀<&>" * 500, "anilist": i, "similarity": 0.95, "video": f"https://example.org/{i}.mp4"} for i in range(3)
+            ]
+        }
+    )
+    await external_handlers["process_which_anime"](message)
+    media = target.reply_media_group.call_args.args[0].media
+    caption = media[0].caption
+    parsed = "".join(element_tree.fromstring("<root>" + caption + "</root>").itertext())
+    assert len(parsed.encode("utf-16-le")) // 2 <= 1024
+    assert "…" in parsed
+
+
+async def test_gpt2_prompt_is_escaped_once(external_handlers):
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    meta = SimpleNamespace(extract_text=lambda: (target, "<Prompt> &"))
+    external_handlers["porfirevich"] = AsyncMock(return_value=" <continuation>")
+    await external_handlers["process_porfirevich"](target, meta)
+    assert target.reply.call_args.args[0] == "<b>&lt;Prompt&gt; &amp;</b> &lt;continuation&gt;"
+
+
+async def test_search_excerpt_survives_legacy_sender_splitting(external_handlers):
+    import xml.etree.ElementTree as element_tree
+    from common.utils import cut_long_text
+
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    meta = SimpleNamespace(extract_text=lambda: (target, "synthetic"))
+    external_handlers["duckduckgo"] = AsyncMock(
+        return_value={
+            "Redirect": "",
+            "Heading": "Synthetic",
+            "AbstractText": "&" * 1000,
+            "AbstractURL": "https://example.org",
+            "Image": "",
+        }
+    )
+    external_handlers["send_super_reply"] = AsyncMock()
+    await external_handlers["process_duckduckgo"](target, meta)
+    text = external_handlers["send_super_reply"].call_args.kwargs["text"]
+    chunks = cut_long_text(text)
+    assert len(chunks) == 1
+    element_tree.fromstring("<root>" + chunks[0] + "</root>")
+    assert "…" in text
+
+
+async def test_gpt2_long_unicode_prompt_keeps_valid_length_and_continuation(external_handlers):
+    import xml.etree.ElementTree as element_tree
+
+    target = SimpleNamespace(chat=object(), reply=AsyncMock())
+    meta = SimpleNamespace(extract_text=lambda: (target, "😀" * 2000))
+    external_handlers["porfirevich"] = AsyncMock(return_value="synthetic " * 60)
+    await external_handlers["process_porfirevich"](target, meta)
+    text = target.reply.call_args.args[0]
+    assert len(text.encode("utf-16-le")) // 2 <= 4096
+    element_tree.fromstring("<root>" + text + "</root>")
+    assert text.endswith("synthetic " * 60)
+    assert "…" in text

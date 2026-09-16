@@ -14,6 +14,7 @@ from pydub.effects import normalize
 from throttler import Throttler
 
 from common.executor import PPExecutor
+from common.externals.exceptions import ExternalServiceError
 from common.tg.middlewares.settings import Settings
 from common.tg.utils import send_super_reply
 from common.utils import megabytes, FakeBytesIO
@@ -35,8 +36,9 @@ class _AudioBuffer(FakeBytesIO):
         return super().write(data)
 
 
-class WitAPIError(Exception):
+class WitAPIError(ExternalServiceError):
     def __init__(self, code: int, reason: str):
+        super().__init__('Не удалось распознать речь. Попробуйте ещё раз позже.')
         self.code = code
         self.reason = reason
 
@@ -58,7 +60,7 @@ class WitAPI:
             'Authorization': f'Bearer {self.token}',
             'Accept': f'application/vnd.wit.{self.api_version}+json'
         }
-        return aiohttp.ClientSession(headers=headers)
+        return aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=30))
 
     async def close(self):
         session = self.__dict__.get('session')
@@ -73,8 +75,13 @@ class WitAPI:
                     if response.status == 400:
                         if 'no-body' in text:
                             return {'text': ''}
-                    raise WitAPIError(response.status, response.reason + ' ' + text)
-                result = await response.json()
+                    raise WitAPIError(response.status, response.reason)
+                try:
+                    result = await response.json()
+                except (aiohttp.ContentTypeError, ValueError):
+                    raise WitAPIError(response.status, 'Invalid response') from None
+                if not isinstance(result, dict) or result.get('error') or ('text' in result and not isinstance(result['text'], str)):
+                    raise WitAPIError(response.status, 'Invalid response')
                 return result
 
     async def speech(self, audio: io.BytesIO, content_type: str = 'audio/mpeg3') -> str:

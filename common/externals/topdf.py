@@ -21,6 +21,18 @@ js_rand = js2py.eval_js(
 )
 
 
+async def _response_json(response) -> dict:
+    if response.status != 200:
+        raise BadRequestError()
+    try:
+        result = await response.json()
+        if not isinstance(result, dict):
+            raise TypeError
+        return result
+    except (aiohttp.ContentTypeError, TypeError, ValueError):
+        raise BadRequestError() from None
+
+
 async def convert_to_pdf(file: io.BytesIO, filename: str, content_type: str) -> Tuple[str, str, str]:
     sid = ''.join(random.choices('0123456789abcdefghiklmnopqrstuvwxyz', k=16))
     fid = js_rand()
@@ -35,30 +47,24 @@ async def convert_to_pdf(file: io.BytesIO, filename: str, content_type: str) -> 
         'referrer': 'https://topdf.com/',
     }
 
-    async with asyncio.timeout(JOB_TIMEOUT_SECONDS), aiohttp.ClientSession(headers=headers) as session:
+    async with asyncio.timeout(JOB_TIMEOUT_SECONDS), aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as session:
         url = f'https://topdf.com/upload/{sid}'
-        async with session.post(url, data=data) as response:
-            if response.status != 200:
-                raise BadRequestError()
-            result = await response.json()
+        async with session.post(url, data=data, allow_redirects=False) as response:
+            result = await _response_json(response)
 
         url = f'https://topdf.com/convert/{sid}/{fid}?rnd={random.random()}'
-        async with session.get(url, headers={'X-Requested-With': 'XMLHttpRequest'}) as response:
-            if response.status != 200:
-                raise BadRequestError()
-            result = await response.json()
+        async with session.get(url, headers={'X-Requested-With': 'XMLHttpRequest'}, allow_redirects=False) as response:
+            result = await _response_json(response)
 
         while True:
             await asyncio.sleep(1)
             url = f'https://topdf.com/status/{sid}/{fid}?rnd={random.random()}'
-            async with session.get(url, headers={'X-Requested-With': 'XMLHttpRequest'}) as response:
-                if response.status != 200:
-                    raise BadRequestError()
-                result = await response.json()
-                if result['status'] != 'processing':
+            async with session.get(url, headers={'X-Requested-With': 'XMLHttpRequest'}, allow_redirects=False) as response:
+                result = await _response_json(response)
+                if result.get('status') != 'processing':
                     break
 
-    if 'convert_result' not in result:
+    if not all(isinstance(result.get(key), str) and result[key] for key in ('convert_result', 'thumb_url')):
         raise BadRequestError()
 
     convert_name = result['convert_result']
