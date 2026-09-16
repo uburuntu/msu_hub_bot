@@ -12,6 +12,17 @@ ResultT = TypeVar("ResultT")
 EventT = TypeVar("EventT")
 
 
+async def gather_complete(*operations: Awaitable[ResultT]) -> list[ResultT]:
+    """Await every child before propagating a batch failure to its owning task."""
+    results = await asyncio.gather(*operations, return_exceptions=True)
+    completed: list[ResultT] = []
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+        completed.append(result)
+    return completed
+
+
 class AdmissionClosed(RuntimeError):
     """New background work cannot join the shutting-down application."""
 

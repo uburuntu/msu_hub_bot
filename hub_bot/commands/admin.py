@@ -1,70 +1,55 @@
-import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import List
 
-import aiogram
-from aiogram.types import ChatMember, ChatPermissions, Message
-from aiogram.utils.markdown import hcode, hlink, hpre
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import ChatMemberAdministrator, ChatMemberOwner, ChatPermissions, Message
+from aiogram.utils.markdown import hcode, hpre
 
-from app import bot, events_chat_id, db
-from db import EcosystemChat
-
-
-async def process_ban(message: Message):
-    arg = message.get_args()
-    if not arg.isdigit():
-        return
-
-    user_id = int(arg)
-    e_chats = await EcosystemChat.query(db).get_all()
-
-    coros = [bot.kick_chat_member(chat.chat_id, user_id) for chat in e_chats]
-    return await asyncio.gather(*coros)
+from common.db.edb import EdgeDB
+from common.tg.runtime import gather_complete
+from common.tg.utils import chat_link, command_arguments
+from common.tg.wrapper import BotWrapper
+from hub_bot.db import EcosystemChat
 
 
-async def process_restrict(message: Message):
-    arg = message.get_args()
-    if not arg.isdigit():
-        return
-
-    user_id = int(arg)
-    e_chats = await EcosystemChat.query(db).get_all()
-
-    coros = [bot.restrict_chat_member(chat.chat_id, user_id, ChatPermissions()) for chat in e_chats]
-    return await asyncio.gather(*coros)
+async def process_ban(message: Message, bot: BotWrapper, db: EdgeDB) -> list[bool] | None:
+    argument = command_arguments(message)
+    if not argument.isdigit():
+        return None
+    chats = await EcosystemChat.query(db).get_all()
+    return await gather_complete(*(bot.ban_chat_member(chat.chat_id, int(argument)) for chat in chats))
 
 
-async def process_unban(message: Message):
-    arg = message.get_args()
-    if not arg.isdigit():
-        return
-
-    user_id = int(arg)
-    e_chats = await EcosystemChat.query(db).get_all()
-
-    coros = [bot.unban_chat_member(chat.chat_id, user_id, only_if_banned=True) for chat in e_chats]
-    return await asyncio.gather(*coros)
+async def process_restrict(message: Message, bot: BotWrapper, db: EdgeDB) -> list[bool] | None:
+    argument = command_arguments(message)
+    if not argument.isdigit():
+        return None
+    chats = await EcosystemChat.query(db).get_all()
+    return await gather_complete(*(bot.restrict_chat_member(chat.chat_id, int(argument), ChatPermissions()) for chat in chats))
 
 
-async def process_sudo(message: Message):
-    admins: List[ChatMember] = await message.chat.get_administrators()
+async def process_unban(message: Message, bot: BotWrapper, db: EdgeDB) -> list[bool] | None:
+    argument = command_arguments(message)
+    if not argument.isdigit():
+        return None
+    chats = await EcosystemChat.query(db).get_all()
+    return await gather_complete(*(bot.unban_chat_member(chat.chat_id, int(argument), only_if_banned=True) for chat in chats))
 
-    for admin in admins:
-        if admin.user.id == (await bot.me).id:
-            if admin.can_delete_messages:
-                await message.delete()
 
-            if admin.can_promote_members:
-                break
-    else:
-        return
-
-    for admin in admins:
-        if admin.user.id == message.from_user.id:
-            return
-
-    result = await message.chat.promote(
-        user_id=message.from_user.id,
+async def process_sudo(message: Message, bot: BotWrapper, events_chat_id: int) -> bool | None:
+    if message.from_user is None:
+        return None
+    admins = await bot.get_chat_administrators(message.chat.id)
+    me = next((admin for admin in admins if admin.user.id == bot.id), None)
+    if not isinstance(me, ChatMemberAdministrator):
+        return None
+    if me.can_delete_messages:
+        await message.delete()
+    if not me.can_promote_members or any(admin.user.id == message.from_user.id for admin in admins):
+        return None
+    result = await bot.promote_chat_member(
+        message.chat.id,
+        message.from_user.id,
         can_change_info=True,
         can_delete_messages=True,
         can_invite_users=True,
@@ -72,64 +57,53 @@ async def process_sudo(message: Message):
         can_pin_messages=True,
         can_promote_members=False,
     )
-    if result:
-        event = f'🌝 ' \
-                f'{message.from_user.get_mention()} воспользовался командой {hcode("sudo")} в чате ' \
-                f'{hlink(message.chat.full_name, await message.chat.get_url())}.'
+    if result and events_chat_id:
+        event = (
+            f"🌝 {message.from_user.mention_html()} воспользовался командой {hcode('sudo')} в чате {await chat_link(message.chat, True)}."
+        )
         await bot.send_message(events_chat_id, event, disable_web_page_preview=True)
-
     return result
 
 
-async def process_revoke(message: Message):
-    admins: List[ChatMember] = await message.chat.get_administrators()
-
-    for admin in admins:
-        if admin.user.id == (await bot.me).id:
-            if admin.can_delete_messages:
-                await message.delete()
-
-            if admin.can_promote_members:
-                break
-    else:
-        return
-
-    for admin in admins:
-        if admin.user.id == message.from_user.id:
-            if admin.status == 'creator':
-                return
-            break
-    else:
-        return
-
-    result = await message.chat.promote(
-        user_id=message.from_user.id,
-    )
-    if result:
-        event = f'🌚 ' \
-                f'{message.from_user.get_mention()} воспользовался командой {hcode("revoke")} в чате ' \
-                f'{hlink(message.chat.full_name, await message.chat.get_url())}.'
+async def process_revoke(message: Message, bot: BotWrapper, events_chat_id: int) -> bool | None:
+    if message.from_user is None:
+        return None
+    admins = await bot.get_chat_administrators(message.chat.id)
+    me = next((admin for admin in admins if admin.user.id == bot.id), None)
+    if not isinstance(me, ChatMemberAdministrator):
+        return None
+    if me.can_delete_messages:
+        await message.delete()
+    if not me.can_promote_members:
+        return None
+    target = next((admin for admin in admins if admin.user.id == message.from_user.id), None)
+    if target is None or isinstance(target, ChatMemberOwner):
+        return None
+    result = await bot.promote_chat_member(message.chat.id, message.from_user.id)
+    if result and events_chat_id:
+        event = (
+            f"🌚 {message.from_user.mention_html()} воспользовался командой {hcode('revoke')} в чате {await chat_link(message.chat, True)}."
+        )
         await bot.send_message(events_chat_id, event, disable_web_page_preview=True)
-
     return result
 
 
-async def process_forwards(message: Message):
-    args = message.get_args().split()
+async def process_forwards(message: Message, bot: BotWrapper) -> Message | None:
+    args = command_arguments(message).split()
     if len(args) != 3:
-        return await message.reply(hpre('/forwards [chat_id] [from_message_id] [count]'))
+        return await message.reply(hpre("/forwards [chat_id] [from_message_id] [count]"))
     chat_id = args[0]
-    from_message_id = int(args[1])
-    count = int(args[2])
+    first, count = int(args[1]), int(args[2])
+    for message_id in range(first, first + count):
+        with suppress(TelegramBadRequest):
+            await bot.forward_message(message.chat.id, chat_id, message_id)
+    return None
 
-    for message_id in range(from_message_id, from_message_id + count):
-        with suppress(aiogram.exceptions.BadRequest):
-            await message.bot.forward_message(message.chat.id, chat_id, message_id)
 
-
-def process_forward_builder(dest_chat_id: int):
-    async def process_forward(message: Message):
-        with suppress(aiogram.exceptions.BadRequest):
+def process_forward_builder(dest_chat_id: int) -> Callable[[Message], Awaitable[Message | None]]:
+    async def process_forward(message: Message) -> Message | None:
+        with suppress(TelegramBadRequest):
             return await message.forward(dest_chat_id)
+        return None
 
     return process_forward

@@ -228,3 +228,48 @@ async def test_second_drain_cannot_wait_outside_its_own_deadline():
 async def test_invalid_deadlines_are_rejected(timeout, cancel_timeout):
     with pytest.raises(ValueError):
         await Supervisor().drain(timeout, cancel_timeout=cancel_timeout)
+
+
+async def test_batch_failure_waits_for_every_child_before_owner_finishes():
+    from common.tg.runtime import gather_complete
+
+    entered, finish = asyncio.Event(), asyncio.Event()
+    failure = ValueError("synthetic failure")
+
+    async def failed():
+        raise failure
+
+    async def other():
+        entered.set()
+        await finish.wait()
+        return True
+
+    task = asyncio.create_task(gather_complete(failed(), other()))
+    await entered.wait()
+    await asyncio.sleep(0)
+    assert not task.done()
+    finish.set()
+    with pytest.raises(ValueError) as caught:
+        await task
+    assert caught.value is failure
+
+
+async def test_cancelled_batch_waits_for_child_cleanup():
+    from common.tg.runtime import gather_complete
+
+    entered, cleanup = asyncio.Event(), asyncio.Event()
+
+    async def child():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            cleanup.set()
+
+    task = asyncio.create_task(gather_complete(child()))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cleanup.is_set()

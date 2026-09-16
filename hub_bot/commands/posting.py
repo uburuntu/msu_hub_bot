@@ -1,15 +1,15 @@
-from msu_hub_bot.settings import settings
-
-import asyncio
-
-import aiogram
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import StatesGroup, State
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.exceptions import TelegramAPIError
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import KeyboardButton, Message, MessageOriginChannel, MessageOriginChat, ReplyKeyboardMarkup
 from aiogram.utils.markdown import hbold, hcode
+from pydantic import BaseModel, Field
 
-from app import bot, db
-from db import EcosystemChat
+from common.db.edb import EdgeDB
+from common.tg.runtime import gather_complete
+from common.tg.state import UpdateStateContext, release_state_isolation
+from common.tg.wrapper import BotWrapper
+from hub_bot.db import EcosystemChat
 
 
 class MakePostStates(StatesGroup):
@@ -17,119 +17,132 @@ class MakePostStates(StatesGroup):
     waiting = State()
 
 
+class PostDraft(BaseModel):
+    post_chat_id: int
+    post_message_id: int
+    dest_chat_ids: list[int] = Field(default_factory=list)
+
+
+def _instructions(title: str, example_chat_id: int) -> str:
+    return (
+        f"{hbold(title)}\n\n"
+        "Укажите где следует разместить пост, это можно сделать тремя способами:\n"
+        f"1. Прислать юзернейм чата / канала, например: {hcode('@chat_msu')}\n"
+        f"2. Прислать id чата / канала, например {hcode(str(example_chat_id or -1001234567890))}\n"
+        "3. Если это канал, то перешлите мне сообщение из него\n\n"
+        "Чтобы выйти из процесса рассылки — /cancel."
+    )
+
+
 class MakePost:
     @classmethod
     def keyboard(cls) -> ReplyKeyboardMarkup:
-        keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, selective=True)
-        keyboard.add(KeyboardButton(text='Запустить рассылку'))
-        keyboard.add(KeyboardButton(text='Добавить целевой чат'))
-        return keyboard
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Запустить рассылку")],
+                [KeyboardButton(text="Добавить целевой чат")],
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            selective=True,
+        )
 
     @classmethod
-    async def process(cls, message: Message, state: FSMContext):
+    async def process(cls, message: Message, state: FSMContext, posting_main_chat_id: int) -> Message:
         reply_to = message.reply_to_message
-
         if not reply_to:
-            return await message.reply(f'Используйте команду реплаем на пост, который хотите разослать')
-
-        async with state.proxy() as data:
-            data['post_chat_id'] = reply_to.chat.id
-            data['post_message_id'] = reply_to.message_id
-
-        await MakePostStates.destination.set()
-        return await message.reply(f'{hbold("Создание рассылки")}\n\n'
-                                   f'Укажите где следует разместить пост, это можно сделать тремя способами:\n'
-                                   f'1. Прислать юзернейм чата / канала, например: {hcode("@chat_msu")}\n'
-                                   f'2. Прислать id чата / канала, например {hcode(str(settings.posting_main_chat_id or -1001234567890))}\n'
-                                   f'3. Если это канал, то перешлите мне сообщение из него\n\n'
-                                   f'Чтобы выйти из процесса рассылки — /cancel.')
+            return await message.reply("Используйте команду реплаем на пост, который хотите разослать")
+        draft = PostDraft(post_chat_id=reply_to.chat.id, post_message_id=reply_to.message_id)
+        await state.set_data(draft.model_dump())
+        await state.set_state(MakePostStates.destination)
+        return await message.reply(_instructions("Создание рассылки", posting_main_chat_id))
 
     @classmethod
-    async def process_waiting(cls, message: Message, state: FSMContext):
-        if message.text == 'Запустить рассылку':
-            return await cls.process_run(message, state)
-
-        if message.text == 'Добавить целевой чат':
-            await MakePostStates.destination.set()
-            return await message.reply(f'{hbold("Добавление целевого чата")}\n\n'
-                                       f'Укажите где следует разместить пост, это можно сделать тремя способами:\n'
-                                       f'1. Прислать юзернейм чата / канала, например: {hcode("@chat_msu")}\n'
-                                       f'2. Прислать id чата / канала, например {hcode(str(settings.posting_main_chat_id or -1001234567890))}\n'
-                                       f'3. Если это канал, то перешлите мне сообщение из него\n\n'
-                                       f'Чтобы выйти из процесса рассылки — /cancel.')
-
-        return await message.reply(f'Выберите одно из предложенных действий или жмите /cancel')
+    async def process_waiting(
+        cls,
+        message: Message,
+        state: FSMContext,
+        bot: BotWrapper,
+        state_context: UpdateStateContext,
+        posting_main_chat_id: int,
+    ) -> Message:
+        if message.text == "Запустить рассылку":
+            return await cls.process_run(message, state, bot, state_context)
+        if message.text == "Добавить целевой чат":
+            await state.set_state(MakePostStates.destination)
+            return await message.reply(_instructions("Добавление целевого чата", posting_main_chat_id))
+        return await message.reply("Выберите одно из предложенных действий или жмите /cancel")
 
     @classmethod
-    async def process_destination(cls, message: Message, state: FSMContext):
-        if message.forward_from_chat:
-            dest = message.forward_from_chat.id
+    async def process_destination(cls, message: Message, state: FSMContext, bot: BotWrapper) -> Message:
+        origin = message.forward_origin
+        if isinstance(origin, (MessageOriginChannel, MessageOriginChat)):
+            destination: int | str = origin.chat.id if isinstance(origin, MessageOriginChannel) else origin.sender_chat.id
+        elif message.text:
+            destination = message.text
         else:
-            dest = message.text
-
-            if not dest:
-                return await message.reply(f'Ожидаю текстовое сообщение или /cancel')
-
+            return await message.reply("Ожидаю текстовое сообщение или /cancel")
         try:
-            chat = await message.bot.get_chat(dest)
-        except aiogram.exceptions.TelegramAPIError as e:
-            print(repr(e))
-            return await message.reply(f'Что-то пошло не так: возможно у меня нет доступа к этому чату. '
-                                       f'Пришлите другой или жмите /cancel.')
-
-        async with state.proxy() as data:
-            if 'dest_chat_ids' not in data:
-                data['dest_chat_ids'] = []
-            data['dest_chat_ids'].append(chat.id)
-
-        await MakePostStates.waiting.set()
-        return await message.reply(f'Отлично, чат {hcode(chat.full_name)} добавлен в рассылку, '
-                                   f'выберите следующее действие.', reply_markup=cls.keyboard())
+            chat = await bot.get_chat(destination)
+        except TelegramAPIError:
+            return await message.reply("Что-то пошло не так: возможно у меня нет доступа к этому чату. Пришлите другой или жмите /cancel.")
+        draft = PostDraft.model_validate(await state.get_data())
+        draft.dest_chat_ids.append(chat.id)
+        await state.set_data(draft.model_dump())
+        await state.set_state(MakePostStates.waiting)
+        return await message.reply(
+            f"Отлично, чат {hcode(chat.full_name)} добавлен в рассылку, выберите следующее действие.",
+            reply_markup=cls.keyboard(),
+        )
 
     @classmethod
-    async def process_run(cls, message: Message, state: FSMContext):
-        async with state.proxy() as data:
-            post_chat_id = data['post_chat_id']
-            post_message_id = data['post_message_id']
-            dest_chat_ids = data['dest_chat_ids']
-
-        await state.finish()
-
-        for chat_id in dest_chat_ids:
+    async def process_run(
+        cls,
+        message: Message,
+        state: FSMContext,
+        bot: BotWrapper,
+        state_context: UpdateStateContext,
+    ) -> Message:
+        draft = PostDraft.model_validate(await state.get_data())
+        await state.clear()
+        # The draft is consumed before delivery; /cancel does not cancel a running broadcast.
+        release_state_isolation(state_context)
+        for chat_id in draft.dest_chat_ids:
             try:
-                await message.bot.copy_message(chat_id, post_chat_id, post_message_id)
-            except aiogram.exceptions.TelegramAPIError as e:
-                chat = await bot.get_chat(chat_id)
-                await message.answer(f'Возникла ошибка с чатом {hcode(chat.full_name)} (пропускаю его):\n\n'
-                                     f'{hcode(repr(e))}')
-
-        return await message.answer(f'Рассылка завершена!')
+                await bot.copy_message(chat_id, draft.post_chat_id, draft.post_message_id)
+            except TelegramAPIError:
+                await message.answer(f"Не удалось отправить пост в чат {hcode(str(chat_id))}. Пропускаю его и продолжаю рассылку.")
+        return await message.answer("Рассылка завершена!")
 
 
-tb_chat_id = settings.posting_tb_chat_id
+async def _destinations(db: EdgeDB, posting_tb_chat_id: int) -> list[int]:
+    chats = await EcosystemChat.query(db).get_all()
+    return [
+        chat.chat_id for chat in chats if (chat.members or 0) >= 55 and chat.section != "channel" and chat.chat_id != posting_tb_chat_id
+    ]
 
 
-async def process_post_all(message: Message):
+async def process_post_all(
+    message: Message,
+    bot: BotWrapper,
+    db: EdgeDB,
+    posting_tb_chat_id: int,
+) -> list[Message] | None:
     if not (post_message := message.reply_to_message):
-        return
-
-    e_chats = await EcosystemChat.query(db).get_all()
-    chat_ids = [chat.chat_id for chat in e_chats
-                if chat.members >= 55 and chat.section not in ('channel',) and chat.chat_id != tb_chat_id]
+        return None
+    chat_ids = await _destinations(db, posting_tb_chat_id)
+    return await gather_complete(*(bot(post_message.send_copy(chat_id, disable_notification=True)) for chat_id in chat_ids))
 
 
-    coros = [post_message.send_copy(chat_id, disable_notification=True) for chat_id in chat_ids]
-    return await asyncio.gather(*coros)
-
-
-async def process_post_forward_all(message: Message):
+async def process_post_forward_all(
+    message: Message,
+    bot: BotWrapper,
+    db: EdgeDB,
+    posting_tb_chat_id: int,
+) -> list[Message] | None:
     if not (post_message := message.reply_to_message):
-        return
-
-    e_chats = await EcosystemChat.query(db).get_all()
-    chat_ids = [chat.chat_id for chat in e_chats
-                if chat.members >= 55 and chat.section not in ('channel',) and chat.chat_id != tb_chat_id]
-
-
-    coros = [post_message.forward(chat_id, disable_notification=True) for chat_id in chat_ids]
-    return await asyncio.gather(*coros)
+        return None
+    chat_ids = await _destinations(db, posting_tb_chat_id)
+    return await gather_complete(
+        *(bot.forward_message(chat_id, post_message.chat.id, post_message.message_id, disable_notification=True) for chat_id in chat_ids)
+    )
