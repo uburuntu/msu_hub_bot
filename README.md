@@ -4,7 +4,7 @@ A friends' Swiss-army Telegram bot, born in Moscow State University chats:
 media tools, OCR, speech and song recognition, translation, code execution
 through JDoodle, games, polls, chat administration, and a few inside jokes.
 
-The runtime uses aiogram 2, EdgeDB, and Redis. Dependencies are locked for
+The runtime uses aiogram 3, Pydantic 2, EdgeDB, and Redis. Dependencies are locked for
 reproducible builds. External tools depend on their providers' availability
 and configuration; see the bot's `/help` for commands.
 
@@ -17,6 +17,8 @@ needed for media and OCR commands.
 ```sh
 uv sync --locked
 uv run ruff check .
+uv run python tools/check_types.py
+uv run mypy
 uv run pytest -q
 cp .env.example .env
 ```
@@ -42,7 +44,7 @@ paste an expanded production Compose configuration into logs or issues.
 
 ## CI and production
 
-Pull requests run locked Python checks on Linux and macOS, Ruff, tests, secret
+Pull requests run locked Python checks on Linux and macOS, Ruff, strict progressive mypy, tests, secret
 scanning, workflow validation, and a Linux amd64 container smoke test. Actions
 references and tool versions are pinned. Production credentials are confined
 to the deployment job on the `production` environment.
@@ -61,9 +63,15 @@ rollback, and moving to another VPS.
 
 ## Maintenance and licensing
 
-The launcher preserves the application's existing import layout. Ruff
-exceptions are limited to specific legacy files; runtime, deployment, and test
-code uses Ruff formatting.
+Application imports are side-effect free: `hub_bot/app.py` owns service lifetimes,
+`hub_bot/routing.py` registers ordered feature routers, and handlers receive their
+services through dependency injection. Conversation state is scoped to one user
+within a chat and forum topic. `/cancel` clears the draft; work already started
+continues. The imageboard SDK is isolated in a licensed compatibility package
+until its independent upgrade.
+
+Ruff exceptions are limited to specific files. Strict mypy coverage expands
+monotonically as modules are typed; new application modules must be included.
 
 Demotivators use Liberation Serif; animated text uses Ubuntu Mono. The debate
 dataset and font assets are bundled.

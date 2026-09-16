@@ -31,7 +31,12 @@ def message(chat_id=1, message_id=100):
 
 def message_stub(chat_id, message_id):
     return Mock(
-        spec=Message, chat=SimpleNamespace(id=chat_id), message_id=message_id, reply=AsyncMock(), edit_text=AsyncMock(), edit_caption=AsyncMock()
+        spec=Message,
+        chat=SimpleNamespace(id=chat_id),
+        message_id=message_id,
+        reply=AsyncMock(),
+        edit_text=AsyncMock(),
+        edit_caption=AsyncMock(),
     )
 
 
@@ -51,8 +56,10 @@ def query(round_, choice, user_id=5):
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch):
     game.Geoguess.rounds = {}
+
     async def send(method):
         return await method
+
     monkeypatch.setattr(game, "_send", send)
     monkeypatch.setattr(game, "random_photo", AsyncMock(return_value=PHOTO))
     monkeypatch.setattr(game, "save_scores", AsyncMock())
@@ -252,8 +259,10 @@ def test_score_storage_and_top(monkeypatch):
         zrevrange=AsyncMock(return_value=[(b"10", 3.0)]),
         hget=AsyncMock(return_value=b"Alice <name>"),
     )
+
     async def send(method):
         return await method
+
     module._send = send
     app = ModuleType("app")
     app.redis = SimpleNamespace(redis=AsyncMock(return_value=client))

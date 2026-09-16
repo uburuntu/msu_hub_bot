@@ -127,7 +127,9 @@ async def test_geoguess_finish_is_owned_by_supervisor(monkeypatch):
         {"id": "test", "chat_instance": "test", "from_user": {"id": 42, "is_bot": False, "first_name": "User"}, "message": message},
         context={"bot": bot},
     )
-    worker = asyncio.create_task(geoguess.Geoguess.process_cb(query, geoguess.GeoguessCallback(round="test", choice="finish"), None, supervisor))
+    worker = asyncio.create_task(
+        geoguess.Geoguess.process_cb(query, geoguess.GeoguessCallback(round="test", choice="finish"), None, supervisor)
+    )
     await entered.wait()
     assert supervisor.job_count == 1 and round_.closed
     release.set()

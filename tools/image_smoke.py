@@ -30,8 +30,10 @@ async def main():
     settings.edgedb_dsn = "edgedb://localhost/msu_hub"
     app = await Application.create(settings)
     try:
+
         def count(event):
             return sum(len(router.observers[event].handlers) for router in app.dispatcher.chain_tail)
+
         assert count("message") == 262
         assert count("callback_query") == 19
         assert count("edited_message") == 149

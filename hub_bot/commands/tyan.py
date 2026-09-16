@@ -44,10 +44,12 @@ class Tyan(CallbackCommandBase):
         return await target.reply(hbold('База аниме тяночек 👩🏻‍🦰👱🏻‍♀️👩🏻'), reply_markup=cls.keyboard(settings.with_nsfw))
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: TyanCallback, settings: Settings) -> Message | bool | None:
+    async def process_cb(cls, query: CallbackQuery, callback_data: TyanCallback, settings: Settings | None = None) -> Message | bool | None:
         message = query.message
         if not isinstance(message, Message):
             return await query.answer("Эта кнопка уже недоступна.")
+        if settings is None:
+            raise RuntimeError('Chat preferences middleware is required for accessible callbacks')
         type_, category = callback_data.type, callback_data.category
 
         if type_ == category:

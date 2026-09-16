@@ -1,6 +1,6 @@
 # Shared infrastructure
 
-- [applets.py](applets.py) composes service initialization, startup and shutdown; command behavior belongs in `hub_bot/`.
+- Shared infrastructure is composed by [hub_bot/app.py](../hub_bot/app.py); command behavior belongs in `hub_bot/`.
 - `db/`, `tg/` and `externals/` own persistence helpers, Telegram plumbing and provider adapters respectively.
 - `config/` re-exports [msu_hub_bot.settings](../msu_hub_bot/settings.py); keep configuration ownership there.
 - [executor.py](executor.py) aliases `PPExecutor` to `TPExecutor`: awaiting a timeout does not terminate the worker thread.

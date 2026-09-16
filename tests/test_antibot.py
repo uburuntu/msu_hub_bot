@@ -6,8 +6,14 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiogram.types import (
-    ChatMemberAdministrator, ChatMemberBanned, ChatMemberLeft, ChatMemberMember,
-    ChatMemberOwner, ChatMemberRestricted, Message, User,
+    ChatMemberAdministrator,
+    ChatMemberBanned,
+    ChatMemberLeft,
+    ChatMemberMember,
+    ChatMemberOwner,
+    ChatMemberRestricted,
+    Message,
+    User,
 )
 from pydantic import ValidationError
 
@@ -22,9 +28,12 @@ def isolated():
 
 def member(status, can_restrict=False, can_delete=False):
     classes = {
-        "creator": ChatMemberOwner, "administrator": ChatMemberAdministrator,
-        "member": ChatMemberMember, "restricted": ChatMemberRestricted,
-        "left": ChatMemberLeft, "kicked": ChatMemberBanned,
+        "creator": ChatMemberOwner,
+        "administrator": ChatMemberAdministrator,
+        "member": ChatMemberMember,
+        "restricted": ChatMemberRestricted,
+        "left": ChatMemberLeft,
+        "kicked": ChatMemberBanned,
     }
     cls = classes[status]
     fields = {key: False for key, value in cls.model_fields.items() if value.annotation is bool}
@@ -38,8 +47,14 @@ def callback(actor, target=None, action="ban", bot_permissions=True):
     responses = [actor, member("administrator", bot_permissions, bot_permissions), target or member("member")]
     bot = SimpleNamespace(id=123, get_chat_member=AsyncMock(side_effect=responses), ban_chat_member=AsyncMock())
     message = Mock(
-        spec=Message, chat=SimpleNamespace(id=-100), message_id=50, bot=bot, html_text="Review",
-        edit_text=AsyncMock(), delete=AsyncMock(), reply_to_message=None,
+        spec=Message,
+        chat=SimpleNamespace(id=-100),
+        message_id=50,
+        bot=bot,
+        html_text="Review",
+        edit_text=AsyncMock(),
+        delete=AsyncMock(),
+        reply_to_message=None,
     )
     query = SimpleNamespace(message=message, from_user=User(id=10, is_bot=False, first_name="Friend"), answer=AsyncMock())
     data = AntiBotCallback(action=action, chat_id=-100, user_id=20)

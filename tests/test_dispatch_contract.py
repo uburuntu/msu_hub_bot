@@ -12,6 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
 from common.tg.filters import MetaCommand, SlashCommand
+from common.tg.middlewares.settings import SettingsMiddleware
 from common.tg.state import ReleasableEventIsolation, SelectiveIsolationMiddleware, StateContextMiddleware, TopicFSMContextMiddleware
 from hub_bot.routing import build_router
 from hub_bot.utils.wit import Wit
@@ -117,4 +118,43 @@ async def test_plain_slash_commands_keep_case_and_caption_policy(command):
         assert await f(make_message(bot, text="/" + command.upper()), bot)
         assert not await f(make_message(bot, caption="/" + command.upper()), bot)
     finally:
+        await bot.session.close()
+
+
+async def test_inline_tyan_callback_is_acknowledged_without_chat_preferences():
+    bot = make_bot()
+    dispatcher = Dispatcher(disable_fsm=True)
+    dispatcher.update.outer_middleware(StateContextMiddleware())
+    fsm = TopicFSMContextMiddleware(MemoryStorage(), ReleasableEventIsolation())
+    dispatcher.update.outer_middleware(fsm)
+    # No chat exists: preferences must neither access the database nor be required
+    # to enter the callback's stale-message guard.
+    dispatcher.callback_query.outer_middleware(SettingsMiddleware(None))
+    failures = []
+
+    async def capture_error(event):
+        failures.append(event.exception)
+        return True
+
+    dispatcher.errors.register(capture_error)
+    dispatcher.include_router(router())
+    update = Update.model_validate(
+        {
+            "update_id": 1,
+            "callback_query": {
+                "id": "synthetic",
+                "inline_message_id": "synthetic",
+                "chat_instance": "synthetic",
+                "data": "tyan:sfw:neko",
+                "from_user": {"id": 42, "is_bot": False, "first_name": "Synthetic"},
+            },
+        }
+    )
+    try:
+        await dispatcher.feed_update(bot, update)
+        assert failures == []
+        assert [method.__api_method__ for method in bot.session.methods] == ["answerCallbackQuery"]
+        assert "недоступна" in bot.session.methods[0].text
+    finally:
+        await fsm.close()
         await bot.session.close()

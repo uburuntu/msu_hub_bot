@@ -69,9 +69,8 @@ Tracked in [issue #7](https://github.com/uburuntu/msu_hub_bot/issues/7).
 Pack replacement, reordering, title editing, and thumbnail management stay in
 Telegram's apps, which provide a better interface for these operations.
 
-These API operations can use the shared client on aiogram 2. A later aiogram 3
-migration can replace the adapter with current typed models without mixing that
-work into media conversion or command behavior.
+The shared client uses aiogram’s typed `InputSticker` and upload models; media
+conversion remains separate from Telegram delivery and conversation state.
 
 References: [Bot API sticker methods](https://core.telegram.org/bots/api#stickers)
 and [InputSticker formats and metadata](https://core.telegram.org/bots/api#inputsticker).

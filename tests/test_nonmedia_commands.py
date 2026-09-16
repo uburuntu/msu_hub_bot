@@ -99,7 +99,9 @@ async def test_callback_without_accessible_message_is_acknowledged(transport, fa
 
     bot, session = transport
     values = {
-        "id": "synthetic", "from_user": {"id": 42, "is_bot": False, "first_name": "User"}, "chat_instance": "test",
+        "id": "synthetic",
+        "from_user": {"id": 42, "is_bot": False, "first_name": "User"},
+        "chat_instance": "test",
     }
     if inaccessible:
         values["message"] = {"date": 0, "chat": {"id": -1001, "type": "supergroup"}, "message_id": 7}
