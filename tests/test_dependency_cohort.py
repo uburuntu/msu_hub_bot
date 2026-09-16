@@ -6,11 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import aiohttp
+import brotli
 import pycares
 import pytest
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.base import DefaultKeyBuilder, StorageKey
 from aiogram.fsm.storage.redis import RedisStorage
+from aiohttp.compression_utils import BrotliDecompressor
 from aiohttp_socks import ProxyConnector
 from python_socks.async_.asyncio.v2 import Proxy
 from redis.asyncio import Redis
@@ -19,6 +21,22 @@ from redis.asyncio import Redis
 @pytest.mark.parametrize("name", ["aiogram", "pydantic_settings", "aiohttp_socks", "redis.asyncio", "bs4", "dns", "common.externals.dvach"])
 def test_required_dependency_integrations_import(name):
     importlib.import_module(name)
+
+
+def test_native_brotli_decoder_supports_bounded_chunks_and_completion():
+    payload = b'{"output":"synthetic"}\n' * 16384
+    decoder = BrotliDecompressor()
+    first = decoder.decompress_sync(brotli.compress(payload), max_length=65536)
+    assert 0 < len(first) < len(payload)
+    chunks = [first]
+    # aiohttp drains buffered output with empty input while applying backpressure.
+    for _ in range(64):
+        if not decoder.data_available:
+            break
+        chunks.append(decoder.decompress_sync(b"", max_length=65536))
+    assert not decoder.data_available
+    assert b"".join(chunks) + decoder.flush() == payload
+    assert decoder.decompress_sync(b"", max_length=65536) == b""
 
 
 @pytest.mark.parametrize(
