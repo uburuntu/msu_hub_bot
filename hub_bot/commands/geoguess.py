@@ -27,7 +27,9 @@ _Result = TypeVar("_Result")
 
 
 async def _send(method: TelegramMethod[_Result]) -> _Result:
-    return await bot_for(method)(method, request_timeout=SEND_TIMEOUT)
+    # Include middleware waits and retries in the operation's deadline.
+    async with asyncio.timeout(SEND_TIMEOUT):
+        return await bot_for(method)(method, request_timeout=SEND_TIMEOUT)
 
 
 @dataclass
@@ -119,34 +121,35 @@ class Geoguess:
     @classmethod
     async def process_cb(cls, query: CallbackQuery, callback_data: GeoguessCallback, redis: RedisStorage, supervisor: Supervisor) -> bool | None:
         if not isinstance(query.message, Message):
-            return await query.answer('Этот раунд недоступен.')
+            return await _send(query.answer('Этот раунд недоступен.'))
         message = query.message
         round_ = cls.rounds.get(message.chat.id)
         if (round_ is None or round_.message is None or round_.closed
                 or round_.token != callback_data.round
                 or round_.message.message_id != query.message.message_id):
-            return await query.answer('Раунд завершён. Начни новый: /geoguess', show_alert=True)
+            return await _send(query.answer('Раунд завершён. Начни новый: /geoguess', show_alert=True))
         if callback_data.choice == 'finish':
             # Close before any await, so two clicks cannot award points twice.
             round_.closed = True
             round_.task = supervisor.create_job(lambda: cls.finish(message.chat.id, round_, redis))
-            await query.answer('Задание завершено!')
-            await round_.task
+            await _send(query.answer('Задание завершено!'))
+            # The supervisor owns completion even if the callback worker stops.
+            await asyncio.shield(round_.task)
             return None
         user_id = query.from_user.id
         if user_id in round_.votes:
-            return await query.answer('Твой ответ уже принят. Изменить его нельзя.', show_alert=True)
+            return await _send(query.answer('Твой ответ уже принят. Изменить его нельзя.', show_alert=True))
         try:
             choice = int(callback_data.choice)
             if not 0 <= choice < len(round_.options):
                 raise ValueError
         except (KeyError, ValueError):
-            return await query.answer('Неизвестный вариант.')
+            return await _send(query.answer('Неизвестный вариант.'))
         # No await between checking and recording: simultaneous clicks cannot vote twice.
         round_.votes[user_id] = (choice, query.from_user.full_name[:40])
         round_.usernames[user_id] = query.from_user.username
         try:
-            await query.answer('Ответ принят! Результат — в конце раунда.')
+            await _send(query.answer('Ответ принят! Результат — в конце раунда.'))
         finally:
             await cls.update_board(round_)
         return None
