@@ -4,6 +4,7 @@ import pytest
 from aiogram import Bot, types
 
 from common.tg.filters import MetaCommand, SimpleExtractor
+from telegram_helpers import make_message
 
 
 @pytest.fixture
@@ -17,7 +18,7 @@ def bot(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("text", ["", " ", "\n\t", "/unrelated text", "/tr@another_bot text"])
 async def test_nonmatching_input_is_ignored(bot, text):
-    assert await MetaCommand("tr").check(types.Message(text=text)) is False
+    assert await MetaCommand("tr")(make_message(bot, text=text), bot=bot) is False
 
 
 @pytest.mark.asyncio
@@ -30,19 +31,19 @@ async def test_nonmatching_input_is_ignored(bot, text):
     ],
 )
 async def test_only_matched_command_token_is_removed(bot, text, expected):
-    result = await MetaCommand("tr").check(types.Message(text=text))
+    result = await MetaCommand("tr")(make_message(bot, text=text), bot=bot)
     assert result["meta"].text == expected
 
 
 @pytest.mark.asyncio
 async def test_caption_arguments_and_reply_selection(bot):
-    reply = types.Message(text="Use the reply")
-    message = types.Message(caption="/tr en ru keep /tr", reply_to_message=reply)
-    result = await MetaCommand("tr", args=2).check(message)
+    reply = make_message(bot, text="Use the reply")
+    message = make_message(bot, caption="/tr en ru keep /tr", reply_to_message=reply)
+    result = await MetaCommand("tr", args=2)(message, bot=bot)
     assert result["meta"].arguments == ["en", "ru"]
     assert result["meta"].extract_text() == (message, "keep /tr")
-    message = types.Message(text="/tr en ru", reply_to_message=reply)
-    result = await MetaCommand("tr", args=2).check(message)
+    message = make_message(bot, text="/tr en ru", reply_to_message=reply)
+    result = await MetaCommand("tr", args=2)(message, bot=bot)
     assert result["meta"].extract_text() == (reply, "Use the reply")
 
 

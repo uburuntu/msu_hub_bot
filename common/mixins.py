@@ -1,10 +1,11 @@
 import logging
+from typing import Any
 
 from common.logger import LoggerBuilder
 
 
 class LoggerMixin:
-    def __init_subclass__(cls, logger_name=None, **kwargs):
+    def __init_subclass__(cls, logger_name: str | None = None, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         cls._logger_name = logger_name or cls.__name__
 

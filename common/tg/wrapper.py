@@ -1,141 +1,146 @@
-import asyncio
-from typing import Iterable, List
+"""Bot presentation helpers and method-aware Telegram request policy."""
 
-import aiogram
-import cachetools
+import asyncio
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Any
+
 from aiogram import Bot
-from aiogram.types import MediaGroup, Chat, ChatType
-from aiogram.utils.markdown import hide_link
-from throttler import ThrottlerSimultaneous
+from aiogram.client.session.base import BaseSession
+from aiogram.client.session.middlewares.base import BaseRequestMiddleware, NextRequestMiddlewareType
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter, TelegramServerError
+from aiogram.methods import Response, TelegramMethod
+from aiogram.methods.base import TelegramType
+from aiogram.types import InputMediaPhoto, InputMediaVideo, Message, ReplyParameters
 
 from common.constants import TELEGRAM_CAPTION_MAX_LEN
-from common.logger import LoggerBuilder
-from common.utils import cut_long_text, retry_async
+from common.tg.delivery import AlbumMedia, send_album
+from common.tg.utils import send_super_message
 from msu_hub_bot.health import mark_poll_success
 
 
-class RetryAtThisError(Exception):
-    pass
+class TelegramRequestPolicy(BaseRequestMiddleware):
+    """Retry rejected requests and reads; never replay an ambiguous mutation."""
+
+    def __init__(self, attempts: int = 3, max_retry_after: int = 30) -> None:
+        self.attempts = attempts
+        self.max_retry_after = max_retry_after
+
+    async def __call__(
+        self,
+        make_request: NextRequestMiddlewareType[TelegramType],
+        bot: Bot,
+        method: TelegramMethod[TelegramType],
+    ) -> Response[TelegramType]:
+        reply = getattr(method, "reply_parameters", None)
+        allow_missing = getattr(method, "allow_sending_without_reply", None)
+        if isinstance(reply, ReplyParameters) and allow_missing is not None:
+            # Telegram ignores deprecated top-level fallback when nested reply
+            # parameters exist. Keep an explicit per-call override effective.
+            method = method.model_copy(update={"reply_parameters": reply.model_copy(update={"allow_sending_without_reply": allow_missing})})
+        is_read = method.__api_method__.startswith("get")
+        for attempt in range(self.attempts):
+            try:
+                result = await make_request(bot, method)
+            except TelegramRetryAfter as error:
+                if attempt + 1 == self.attempts or error.retry_after > self.max_retry_after:
+                    raise
+                await asyncio.sleep(max(error.retry_after, 0))
+            except (TelegramNetworkError, TelegramServerError, TimeoutError):
+                if not is_read or attempt + 1 == self.attempts:
+                    raise
+                await asyncio.sleep(2**attempt)
+            except TelegramBadRequest as error:
+                chat_id = getattr(method, "chat_id", None)
+                if (
+                    error.message.removeprefix("Bad Request: ").casefold() == "have no rights to send a message"
+                    and isinstance(chat_id, int)
+                    and chat_id < 0
+                ):
+                    await bot.leave_chat(chat_id)
+                raise
+            else:
+                if method.__api_method__ == "getUpdates":
+                    mark_poll_success()
+                return result
+        raise AssertionError("A request attempt must return or raise")
+
+
+@dataclass(slots=True)
+class _ChatSend:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
 
 
 class BotWrapper(Bot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, token: str, *, session: BaseSession, **kwargs: Any) -> None:
+        super().__init__(token, session=session, **kwargs)
+        self.session.middleware(TelegramRequestPolicy())
+        self._chat_sends: dict[int, _ChatSend] = {}
 
-        self.logger = LoggerBuilder.get_logger('SafeBot')
-        self.throttlers = cachetools.LRUCache(maxsize=128)
-
-    @retry_async(RetryAtThisError, retries_count=2, sleep_for=1.)
-    async def request(self, *args, **kwargs):
-        ex = aiogram.exceptions
-
+    @asynccontextmanager
+    async def serial_send(self, chat_id: int) -> AsyncIterator[None]:
+        entry = self._chat_sends.setdefault(chat_id, _ChatSend())
+        entry.users += 1
         try:
-            result = await super().request(*args, **kwargs)
-            method = args[0] if args else kwargs.get('method')
-            if method == 'getUpdates':
-                mark_poll_success()
-            return result
+            async with entry.lock:
+                yield
+        finally:
+            entry.users -= 1
+            if not entry.users:
+                del self._chat_sends[chat_id]
 
-        except ex.RetryAfter as e:
-            await asyncio.sleep(e.timeout)
-            return await self.request(*args, **kwargs)
+    async def send_super_message(
+        self,
+        text: str,
+        web_preview: str | None,
+        photos_urls: Iterable[str] | None,
+        video_urls: Iterable[str] | None,
+        chat_id: int,
+        reply_to: int | None = None,
+        *,
+        message_thread_id: int | None = None,
+    ) -> Message | None:
+        async with self.serial_send(chat_id):
+            return await send_super_message(
+                self,
+                text,
+                web_preview,
+                photos_urls,
+                video_urls,
+                chat_id,
+                reply_to,
+                message_thread_id=message_thread_id,
+            )
 
-        except ex.BadRequest as e:
-            error = e.args[0]
-            chat = Chat.get_current()
-            if error == 'Have no rights to send a message':
-                if chat.type != ChatType.PRIVATE:
-                    await chat.leave()
-            if error in ('Not enough rights to send stickers to the chat',
-                         'Chat_send_gifs_forbidden',
-                         'Not enough rights to send polls to the chat'):
-                pass
-            raise
-
-        except ex.TelegramAPIError as e:
-            error = e.args[0]
-            if error == 'Gateway Timeout':
-                raise RetryAtThisError()
-            raise
-
-        except asyncio.exceptions.TimeoutError:
-            raise RetryAtThisError()
-
-    def throttler(self, chat_id: int) -> ThrottlerSimultaneous:
-        if chat_id in self.throttlers:
-            throttler = self.throttlers[chat_id]
-        else:
-            throttler = ThrottlerSimultaneous(count=1)
-            self.throttlers[chat_id] = throttler
-        return throttler
-
-    @retry_async(aiogram.exceptions.TelegramAPIError, retries_count=5, sleep_for=1.)
-    async def safe_send_message(self, *args, **kwargs):
-        async with self.throttler(kwargs['chat_id']):
-            return await self.send_message(*args, **kwargs)
-
-    @retry_async(aiogram.exceptions.TelegramAPIError, retries_count=10, sleep_for=1.5)
-    async def safe_send_media_group(self, *args, **kwargs):
-        async with self.throttler(kwargs['chat_id']):
-            return await self.send_media_group(*args, **kwargs)
-
-    async def send_super_message(self,
-                                 text: str, web_preview: str, photos_urls: Iterable[str], video_urls: Iterable[str],
-                                 chat_id: int, reply_to: int = None):
-        message = None
-
-        if text:
-            texts = cut_long_text(text)
-
-            for t in texts[:-1]:
-                message = await self.safe_send_message(chat_id=chat_id, text=t, disable_web_page_preview=True, reply_to_message_id=reply_to)
-                reply_to = message.message_id
-
-            t = (hide_link(web_preview) + texts[-1]) if web_preview else texts[-1]
-            not_prev = not web_preview
-
-            message = await self.safe_send_message(chat_id=chat_id, text=t, disable_web_page_preview=not_prev, reply_to_message_id=reply_to)
-            reply_to = message.message_id
-
-        if photos_urls:
-            media = MediaGroup()
-            for url in photos_urls:
-                media.attach_photo(url)
-            await self.safe_send_media_group(chat_id=chat_id, media=media, reply_to_message_id=reply_to)
-
-        if video_urls:
-            media = MediaGroup()
-            for url in video_urls:
-                media.attach_video(url)
-            await self.safe_send_media_group(chat_id=chat_id, media=media, reply_to_message_id=reply_to)
-
-        return message
-
-    async def send_super_message_prefer_album(self,
-                                              text: str, web_preview: str, photos_urls: List[str], video_urls: List[str],
-                                              chat_id: int, reply_to: int = None):
-        message = None
-
-        if len(text) > TELEGRAM_CAPTION_MAX_LEN or len(photos_urls) + len(video_urls) == 0:
+    async def send_super_message_prefer_album(
+        self,
+        text: str,
+        web_preview: str | None,
+        photos_urls: list[str],
+        video_urls: list[str],
+        chat_id: int,
+        reply_to: int | None = None,
+        *,
+        message_thread_id: int | None = None,
+    ) -> Message | None:
+        if len(text) > TELEGRAM_CAPTION_MAX_LEN or not (photos_urls or video_urls):
             if len(photos_urls) + len(video_urls) == 1:
-                web_preview = photos_urls[0] if photos_urls else video_urls[0]
+                web_preview = (photos_urls or video_urls)[0]
                 photos_urls, video_urls = [], []
-            return await self.send_super_message(text, web_preview, photos_urls, video_urls, chat_id, reply_to)
-
-        if photos_urls:
-            media = MediaGroup()
-            for url in photos_urls:
-                media.attach_photo(url, caption=text)
-                text = None
-            messages = await self.safe_send_media_group(chat_id=chat_id, media=media, reply_to_message_id=reply_to)
-            message = messages[0]
-
-        if video_urls:
-            media = MediaGroup()
-            for url in video_urls:
-                media.attach_video(url, caption=text)
-                text = None
-            messages = await self.safe_send_media_group(chat_id=chat_id, media=media, reply_to_message_id=reply_to)
-            message = messages[0]
-
-        return message
+            return await self.send_super_message(
+                text, web_preview, photos_urls, video_urls, chat_id, reply_to, message_thread_id=message_thread_id
+            )
+        reply = ReplyParameters(message_id=reply_to) if reply_to is not None else None
+        result = None
+        async with self.serial_send(chat_id):
+            for urls, media_class in ((photos_urls, InputMediaPhoto), (video_urls, InputMediaVideo)):
+                media: list[AlbumMedia] = []
+                for url in urls:
+                    media.append(media_class(media=url, caption=text or None))
+                    text = ""
+                if media:
+                    messages = await send_album(self, chat_id, media, reply_parameters=reply, message_thread_id=message_thread_id)
+                    result = messages[0]
+        return result

@@ -1,12 +1,13 @@
 import asyncio
 from datetime import timedelta
+from typing import Any
 
 import cachetools
 from aiogram.types import Message, CallbackQuery, Chat
 
 
 class CallbackCommandBase:
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         cls.cache = cachetools.LRUCache(maxsize=512)
         cls.locks = cachetools.LRUCache(maxsize=512)
 
