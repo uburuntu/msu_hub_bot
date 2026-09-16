@@ -95,6 +95,8 @@ class Supervisor:
             task.exception()  # The error boundary owns reporting, not the event loop.
 
     def _job_done(self, task: asyncio.Task[Any]) -> None:
+        if task not in self._jobs:
+            return
         self._jobs.discard(task)
         if not task.cancelled() and task.exception() is not None:
             self._failed_jobs += 1
@@ -146,6 +148,9 @@ class Supervisor:
                     if not task.done():
                         task.cancel()
                 raise
+            for task in tuple(self._jobs):
+                if task.done():
+                    self._job_done(task)
             if self.update_count or self.job_count:
                 raise DrainTimeout(self.update_count, self.job_count)
             return DrainResult(len(cancelled_updates), len(cancelled_jobs), self.failed_jobs)

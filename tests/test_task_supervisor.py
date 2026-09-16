@@ -198,6 +198,20 @@ async def test_owned_task_cannot_deadlock_by_draining_itself():
     await supervisor.drain(1)
 
 
+async def test_drain_accounts_for_finished_job_before_its_callback_runs():
+    supervisor = Supervisor()
+
+    async def fail():
+        raise ValueError("synthetic failure")
+
+    supervisor.create_job(fail)
+    await asyncio.sleep(0)
+    result = await supervisor.drain(0)
+    assert result.failed_jobs == 1
+    await asyncio.sleep(0)
+    assert supervisor.failed_jobs == 1
+
+
 async def test_second_drain_cannot_wait_outside_its_own_deadline():
     supervisor = Supervisor()
     finish = asyncio.Event()
