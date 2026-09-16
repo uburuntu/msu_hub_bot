@@ -1,4 +1,6 @@
 import datetime
+import math
+import time
 from contextlib import suppress
 from copy import copy
 from textwrap import dedent
@@ -68,6 +70,8 @@ class Weather(CallbackCommandBase):
     Moscow = (55.7522, 37.6155)
 
     replies = cachetools.LRUCache(maxsize=128)
+    location_refreshes = cachetools.LRUCache(maxsize=128)
+    location_refresh_interval = 15 * 60
     callback_data = CallbackData('weather', 'lat', 'lon')
 
     @classmethod
@@ -124,21 +128,39 @@ class Weather(CallbackCommandBase):
 
         text = parse_response(*response)
         result = await message.reply(text, reply_markup=cls.keyboard(coordinates), disable_web_page_preview=True)
-        cls.replies[cls.cache_key(message)] = result.message_id
+        key = cls.cache_key(message)
+        cls.replies[key] = result.message_id
+        cls.location_refreshes[key] = time.monotonic()
         return result
 
     @classmethod
     async def process_location_edited(cls, message: Message):
-        location, location_name = message.location, None
-        if venue := message.venue:
-            location, location_name = venue.location, venue.address
-
-        coordinates = (location.latitude, location.longitude)
-        response = await weather(coordinates, location_name)
-        if response is None:
+        key = cls.cache_key(message)
+        if key not in cls.replies:
             return True
 
-        if message_id := cls.replies.get(cls.cache_key(message)):
+        async with cls.lock(key):
+            message_id = cls.replies.get(key)
+            if message_id is None:
+                return True
+            now = time.monotonic()
+            if now - cls.location_refreshes.get(key, float('-inf')) < cls.location_refresh_interval:
+                return True
+
+            location, location_name = message.location, None
+            if venue := message.venue:
+                location, location_name = venue.location, venue.address
+            if location is None:
+                return True
+
+            # Intermediate edits are coalesced into the next eligible received position.
+            # No timer or location data survives the bounded reply cache/restart.
+            cls.location_refreshes[key] = now
+            coordinates = (location.latitude, location.longitude)
+            response = await weather(coordinates, location_name)
+            if response is None:
+                return True
+
             with suppress(aiogram.exceptions.BadRequest):
                 text = parse_response(*response)
                 return await message.bot.edit_message_text(text, message.chat.id, message_id,
@@ -146,7 +168,14 @@ class Weather(CallbackCommandBase):
 
     @classmethod
     async def process_cb(cls, query: CallbackQuery, callback_data: dict):
-        coordinates = float(callback_data['lat']), float(callback_data['lon'])
+        try:
+            coordinates = float(callback_data['lat']), float(callback_data['lon'])
+            if not all(math.isfinite(value) for value in coordinates) or not (-90 <= coordinates[0] <= 90 and -180 <= coordinates[1] <= 180):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            return await query.answer('Не удалось прочитать координаты. Пришлите геопозицию заново.', show_alert=True)
+        if query.message is None:
+            return await query.answer('Сообщение с погодой больше недоступно.', show_alert=True)
 
         await query.answer(text='✅', cache_time=2 * 60)
 

@@ -1,88 +1,48 @@
 import io
-import os
+import logging
 import subprocess
-from tempfile import NamedTemporaryFile
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import List, Optional
 
 from common.utils import FakeBytesIO
 
 
+FFMPEG_TIMEOUT = 120
+logger = logging.getLogger(__name__)
+
+
 def ffmpeg(file: io.BytesIO, parameters: List[str] = None, out_suffix: str = None) -> Optional[io.BytesIO]:
-    parameters = parameters or []
-
-    f_input = NamedTemporaryFile(delete=False)
-    f_output = NamedTemporaryFile(suffix=out_suffix, delete=False)
-
-    f_input.write(file.read())
-
-    command = [
-        'ffmpeg',
-        '-y',
-        '-i', f_input.name,
-        *parameters,
-        f_output.name,
-    ]
-
-    with open(os.devnull, 'rb') as devnull:
-        p = subprocess.Popen(command, stdin=devnull, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    p_out, p_err = p.communicate()
-
-    if p.returncode != 0:
-        print(p_out.decode(errors='ignore'))
-        print(p_err.decode(errors='ignore'))
-        return None
-
-    f_output.seek(0)
-    result = FakeBytesIO(f_output.read())
-    result.name = f_output.name
-    result.seek(0)
-
-    f_input.close()
-    f_output.close()
-    os.unlink(f_input.name)
-    os.unlink(f_output.name)
-
-    return result
+    return ffmpeg2(file, parameters2=parameters, out_suffix=out_suffix)
 
 
 def ffmpeg2(file: io.BytesIO, parameters1: List[str] = None, parameters2: List[str] = None, out_suffix: str = None) -> Optional[io.BytesIO]:
-    parameters1 = parameters1 or []
-    parameters2 = parameters2 or []
-
-    f_input = NamedTemporaryFile(delete=False)
-    f_output = NamedTemporaryFile(suffix=out_suffix, delete=False)
-
-    f_input.write(file.read())
-
-    command = [
-        'ffmpeg',
-        '-y',
-        *parameters1,
-        '-i', f_input.name,
-        *parameters2,
-        f_output.name,
-    ]
-
-    with open(os.devnull, 'rb') as devnull:
-        p = subprocess.Popen(command, stdin=devnull, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    p_out, p_err = p.communicate()
-
-    if p.returncode != 0:
-        print(p_out.decode(errors='ignore'))
-        print(p_err.decode(errors='ignore'))
-        return None
-
-    f_output.seek(0)
-    result = FakeBytesIO(f_output.read())
-    result.name = f_output.name
-    result.seek(0)
-
-    f_input.close()
-    f_output.close()
-    os.unlink(f_input.name)
-    os.unlink(f_output.name)
-
-    return result
+    """Convert in a disposable workspace, killing native work at its own deadline."""
+    with TemporaryDirectory(prefix='hub-media-') as directory:
+        source = Path(directory) / 'source'
+        output = Path(directory) / ('result' + (out_suffix or ''))
+        # Close the writer before FFmpeg opens even a very small input.
+        source.write_bytes(file.read())
+        command = [
+            'ffmpeg', '-nostdin', '-v', 'error', '-y',
+            *(parameters1 or []), '-i', str(source), *(parameters2 or []), str(output),
+        ]
+        try:
+            subprocess.run(
+                command, check=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=FFMPEG_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            # subprocess.run kills and reaps the child before returning the error.
+            logger.warning('FFmpeg conversion exceeded its deadline')
+            return None
+        except (OSError, subprocess.CalledProcessError):
+            # Native diagnostics can include input text/URLs; do not print them.
+            logger.warning('FFmpeg conversion failed')
+            return None
+        result = FakeBytesIO(output.read_bytes())
+        result.name = output.name
+        return result
 
 
 def to_ogg_opus(file: io.BytesIO) -> io.BytesIO:

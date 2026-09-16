@@ -6,11 +6,12 @@ from typing import Optional
 import lottie
 from aiogram.types import Message
 from aiogram.utils.markdown import hcode
+from fontTools.pens.boundsPen import BoundsPen
 from lottie import NVector, objects
 from lottie.objects import easing
 from lottie.utils import script
 from lottie.utils.color import Color
-from lottie.utils.font import FontStyle, RawFontRenderer
+from lottie.utils.font import Font, GlyphMetrics, RawFontRenderer
 
 from app import cpu_executor
 from common import json
@@ -18,8 +19,24 @@ from common.tg.filters import MetaInfo
 from common.utils import bytes_io
 from resources import ubuntu_mono_font
 
-ubuntu_mono = FontStyle(str(ubuntu_mono_font), 25.5)
-ubuntu_mono_renderer = RawFontRenderer(str(ubuntu_mono_font))
+class OutlineFont(Font):
+    """Read glyph bounds through fontTools' public outline/pen protocol."""
+
+    def glyph(self, glyph_name):
+        glyph = self.glyphset[glyph_name]
+        bounds = BoundsPen(self.glyphset)
+        glyph.draw(bounds)
+        xmin, _, xmax, _ = bounds.bounds or (glyph.lsb, 0, glyph.width, 0)
+        return GlyphMetrics(glyph, glyph.lsb, glyph.width, xmin, xmax)
+
+
+class OutlineFontRenderer(RawFontRenderer):
+    def __init__(self, filename):
+        super().__init__(filename)
+        self._font = OutlineFont(self.font.wrapped)
+
+
+ubuntu_mono_renderer = OutlineFontRenderer(str(ubuntu_mono_font))
 
 
 def shift(s: str, k: int) -> str:
@@ -36,9 +53,10 @@ class MatrixSticker:
         self.last_frame = 180
         self.animation = objects.Animation(self.last_frame)
         self.offset_time = 5
-        self.font = ubuntu_mono
-        self.ex = self.font.ex + 3
-        self.line_height = self.font.line_height
+        self.font = ubuntu_mono_renderer
+        self.font_size = 25.5
+        self.ex = self.font.ex(self.font_size) + 3
+        self.line_height = self.font.line_height(self.font_size)
         self.loop_time = 120
         self.n_lines = 0
         self.n_rows = 6 * 4
@@ -47,7 +65,7 @@ class MatrixSticker:
         self.columns = [shift(text, k)[:self.n_rows] for k in range(min(6, len(text)))]
 
     def character(self, ch, parent, time, y_off):
-        group = parent.add_shape(self.font.render(ch).shapes[0])
+        group = parent.add_shape(self.font.render(ch, self.font_size).shapes[0])
         group.transform.position.value.y += self.line_height * y_off
         fill = group.add_shape(objects.Fill())
         color = Color(0, 1, 0)
