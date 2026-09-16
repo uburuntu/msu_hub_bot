@@ -22,10 +22,7 @@ def external_handlers():
     path = Path(__file__).resolve().parents[1] / "hub_bot/commands/externals.py"
     tree = ast.parse(path.read_text())
     # Isolate application globals and unrelated native conversion, not handler logic.
-    tree.body = [
-        node for node in tree.body
-        if not isinstance(node, ast.ImportFrom) or node.module not in {"app", "utils.ffmpeg"}
-    ]
+    tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or node.module not in {"app", "utils.ffmpeg"}]
     namespace = {}
     exec(compile(tree, str(path), "exec"), namespace)
 
@@ -47,10 +44,14 @@ async def test_anime_results_use_valid_delivery(external_handlers, count):
     message = SimpleNamespace(chat=object())
     external_handlers["extract_image"] = AsyncMock(return_value=(target, object()))
     external_handlers["download"] = AsyncMock(return_value=io.BytesIO(b"image"))
-    external_handlers["which_anime"] = AsyncMock(return_value={"result": [
-        {"filename": f"Episode <{i}>", "anilist": i, "similarity": 0.95, "video": f"https://example.org/{i}.mp4"}
-        for i in range(count)
-    ]})
+    external_handlers["which_anime"] = AsyncMock(
+        return_value={
+            "result": [
+                {"filename": f"Episode <{i}>", "anilist": i, "similarity": 0.95, "video": f"https://example.org/{i}.mp4"}
+                for i in range(count)
+            ]
+        }
+    )
 
     await external_handlers["process_which_anime"](message)
 
@@ -204,15 +205,21 @@ def pending_provider(request, monkeypatch):
                 return Response({})
             self.polling.set()
             if request.param == "fakeyou":
-                return Response({"state": {
-                    "status": "complete_success" if self.complete else "pending",
-                    "maybe_public_bucket_wav_audio_path": "/synthetic.wav",
-                }})
-            return Response({
-                "status": "ready" if self.complete else "processing",
-                "convert_result": "synthetic.pdf",
-                "thumb_url": "synthetic.png",
-            })
+                return Response(
+                    {
+                        "state": {
+                            "status": "complete_success" if self.complete else "pending",
+                            "maybe_public_bucket_wav_audio_path": "/synthetic.wav",
+                        }
+                    }
+                )
+            return Response(
+                {
+                    "status": "ready" if self.complete else "processing",
+                    "convert_result": "synthetic.pdf",
+                    "thumb_url": "synthetic.png",
+                }
+            )
 
     session = Session()
     monkeypatch.setattr(module.aiohttp, "ClientSession", lambda **kwargs: session)
