@@ -1,26 +1,16 @@
 import gzip
-import importlib.util
 import json
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from hub_bot import resources
+from hub_bot.commands import animate
 
 
 @pytest.fixture
-def animation(monkeypatch):
-    monkeypatch.setitem(sys.modules, "app", SimpleNamespace(cpu_executor=SimpleNamespace(run=AsyncMock())))
-    monkeypatch.setitem(sys.modules, "resources", resources)
-    spec = importlib.util.spec_from_file_location(
-        "text_animation_test", Path(__file__).resolve().parents[1] / "hub_bot/commands/animate.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def animation():
+    return animate
 
 
 def paths(value):
@@ -56,10 +46,10 @@ async def test_animate_handler_delivers_generated_sticker(animation):
     async def execute(func, *args):
         return func(*args), False
 
-    animation.cpu_executor.run.side_effect = execute
+    worker = SimpleNamespace(run=AsyncMock(side_effect=execute))
     target = SimpleNamespace(reply_sticker=AsyncMock())
     message = SimpleNamespace(reply=AsyncMock())
     meta = SimpleNamespace(extract_text=lambda: (target, "Привет"))
-    await animation.process_animate(message, meta)
+    await animation.process_animate(message, meta, worker)
     target.reply_sticker.assert_awaited_once()
     message.reply.assert_not_awaited()

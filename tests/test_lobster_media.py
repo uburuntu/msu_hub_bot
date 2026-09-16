@@ -1,9 +1,7 @@
-import importlib.util
 import io
 import json
 import shutil
 import subprocess
-import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,26 +10,24 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image
 
-from hub_bot import resources
-from hub_bot.utils import ffmpeg
+from hub_bot.commands import lobster as lobster_module
 from hub_bot.utils import caption_layout
 
 
 @pytest.fixture
 def lobster(monkeypatch):
-    monkeypatch.setitem(sys.modules, "app", SimpleNamespace(cpu_executor=SimpleNamespace(run=AsyncMock())))
-    monkeypatch.setitem(sys.modules, "resources", resources)
-    monkeypatch.setitem(sys.modules, "utils.ffmpeg", ffmpeg)
-    spec = importlib.util.spec_from_file_location("lobster_media_test", Path(__file__).resolve().parents[1] / "hub_bot/commands/lobster.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
     @asynccontextmanager
     async def no_chat_action(*args):
         yield
 
-    module.ChatActioner = no_chat_action
-    return module
+    monkeypatch.setattr(lobster_module, "ChatActioner", no_chat_action)
+    monkeypatch.setattr(lobster_module, "download", AsyncMock(return_value=io.BytesIO(b"video")))
+    return lobster_module
+
+
+@pytest.fixture
+def worker():
+    return SimpleNamespace(run=AsyncMock())
 
 
 def photo_input(argument):
@@ -58,45 +54,46 @@ async def test_small_positive_crop_keeps_one_source_pixel(lobster, handler, expe
     message, meta, target = photo_input("0.00001")
     await getattr(lobster, handler)(message, meta)
     result = target.reply_photo.call_args.args[0]
-    assert Image.open(result).size == expected
+    assert Image.open(io.BytesIO(result.data)).size == expected
     message.reply.assert_not_awaited()
 
 
 @pytest.mark.parametrize("timeout", [False, True])
-async def test_video_conversion_failure_replies_without_sending_none(lobster, timeout):
-    lobster.cpu_executor.run.return_value = None, timeout
+async def test_video_conversion_failure_replies_without_sending_none(lobster, worker, timeout):
+    worker.run.return_value = None, timeout
     target = SimpleNamespace(reply_video=AsyncMock())
     video = SimpleNamespace(file_size=100, width=32, download=AsyncMock(return_value=io.BytesIO(b"invalid video")))
     meta = SimpleNamespace(extract_video=AsyncMock(return_value=(target, video)), extract_text=lambda: (target, "Привет"))
     message = SimpleNamespace(reply=AsyncMock(), chat=SimpleNamespace(type="private"))
-    await lobster.process_demotivator_video(message, meta)
+    await lobster.process_demotivator_video(message, meta, worker)
     message.reply.assert_awaited_once()
     target.reply_video.assert_not_awaited()
 
 
 @pytest.mark.parametrize("metadata", [{}, {"file_size": None}])
-async def test_video_without_size_metadata_reaches_conversion(lobster, metadata):
+async def test_video_without_size_metadata_reaches_conversion(lobster, worker, metadata):
     result = io.BytesIO(b"converted video")
-    lobster.cpu_executor.run.return_value = result, False
+    worker.run.return_value = result, False
     target = SimpleNamespace(reply_video=AsyncMock())
     video = SimpleNamespace(**metadata, width=None, download=AsyncMock(return_value=io.BytesIO(b"video")))
     meta = SimpleNamespace(extract_video=AsyncMock(return_value=(target, video)), extract_text=lambda: (target, "Привет"))
     message = SimpleNamespace(reply=AsyncMock(), chat=SimpleNamespace(type="private"))
-    await lobster.process_demotivator_video(message, meta)
-    target.reply_video.assert_awaited_once_with(result, reply_markup=None)
+    await lobster.process_demotivator_video(message, meta, worker)
+    assert target.reply_video.call_args.args[0].data == result.getvalue()
+    assert target.reply_video.call_args.kwargs == {"reply_markup": None}
     message.reply.assert_not_awaited()
 
 
 @pytest.mark.parametrize("handler", ["process_lobster", "process_demotivator"])
-async def test_caption_length_error_is_a_reply_not_a_truncated_image(lobster, handler):
+async def test_caption_length_error_is_a_reply_not_a_truncated_image(lobster, worker, handler):
     async def execute(func, *args):
         return func(*args), False
 
-    lobster.cpu_executor.run.side_effect = execute
+    worker.run.side_effect = execute
     message, meta, target = photo_input("0.5")
     meta.extract_text = lambda: (target, "x" * 1025)
     meta.extract_video = AsyncMock(return_value=(target, None))
-    await getattr(lobster, handler)(message, meta)
+    await getattr(lobster, handler)(message, meta, worker)
     assert "1024" in message.reply.call_args.args[0]
     target.reply_photo.assert_not_awaited()
 

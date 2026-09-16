@@ -13,16 +13,18 @@ from lottie.utils import script
 from lottie.utils.color import Color
 from lottie.utils.font import Font, GlyphMetrics, RawFontRenderer
 
-from app import cpu_executor
+from common.executor import TPExecutor
 from common import json
 from common.tg.filters import MetaInfo
+from common.tg.files import input_file
 from common.utils import bytes_io
-from resources import ubuntu_mono_font
+from hub_bot.resources import ubuntu_mono_font
 
-class OutlineFont(Font):
+
+class OutlineFont(Font):  # type: ignore[misc]  # The upstream font adapter has no typing metadata.
     """Read glyph bounds through fontTools' public outline/pen protocol."""
 
-    def glyph(self, glyph_name):
+    def glyph(self, glyph_name: str) -> GlyphMetrics:
         glyph = self.glyphset[glyph_name]
         bounds = BoundsPen(self.glyphset)
         glyph.draw(bounds)
@@ -30,8 +32,8 @@ class OutlineFont(Font):
         return GlyphMetrics(glyph, glyph.lsb, glyph.width, xmin, xmax)
 
 
-class OutlineFontRenderer(RawFontRenderer):
-    def __init__(self, filename):
+class OutlineFontRenderer(RawFontRenderer):  # type: ignore[misc]  # The upstream renderer has no typing metadata.
+    def __init__(self, filename: str) -> None:
         super().__init__(filename)
         self._font = OutlineFont(self.font.wrapped)
 
@@ -49,7 +51,7 @@ class MatrixSticker:
     Author: https://gitlab.com/mattia.basaglia/sticker_scripts
     """
 
-    def __init__(self, text: str):
+    def __init__(self, text: str) -> None:
         self.last_frame = 180
         self.animation = objects.Animation(self.last_frame)
         self.offset_time = 5
@@ -61,10 +63,10 @@ class MatrixSticker:
         self.n_lines = 0
         self.n_rows = 6 * 4
 
-        text += ' '
-        self.columns = [shift(text, k)[:self.n_rows] for k in range(min(6, len(text)))]
+        text += " "
+        self.columns = [shift(text, k)[: self.n_rows] for k in range(min(6, len(text)))]
 
-    def character(self, ch, parent, time, y_off):
+    def character(self, ch: str, parent: objects.ShapeLayer, time: int, y_off: int) -> None:
         group = parent.add_shape(self.font.render(ch, self.font_size).shapes[0])
         group.transform.position.value.y += self.line_height * y_off
         fill = group.add_shape(objects.Fill())
@@ -78,7 +80,7 @@ class MatrixSticker:
         fill.opacity.add_keyframe(time + 80, 0)
         group.add_shape(objects.Stroke(Color(0, 0, 0), 2)).opacity = fill.opacity
 
-    def add_rain(self, layer_id, x, y, parent):
+    def add_rain(self, layer_id: str, x: int, y: int, parent: objects.Precomp) -> None:
         layer = objects.PreCompLayer(layer_id)
         parent.add_layer(layer)
         layer.transform.position.value.x = self.ex * x
@@ -87,8 +89,8 @@ class MatrixSticker:
 
         layer.start_time = start_time
 
-    def make_line(self, s: str):
-        layer_id = f'line{self.n_lines}'
+    def make_line(self, s: str) -> None:
+        layer_id = f"line{self.n_lines}"
         self.n_lines += 1
         pc = objects.Precomp(layer_id, self.animation)
         self.animation.assets.append(pc)
@@ -97,23 +99,23 @@ class MatrixSticker:
         for i, c in enumerate(s):
             self.character(c, layer, i * self.offset_time, i + 1)
 
-    def add_line(self, layer_id, x, off):
+    def add_line(self, layer_id: str, x: int, off: float) -> None:
         pcl = objects.PreCompLayer(layer_id)
         self.animation.add_layer(pcl)
         pcl.transform.position.value.x = x * self.ex
         start_time = self.last_frame * off
         pcl.start_time = start_time
 
-    def generate(self):
+    def generate(self) -> objects.Animation:
         for column in self.columns:
             line = column
             while len(line) < self.n_rows:
                 line += column
-            self.make_line(line[:self.n_rows])
+            self.make_line(line[: self.n_rows])
 
         n_cols = 32
         n_offsets = 16
-        off = []
+        off: list[int] = []
         for i in range(0, n_cols, n_offsets):
             t_off = list(range(n_offsets))
             random.shuffle(t_off)
@@ -123,7 +125,7 @@ class MatrixSticker:
 
         for i in range(n_cols):
             norm_off = off[i] / n_offsets
-            line_id = f'line{random.randint(0, self.n_lines - 1)}'
+            line_id = f"line{random.randint(0, self.n_lines - 1)}"
             self.add_line(line_id, i, norm_off)
             self.add_line(line_id, i, norm_off - 1)
 
@@ -139,10 +141,10 @@ color_pairs = (
 
 
 class AnimateTextSticker:
-    def __init__(self, text: str):
-        self.text = text[:11] + ' '
+    def __init__(self, text: str) -> None:
+        self.text = text[:11] + " "
 
-    def generate(self):
+    def generate(self) -> objects.Animation | None:
         x_scale = -1
         last_frame = 40
         animation = lottie.objects.Animation(last_frame)
@@ -191,31 +193,33 @@ class AnimateTextSticker:
         return animation
 
 
-def animate(builder, text: str) -> Optional[BytesIO]:
+def animate(builder: type[AnimateTextSticker] | type[MatrixSticker], text: str) -> Optional[BytesIO]:
     res = builder(text).generate()
     if not res:
         return None
 
-    sticker = bytes(json.dumps(res.to_dict()), encoding='utf-8')
-    return bytes_io(gzip.compress(sticker), 'sticker.tgs')
+    sticker = bytes(json.dumps(res.to_dict()), encoding="utf-8")
+    return bytes_io(gzip.compress(sticker), "sticker.tgs")
 
 
-async def reply_sticker(message: Message, meta: MetaInfo, builder):
+async def reply_sticker(
+    message: Message, meta: MetaInfo, builder: type[AnimateTextSticker] | type[MatrixSticker], cpu_executor: TPExecutor
+) -> Message | bool:
     target, text = meta.extract_text()
     if not text:
         return True
 
     sticker, timeouted = await cpu_executor.run(animate, builder, text)
     if timeouted:
-        return await message.reply(hcode('🤷🏻‍♂️ Timeout'))
+        return await message.reply(hcode("🤷🏻‍♂️ Timeout"))
     if not sticker:
         return True
-    return await target.reply_sticker(sticker)
+    return await target.reply_sticker(input_file(sticker, "sticker.tgs"))
 
 
-async def process_animate(message: Message, meta: MetaInfo):
-    return await reply_sticker(message, meta, AnimateTextSticker)
+async def process_animate(message: Message, meta: MetaInfo, cpu_executor: TPExecutor) -> Message | bool:
+    return await reply_sticker(message, meta, AnimateTextSticker, cpu_executor)
 
 
-async def process_matrix(message: Message, meta: MetaInfo):
-    return await reply_sticker(message, meta, MatrixSticker)
+async def process_matrix(message: Message, meta: MetaInfo, cpu_executor: TPExecutor) -> Message | bool:
+    return await reply_sticker(message, meta, MatrixSticker, cpu_executor)

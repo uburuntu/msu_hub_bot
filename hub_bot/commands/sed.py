@@ -1,15 +1,18 @@
+from aiogram import html
 from contextlib import suppress
 
-from aiogram.types import ChatActions, Message
-from aiogram.utils.exceptions import BadRequest
-from aiogram.utils.markdown import hcode, quote_html
+from aiogram import Bot
+from aiogram.enums import ChatAction
+from aiogram.types import Message
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.utils.markdown import hcode
 
-from app import cpu_executor
+from common.executor import TPExecutor
 from common.constants import TELEGRAM_MESSAGE_MAX_LEN
-from utils.sed import SedTimeout, sed_calc
+from hub_bot.utils.sed import SedTimeout, sed_calc
 
 
-async def process_sed(message: Message):
+async def process_sed(message: Message, bot: Bot, cpu_executor: TPExecutor) -> Message | bool | None:
     if not (reply_to := message.reply_to_message):
         return True
 
@@ -17,17 +20,20 @@ async def process_sed(message: Message):
     if not text:
         return True
 
-    await message.chat.do(ChatActions.TYPING)
-    commands = message.text.split('\n')
+    await bot.send_chat_action(
+        chat_id=message.chat.id, action=ChatAction.TYPING, message_thread_id=message.message_thread_id if message.is_topic_message else None
+    )
+    commands = (message.text or message.caption or "").split("\n")
 
     try:
         text, timeouted = await cpu_executor.run(sed_calc, text, commands)
     except SedTimeout:
         text, timeouted = None, True
     if timeouted:
-        return await message.reply(hcode('Timeout 🤗'))
+        return await message.reply(hcode("Timeout 🤗"))
     if not text:
         return True
 
-    with suppress(BadRequest):
-        return await reply_to.reply(quote_html(text[:TELEGRAM_MESSAGE_MAX_LEN]))
+    with suppress(TelegramBadRequest):
+        return await reply_to.reply(html.quote(text[:TELEGRAM_MESSAGE_MAX_LEN]))
+    return None

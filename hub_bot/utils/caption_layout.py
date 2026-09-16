@@ -3,6 +3,8 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from io import BytesIO
+from typing import cast
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
@@ -26,14 +28,14 @@ class Caption:
     stroke: int = 0
 
     @property
-    def width(self):
+    def width(self) -> int:
         return self.bounds[2] - self.bounds[0]
 
     @property
-    def height(self):
+    def height(self) -> int:
         return self.bounds[3] - self.bounds[1]
 
-    def draw(self, image, left, top):
+    def draw(self, image: Image.Image, left: int, top: int) -> None:
         ImageDraw.Draw(image).multiline_text(
             (left - self.bounds[0], top - self.bounds[1]),
             self.text,
@@ -46,8 +48,8 @@ class Caption:
         )
 
 
-def _wrap(text, font, width, stroke):
-    def fits(value):
+def _wrap(text: str, font: ImageFont.FreeTypeFont, width: int, stroke: int) -> str:
+    def fits(value: str) -> bool:
         left, _, right, _ = font.getbbox(value, stroke_width=stroke)
         return right - left <= width
 
@@ -78,7 +80,7 @@ def _wrap(text, font, width, stroke):
     return "\n".join(lines)
 
 
-def fit_caption(text: str, font_path: Path, width: int, height: int, preferred_size: int, stroke=0) -> Caption:
+def fit_caption(text: str, font_path: Path, width: int, height: int, preferred_size: int, stroke: int = 0) -> Caption:
     text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
     if len(text) > MAX_CAPTION_LENGTH:
         raise CaptionLayoutError(f"В подписи максимум {MAX_CAPTION_LENGTH} символа. Сократи текст.")
@@ -88,7 +90,7 @@ def fit_caption(text: str, font_path: Path, width: int, height: int, preferred_s
         raise CaptionLayoutError("Добавь текст для подписи.")
     draw = ImageDraw.Draw(Image.new("L", (1, 1)))
 
-    def layout(size):
+    def layout(size: int) -> Caption:
         font = ImageFont.truetype(str(font_path), size)
         spacing = max(3, size // 5)
         wrapped = _wrap(text, font, width, stroke)
@@ -116,19 +118,19 @@ def fit_caption(text: str, font_path: Path, width: int, height: int, preferred_s
     return best
 
 
-def base_image(file, preserve_alpha=False):
+def base_image(file: BytesIO, preserve_alpha: bool = False) -> Image.Image:
     with Image.open(file) as original:
         image = ImageOps.exif_transpose(original).convert("RGBA")
     image.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE), Image.Resampling.LANCZOS)
     if max(image.size) < 320:
         scale = 320 / max(image.size)
-        image = image.resize(tuple(max(1, round(side * scale)) for side in image.size), Image.Resampling.LANCZOS)
+        image = image.resize(cast(tuple[int, int], tuple(max(1, round(side * scale)) for side in image.size)), Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA" if preserve_alpha else "RGB", (max(320, image.width), max(240, image.height)), "black")
     canvas.paste(image, ((canvas.width - image.width) // 2, (canvas.height - image.height) // 2), None if preserve_alpha else image)
     return canvas
 
 
-def lobster_image(file, text):
+def lobster_image(file: BytesIO, text: str) -> Image.Image:
     image = base_image(file, preserve_alpha=True)
     margin = max(12, round(image.width * 0.04))
     bottom = max(12, round(image.height * 0.08))
@@ -144,11 +146,11 @@ def lobster_image(file, text):
     return image
 
 
-def frame_border(width):
+def frame_border(width: int) -> int:
     return max(round((width + 12) * 0.07), 20)
 
 
-def demotivator_caption(width, text, border):
+def demotivator_caption(width: int, text: str, border: int) -> Image.Image:
     caption = fit_caption(
         text,
         times_new_roman_font,
@@ -163,7 +165,7 @@ def demotivator_caption(width, text, border):
     return panel
 
 
-def demotivator_image(file, text):
+def demotivator_image(file: BytesIO, text: str) -> Image.Image:
     source = base_image(file)
     border = frame_border(source.width)
     framed = ImageOps.expand(ImageOps.expand(source, border=3, fill="black"), border=3, fill="white")
