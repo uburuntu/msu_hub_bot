@@ -17,6 +17,7 @@ from utils.sticker_sets import StickerSetClient, UploadedSticker
 
 sticker_set_name_template = 'with_love_for_{id}_by_msu_hub_bot'
 sticker_set_name_template_a = 'with_love_for_{id}a_by_msu_hub_bot'
+trimmed_sticker_notice = '✂️ Для стикера использованы только первые 7 секунд.'
 
 
 class StickerStates(StatesGroup):
@@ -171,16 +172,15 @@ class Stickers:
             prepared, timeouted = await cpu_executor.run(prepare_media, file.getvalue(), kind)
             if timeouted:
                 raise StickerMediaError('Обработка заняла слишком много времени. Стикер не добавлен.')
-            kind, payload = prepared
             emojis = list(dict.fromkeys(e['emoji'] for e in emoji.emoji_list(meta.extract_text()[1])))[:5] or ['✨']
             client = StickerSetClient(message.bot)
-            uploaded = await client.upload(message.from_user.id, payload, kind, emojis)
+            uploaded = await client.upload(message.from_user.id, prepared.payload, prepared.kind, emojis)
             if not await client.save(name, message.from_user.id, uploaded):
                 await state.update_data(mixed_sticker=uploaded.input_sticker(), sticker_upload=uploaded.metadata(), sticker_set_name=name,
-                                        sticker_chat_id=message.chat.id, sticker_user_id=message.from_user.id)
+                                        sticker_chat_id=message.chat.id, sticker_user_id=message.from_user.id, sticker_trimmed=prepared.trimmed)
                 await state.set_state(StickerStates.sticker_set_name.state)
                 return await message.reply('🎈 Пришлите название стикерпака (1–64 символа) или /cancel.')
-            return await cls.reply_saved_sticker(message, client, name, uploaded)
+            return await cls.reply_saved_sticker(message, client, name, uploaded, trimmed=prepared.trimmed)
         except StickerMediaError as exc:
             return await message.reply(str(exc))
         except aiogram.exceptions.InvalidPeerID:
@@ -190,7 +190,7 @@ class Stickers:
             raise
 
     @classmethod
-    async def reply_saved_sticker(cls, message, client, name, uploaded, show_link=False):
+    async def reply_saved_sticker(cls, message, client, name, uploaded, show_link=False, trimmed=False):
         # Saving and preview delivery are separate: never add again after a lookup/send failure.
         file_id = await client.resolve(name, uploaded)
         link = hlink('стикерпак', f'https://t.me/addstickers/{name}')
@@ -200,10 +200,18 @@ class Stickers:
             except aiogram.exceptions.BadRequest:
                 pass
             else:
+                notices = []
                 if show_link:
-                    await message.reply(f'✨ Стикерпак чата: {link}')
+                    notices.append(f'✨ Стикерпак чата: {link}')
+                if trimmed:
+                    notices.append(trimmed_sticker_notice)
+                if notices:
+                    await message.reply('\n'.join(notices))
                 return reply
-        return await message.reply(f'✨ Стикер добавлен в {link}. Откройте его в паке.')
+        text = f'✨ Стикер добавлен в {link}. Откройте его в паке.'
+        if trimmed:
+            text += '\n' + trimmed_sticker_notice
+        return await message.reply(text)
 
     @classmethod
     async def finish_chat_set(cls, message, state, data):
@@ -226,7 +234,7 @@ class Stickers:
             await message.reply('Не удалось сохранить стикер. Попробуйте ещё раз или /cancel. Подробнее в /error_stickers.')
             raise
         await state.finish()
-        return await cls.reply_saved_sticker(message, client, name, uploaded, show_link=True)
+        return await cls.reply_saved_sticker(message, client, name, uploaded, show_link=True, trimmed=data.get('sticker_trimmed', False))
 
     @classmethod
     async def make_sticker_png(cls, message: Message, meta: MetaInfo, state: FSMContext, sticker_set_name: str):

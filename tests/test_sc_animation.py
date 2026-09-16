@@ -55,14 +55,14 @@ def handlers():
     return ns
 
 
-@pytest.mark.parametrize("duration,accelerated", [(0.1, False), (3, False), (3.001, True), (6, True), (7, True)])
+@pytest.mark.parametrize("duration,accelerated", [(0.1, False), (3, False), (3.001, True), (6, True), (7, True), (7.001, True), (60, True)])
 def test_speed_boundaries(duration, accelerated):
     speed = media.speed_factor(duration)
     assert (speed > 1) == accelerated
-    assert duration / speed <= 3
+    assert min(duration, 7) / speed <= 3
 
 
-@pytest.mark.parametrize("duration", [0, -1, 7.001, 8, float("nan"), float("inf")])
+@pytest.mark.parametrize("duration", [0, -1, float("nan"), float("inf")])
 def test_invalid_duration(duration):
     with pytest.raises(media.StickerMediaError):
         media.speed_factor(duration)
@@ -72,16 +72,22 @@ def test_invalid_duration(duration):
 def test_static_dimensions(size):
     source = io.BytesIO()
     Image.new("RGBA", size, (255, 0, 0, 128)).save(source, format="PNG")
-    kind, data = media.prepare_media(source.getvalue(), "static")
-    image = Image.open(io.BytesIO(data))
-    assert kind == "static"
+    prepared = media.prepare_media(source.getvalue(), "static")
+    image = Image.open(io.BytesIO(prepared.payload))
+    assert prepared.kind == "static" and not prepared.trimmed
     assert max(image.size) == 512 and min(image.size) > 0
     assert image.getpixel((0, 0))[3] == 128
 
 
 def test_tgs_roundtrip():
     data = gzip.compress(json.dumps(dict(ip=0, op=180, fr=60)).encode())
-    assert media.prepare_media(data, "animated") == ("animated", data)
+    assert media.prepare_media(data, "animated") == media.PreparedMedia("animated", data)
+
+
+def test_invalid_long_tgs_is_not_retimed_as_video():
+    data = gzip.compress(json.dumps(dict(ip=0, op=480, fr=60)).encode())
+    with pytest.raises(media.StickerMediaError, match="3 секунд"):
+        media.prepare_tgs(data)
 
 
 @pytest.mark.parametrize("data", [b"invalid", gzip.compress(b"{}")])
@@ -90,19 +96,20 @@ def test_bad_tgs(data):
         media.prepare_tgs(data)
 
 
-def test_reject_before_ffmpeg(monkeypatch):
-    monkeypatch.setattr(media, "_probe", lambda path: ({}, {"codec_name": "h264"}, 7.001))
+def test_invalid_duration_rejected_before_encoding(monkeypatch):
+    monkeypatch.setattr(media, "_probe", lambda path: ({}, {"codec_name": "h264"}, 0))
     calls = []
     monkeypatch.setattr(media, "_run", lambda command: calls.append(command))
-    with pytest.raises(media.StickerMediaError, match="7 секунд"):
+    with pytest.raises(media.StickerMediaError, match="длительность"):
         media.prepare_video(b"video")
     assert not calls
 
 
-def test_video_conversion_command(monkeypatch):
+@pytest.mark.parametrize("duration", [6, 7, 7.001, 60])
+def test_video_conversion_command(monkeypatch, duration):
     probes = iter(
         [
-            ({}, {"codec_name": "h264"}, 6),
+            ({}, {"codec_name": "h264"}, duration),
             ({"streams": [{"codec_type": "video"}]}, {"codec_name": "vp9", "width": 512, "height": 288, "avg_frame_rate": "30/1"}, 2.967),
         ]
     )
@@ -114,10 +121,15 @@ def test_video_conversion_command(monkeypatch):
         Path(command[-1]).write_bytes(b"encoded")
 
     monkeypatch.setattr(media, "_run", run)
-    assert media.prepare_video(b"source") == b"encoded"
+    assert media.prepare_video(b"source") == media.PreparedMedia("video", b"encoded", trimmed=duration > 7)
     command = commands[0]
-    assert "-an" in command and "-t" not in command
-    assert "setpts=(PTS-STARTPTS)/2.033898" in command[command.index("-vf") + 1]
+    assert "-an" in command
+    if duration > 7:
+        assert command.index("-t") < command.index("-i")
+        assert command[command.index("-t") + 1] == "7"
+    else:
+        assert "-t" not in command
+    assert f"setpts=(PTS-STARTPTS)/{media.speed_factor(duration):.12f}" in command[command.index("-vf") + 1]
 
 
 def message(admin=True, kind="static"):
@@ -199,16 +211,16 @@ def test_delete_without_set(handlers):
     m.reply_to_message.sticker.delete_from_set.assert_not_awaited()
 
 
-def test_long_video_never_uploaded(handlers):
+def test_invalid_media_never_uploaded(handlers):
     m = message(kind="video")
 
     def reject(*args):
-        raise media.StickerMediaError("Анимация длиннее 7 секунд.")
+        raise media.StickerMediaError("Не удалось определить длительность анимации.")
 
     handlers["prepare_media"] = reject
     asyncio.run(handlers["process_sticker_chat"](m, None, None))
     m.bot.request.assert_not_awaited()
-    assert "7 секунд" in m.reply.call_args.args[0]
+    assert "длительность" in m.reply.call_args.args[0]
 
 
 def test_non_admin_cannot_add(handlers):
@@ -220,7 +232,7 @@ def test_non_admin_cannot_add(handlers):
 @pytest.mark.parametrize("kind", ["static", "animated", "video"])
 def test_upload_and_add_modern_api(handlers, kind):
     m = message(kind=kind)
-    handlers["prepare_media"] = lambda data, kind: (kind, b"prepared")
+    handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared")
     meta = SimpleNamespace(extract_text=lambda: (m, "😎"))
     asyncio.run(handlers["process_sticker_chat"](m, meta, None))
     handlers["cpu_executor"].run.assert_awaited_once_with(handlers["prepare_media"], b"data", kind)
@@ -228,6 +240,16 @@ def test_upload_and_add_modern_api(handlers, kind):
     assert [c.args[0] for c in calls] == ["uploadStickerFile", "addStickerToSet"]
     assert json.loads(calls[1].args[1]["sticker"]) == dict(sticker="uploaded", format=kind, emoji_list=["😎"])
     m.reply_sticker.assert_awaited_once_with("registered-sticker")
+    m.reply.assert_not_awaited()
+
+
+def test_trimmed_video_notice_after_success(handlers):
+    m = message(kind="video")
+    handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared", trimmed=True)
+    meta = SimpleNamespace(extract_text=lambda: (m, ""))
+    asyncio.run(handlers["process_sticker_chat"](m, meta, None))
+    m.reply_sticker.assert_awaited_once_with("registered-sticker")
+    m.reply.assert_awaited_once_with(handlers["trimmed_sticker_notice"])
 
 
 def test_executor_timeout_never_uploads(handlers):
@@ -238,20 +260,22 @@ def test_executor_timeout_never_uploads(handlers):
     assert "слишком много времени" in m.reply.call_args.args[0]
 
 
-def test_new_pack_preserves_prepared_video(handlers):
+@pytest.mark.parametrize("trimmed", [False, True])
+def test_new_pack_preserves_prepared_video(handlers, trimmed):
     m = message(kind="video")
     m.bot.get_sticker_set.side_effect = [
         handlers["aiogram"].exceptions.InvalidStickersSet("invalid"),
         handlers["aiogram"].exceptions.InvalidStickersSet("invalid"),
         registered_pack("video"),
     ]
-    handlers["prepare_media"] = lambda data, kind: (kind, b"prepared")
+    handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared", trimmed=trimmed)
     state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock(), finish=AsyncMock())
     meta = SimpleNamespace(extract_text=lambda: (m, ""))
     asyncio.run(handlers["process_sticker_chat"](m, meta, state))
     data = state.update_data.call_args.kwargs
     assert data["mixed_sticker"]["format"] == "video"
     assert data["sticker_upload"]["file_unique_id"] == "unique-uploaded"
+    assert data["sticker_trimmed"] is trimmed
     m.text = "Наш пак"
     m.caption = None
     m.bot.request.reset_mock()
@@ -261,6 +285,7 @@ def test_new_pack_preserves_prepared_video(handlers):
     assert json.loads(call.args[1]["stickers"])[0]["sticker"] == "uploaded"
     state.finish.assert_awaited_once()
     m.reply_sticker.assert_awaited_once_with("registered-sticker")
+    assert (handlers["trimmed_sticker_notice"] in m.reply.call_args.args[0]) is trimmed
 
 
 def test_creation_error_keeps_pending_state(handlers):
@@ -318,7 +343,7 @@ def test_creation_reuses_concurrently_created_pack(handlers):
 @pytest.mark.parametrize("failure", ["lookup", "send"])
 def test_saved_sticker_preview_failure_never_repeats_the_addition(handlers, failure):
     m = message(kind="video")
-    handlers["prepare_media"] = lambda data, kind: (kind, b"prepared")
+    handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared", trimmed=True)
     meta = SimpleNamespace(extract_text=lambda: (m, ""))
     if failure == "lookup":
         m.bot.get_sticker_set.side_effect = [registered_pack("video"), handlers["aiogram"].exceptions.NetworkError("unavailable")]
@@ -328,6 +353,7 @@ def test_saved_sticker_preview_failure_never_repeats_the_addition(handlers, fail
     assert [call.args[0] for call in m.bot.request.await_args_list] == ["uploadStickerFile", "addStickerToSet"]
     assert "Стикер добавлен" in m.reply.call_args.args[0]
     assert "https://t.me/addstickers/" in m.reply.call_args.args[0]
+    assert m.reply.call_args.args[0].count(handlers["trimmed_sticker_notice"]) == 1
     if failure == "lookup":
         m.reply_sticker.assert_not_awaited()
     else:
@@ -348,12 +374,14 @@ def test_successful_creation_clears_pending_state_even_when_preview_fails(handle
         sticker_user_id=1,
         sticker_set_name="pack",
         mixed_sticker={"sticker": "uploaded", "format": "video", "emoji_list": ["✨"]},
+        sticker_trimmed=True,
     )
     asyncio.run(handlers["Stickers"].finish_chat_set(m, state, data))
     state.finish.assert_awaited_once()
     assert [call.args[0] for call in m.bot.request.await_args_list] == ["createNewStickerSet"]
     m.reply_sticker.assert_not_awaited()
     assert "Стикер добавлен" in m.reply.call_args.args[0]
+    assert handlers["trimmed_sticker_notice"] in m.reply.call_args.args[0]
 
 
 def test_oversized_video_is_encoded_once(monkeypatch):
@@ -475,8 +503,59 @@ def test_video_preserves_display_aspect_ratio(tmp_path, sar, expected_size):
         timeout=30,
     )
     output = tmp_path / "sticker.webm"
-    output.write_bytes(media.prepare_video(source.read_bytes()))
+    output.write_bytes(media.prepare_video(source.read_bytes()).payload)
     _, stream, duration = media._probe(output)
     assert (stream["width"], stream["height"]) == expected_size
     assert stream["sample_aspect_ratio"] == "1:1"
     assert 0 < duration <= 3
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg and FFprobe required")
+@pytest.mark.parametrize("suffix,kind", [("mp4", "video"), ("gif", "video"), ("gif", "static")])
+def test_real_long_clip_uses_only_first_seven_seconds(tmp_path, suffix, kind):
+    source = tmp_path / f"timeline.{suffix}"
+    # Red: 0-3s; green: 3-7s; blue: 7-9s. Blue must never reach the sticker.
+    frames = b"".join(bytes(color) * (64 * 64 * count) for color, count in [((255, 0, 0), 30), ((0, 255, 0), 40), ((0, 0, 255), 20)])
+    codec = ["-c:v", "libx264", "-pix_fmt", "yuv420p"] if suffix == "mp4" else ["-loop", "0"]
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s:v",
+            "64x64",
+            "-r",
+            "10",
+            "-i",
+            "pipe:0",
+            *codec,
+            "-y",
+            str(source),
+        ],
+        input=frames,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    prepared = media.prepare_media(source.read_bytes(), kind)
+    assert prepared.kind == "video" and prepared.trimmed
+    output = tmp_path / "sticker.webm"
+    output.write_bytes(prepared.payload)
+    _, stream, duration = media._probe(output)
+    assert 2.8 < duration <= 3
+    assert max(stream["width"], stream["height"]) == 512
+    assert len(prepared.payload) <= media.MAX_VIDEO_BYTES
+    decoded = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(output), "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    ).stdout
+    colors = [tuple(decoded[index : index + 3]) for index in range(0, len(decoded), 3)]
+    assert any(red > max(green, blue) + 40 for red, green, blue in colors)
+    assert any(green > max(red, blue) + 40 for red, green, blue in colors)
+    assert not any(blue > max(red, green) + 40 for red, green, blue in colors)

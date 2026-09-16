@@ -28,7 +28,7 @@ would require reviewing callable serialization and worker termination first.
 | Broken pool | At most one retry per call, within that deadline. |
 | Waiting callers | No separate count limit in this executor; callers waiting for a slot retain their arguments in memory. |
 | Sticker input | 20 MiB, checked against Telegram metadata before download and actual bytes before decoding. Downloads occur before worker admission. |
-| Video input duration | Positive and at most seven seconds. Inputs over three seconds are accelerated to approximately 2.95 seconds; longer inputs are rejected. |
+| Video input duration | Positive. Use at most the first seven seconds, then accelerate excerpts over three seconds to approximately 2.95 seconds. Longer sources produce a trimming notice after saving. |
 | Video output | Silent VP9 WEBM, at most three seconds, at most 30 FPS, longest side 512 pixels, at most 256 KiB. One encoding attempt. |
 | Static output | Longest side 512 pixels, lossless WEBP, at most 512 KiB. One encoding attempt. |
 | Existing TGS | At most 64 KiB compressed, at most 2 MiB expanded JSON, positive duration at most three seconds. Arbitrary TGS documents are rejected. |
@@ -66,5 +66,5 @@ would require reviewing callable serialization and worker termination first.
 - Sticker tests cover media limits, rejected inputs, timeout handling, admin
   checks, upload/create/add/delete requests, and state retention after failure.
 - Native FFmpeg probes exercised short, three-second, accelerated six/seven-second,
-  over-limit video, GIF playback, existing WEBM, and non-square pixel aspect ratios.
+  trimmed longer video/GIF, existing WEBM, and non-square pixel aspect ratios.
 - Live Telegram API acceptance and host-level resource exhaustion were not tested.

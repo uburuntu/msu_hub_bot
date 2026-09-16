@@ -5,6 +5,7 @@ import io
 import json
 import math
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -12,17 +13,24 @@ from PIL import Image, ImageOps
 
 MAX_INPUT_BYTES = 20 * 1024 * 1024
 MAX_VIDEO_BYTES = 256 * 1024
+MAX_SOURCE_SECONDS = 7
 
 
 class StickerMediaError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class PreparedMedia:
+    kind: str
+    payload: bytes
+    trimmed: bool = False
+
+
 def speed_factor(duration):
     if not math.isfinite(duration) or duration <= 0:
         raise StickerMediaError("Не удалось определить длительность анимации.")
-    if duration > 7:
-        raise StickerMediaError("Анимация длиннее 7 секунд. Стикер не добавлен.")
+    duration = min(duration, MAX_SOURCE_SECONDS)
     # Leave a frame-sized margin for container timestamp rounding.
     return duration / 2.95 if duration > 3 else 1.0
 
@@ -66,7 +74,7 @@ def _probe(path):
 
 
 def prepare_video(data):
-    """Convert one playback of GIF/video to a silent VP9 sticker, never truncate."""
+    """Convert up to the first seven source seconds to a silent VP9 sticker."""
     if len(data) > MAX_INPUT_BYTES:
         raise StickerMediaError("Файл больше 20 МБ. Стикер не добавлен.")
     with TemporaryDirectory(prefix="hub-sticker-") as directory:
@@ -75,6 +83,9 @@ def prepare_video(data):
         source.write_bytes(data)
         _, video, duration = _probe(source)
         factor = speed_factor(duration)
+        trimmed = duration > MAX_SOURCE_SECONDS
+        # Input -t clips the original timeline, before setpts accelerates it.
+        source_limit = ["-t", str(MAX_SOURCE_SECONDS)] if trimmed else []
         # Preserve alpha when decoding existing VP9 video stickers.
         decoder = ["-c:v", "libvpx-vp9"] if video.get("codec_name") == "vp9" else []
         # Preserve display proportions before changing the pixel aspect ratio to 1.
@@ -91,6 +102,7 @@ def prepare_video(data):
                 "-v",
                 "error",
                 "-y",
+                *source_limit,
                 *decoder,
                 "-i",
                 str(source),
@@ -132,14 +144,14 @@ def prepare_video(data):
                 or any(s.get("codec_type") == "audio" for s in info["streams"])
             ):
                 raise StickerMediaError("Результат не соответствует ограничениям Telegram.")
-            return output.read_bytes()
+            return PreparedMedia("video", output.read_bytes(), trimmed=trimmed)
         raise StickerMediaError("После одной попытки сжатия стикер превышает 256 КБ. Стикер не добавлен.")
 
 
 def prepare_static(data):
     with Image.open(io.BytesIO(data)) as source:
         if getattr(source, "is_animated", False):
-            return "video", prepare_video(data)
+            return prepare_video(data)
         image = ImageOps.exif_transpose(source).convert("RGBA")
         ratio = 512 / max(image.size)
         size = tuple(max(1, round(value * ratio)) for value in image.size)
@@ -148,7 +160,7 @@ def prepare_static(data):
         image.save(output, format="WEBP", lossless=True)
         if output.tell() > 512 * 1024:
             raise StickerMediaError("После одной попытки сжатия картинка превышает 512 КБ. Стикер не добавлен.")
-        return "static", output.getvalue()
+        return PreparedMedia("static", output.getvalue())
 
 
 def prepare_tgs(data):
@@ -178,9 +190,9 @@ def prepare_media(data, kind):
     if len(data) > MAX_INPUT_BYTES:
         raise StickerMediaError("Файл больше 20 МБ. Стикер не добавлен.")
     if kind == "animated":
-        return "animated", prepare_tgs(data)
+        return PreparedMedia("animated", prepare_tgs(data))
     if kind == "video":
-        return "video", prepare_video(data)
+        return prepare_video(data)
     try:
         return prepare_static(data)
     except (OSError, ValueError, Image.DecompressionBombError) as exc:
