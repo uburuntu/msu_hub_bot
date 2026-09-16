@@ -1,6 +1,6 @@
-# Observability contract
+# Observability design requirements
 
-Use Logfire and OpenTelemetry through the aiogram 3 application lifecycle. Instrument shared boundaries so commands inherit useful diagnostics without repeating logging code. Telemetry must preserve command behavior, protect chat privacy and remain optional for bot availability.
+These requirements govern Logfire and OpenTelemetry implementations through the aiogram 3 application lifecycle. Instrument shared boundaries so commands inherit useful diagnostics without repeating logging code. Telemetry must preserve command behavior, protect chat privacy and remain optional for bot availability.
 
 ## Trace ownership
 
@@ -52,13 +52,13 @@ Measure polling health through aggregate counters and outage/recovery transition
 
 ## Configuration and lifecycle
 
-The application receives only a project-scoped write token through `LOGFIRE_TOKEN`. `LOGFIRE_API_KEY`, read tokens and CLI login credentials are management/inspection credentials; do not inject them into the bot container, image, ordinary test jobs or application settings. Select the intended project and region explicitly during deployment setup; do not discover or create projects during bot startup.
+The application must receive only a project-scoped write token through `LOGFIRE_TOKEN`. `LOGFIRE_API_KEY`, read tokens and CLI login credentials are management/inspection credentials; do not inject them into the bot container, image, ordinary test jobs or application settings. Select the intended project and region explicitly during deployment setup; do not discover or create projects during bot startup.
 
-Configure telemetry once in the composition root, before handlers run, with explicit service/environment/release metadata and an export enable switch. Missing or invalid telemetry configuration must fall back to redacted local diagnostics without preventing the bot from starting. Unit tests explicitly disable remote export even when developer credentials exist; no credential lookup is needed for offline tests.
+Configure telemetry once in the composition root, before handlers run, with explicit service/environment/release metadata and an export enable switch. Missing or invalid telemetry configuration must fall back to redacted local diagnostics without preventing the bot from starting. Unit tests must explicitly disable remote export even when developer credentials exist; offline tests must require no credential lookup.
 
 Use background batching with bounded queues, finite exporter request deadlines and bounded retries. Never perform synchronous export on a handler's event-loop path. Dropping telemetry under pressure is preferable to blocking commands. Readiness depends on bot/storage health, not Logfire availability.
 
-Shutdown stops new updates, drains owned application tasks, then flushes and closes telemetry within the deployment shutdown budget. Run blocking flush work off the event loop and configure the export transport's own deadlines. An async timeout does not kill a blocking exporter thread, and a flush timeout argument alone is not proof of a bounded shutdown. Test the actual SDK/exporter combination. A forced stop may lose telemetry but must not prevent a release or restart.
+Shutdown must stop new updates, drain owned application tasks, then flush and close telemetry within the deployment shutdown budget. Run blocking flush work off the event loop and configure the export transport's own deadlines. An async timeout does not kill a blocking exporter thread, and a flush timeout argument alone is not proof of a bounded shutdown. Test the actual SDK/exporter combination. A forced stop may lose telemetry but must not prevent a release or restart.
 
 ## Verification and rollout
 
