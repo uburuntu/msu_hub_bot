@@ -65,18 +65,33 @@ class Candidate:
 
 def candidates(data):
     photos = []
-    for page in data.get('query', {}).get('pages', {}).values():
+    query = data.get('query') if isinstance(data, dict) else None
+    pages = query.get('pages') if isinstance(query, dict) else None
+    if not isinstance(pages, dict):
+        return photos
+    for page in pages.values():
         try:
             info = page['imageinfo'][0]
             metadata = info['extmetadata']
-            def value(key):
-                return metadata[key]['value']
-            if info['mime'] != 'image/jpeg' or min(info['width'], info['height']) < 600:
+            def value(key: str) -> str:
+                result = metadata[key]['value']
+                if not isinstance(result, str):
+                    raise ValueError('Expected textual photo metadata')
+                return result
+            width, height = info['width'], info['height']
+            if (info['mime'] != 'image/jpeg' or type(width) is not int or type(height) is not int
+                    or min(width, height) < 600):
                 continue
             latitude, longitude = float(value('GPSLatitude')), float(value('GPSLongitude'))
             if not (math.isfinite(latitude) and math.isfinite(longitude) and -90 <= latitude <= 90 and -180 <= longitude <= 180):
                 continue
-            url = info.get('thumburl', info['url'])
+            url = info.get('thumburl', info.get('url'))
+            if 'thumburl' in info and 'thumbwidth' in info and 'thumbheight' in info:
+                width, height = info['thumbwidth'], info['thumbheight']
+            # Use original dimensions when thumbnail dimensions are unavailable.
+            if (type(width) is not int or type(height) is not int or min(width, height) <= 0
+                    or width + height > 10000 or max(width, height) > 20 * min(width, height)):
+                continue
             license_url = value('LicenseUrl').replace('http://', 'https://', 1)
             if not safe_url(url, {'upload.wikimedia.org', 'thumb.wikimedia.org'}):
                 continue
@@ -108,12 +123,17 @@ class UnknownLocation(ExternalServiceError):
 
 
 def location(data):
-    address = data.get('address', {})
-    code = address.get('country_code', '').lower()
-    if code not in COUNTRIES or not address.get('country'):
+    address = data.get('address') if isinstance(data, dict) else None
+    if not isinstance(address, dict):
+        raise UnknownLocation('Не удалось определить страну фотографии.')
+    code = address.get('country_code')
+    country = address.get('country')
+    if not isinstance(code, str) or code.lower() not in COUNTRIES or not isinstance(country, str) or not country.strip():
         raise UnknownLocation('Не удалось определить страну фотографии.')
     city = next((address[key] for key in ('city', 'town', 'village', 'municipality', 'county', 'state') if address.get(key)), '')
-    return COUNTRIES[code], plain(city, 100)
+    if not isinstance(city, str):
+        raise UnknownLocation('Не удалось определить страну фотографии.')
+    return COUNTRIES[code.lower()], plain(city, 100)
 
 
 async def reverse_location(session, latitude, longitude):
