@@ -18,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
@@ -27,6 +28,10 @@ jobs:
       - run: uv sync --locked
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check msu_hub_bot tests tools deploy
+      - run: uv run --no-sync python tools/check_types.py
+        env:
+          TYPECHECK_BASE_REF: ${{ github.event.pull_request.base.sha }}
+      - run: uv run --no-sync mypy
       - run: uv run --no-sync pytest -q
 
   security:

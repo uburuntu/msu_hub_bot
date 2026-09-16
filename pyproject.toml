@@ -61,7 +61,14 @@ build-backend = "hatchling.build"
 packages = ["msu_hub_bot", "hub_bot", "common"]
 
 [dependency-groups]
-dev = ["ruff==0.15.7", "pytest==8.3.5", "pytest-asyncio==0.25.3", "pytest-socket==0.7.0", "msgpack==1.1.0"]
+dev = [
+    "ruff==0.15.7",
+    "pytest==8.3.5",
+    "pytest-asyncio==0.25.3",
+    "pytest-socket==0.7.0",
+    "msgpack==1.1.0",
+    "mypy==2.0.0",
+]
 
 [tool.uv.sources]
 pyacrcloud = { git = "https://github.com/acrcloud/acrcloud_sdk_python", rev = "9d66907bbb3bd5c4c2f22346c4fa039b28f4176a", subdirectory = "linux/x86-64/python3" }
@@ -69,6 +76,19 @@ pyacrcloud = { git = "https://github.com/acrcloud/acrcloud_sdk_python", rev = "9
 [tool.ruff]
 target-version = "py311"
 line-length = 140
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+show_error_codes = true
+warn_unused_configs = true
+warn_unused_ignores = true
+files = [
+    "common/tg/command.py",
+    "msu_hub_bot/health.py",
+    "msu_hub_bot/settings.py",
+    "tools/check_types.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

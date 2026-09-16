@@ -7,6 +7,7 @@ checked when used; importing modules never requires production credentials.
 import json
 import os
 import re
+from typing import Any
 
 from pydantic import BaseSettings, Field
 
@@ -32,7 +33,7 @@ load_runtime_environment()
 
 
 class MissingIntegration(Exception):
-    def __init__(self, *fields: str):
+    def __init__(self, *fields: str) -> None:
         self.fields = fields
         super().__init__("Optional integration is not configured")
 
@@ -91,7 +92,7 @@ class Settings(BaseSettings):
         case_sensitive = False
         extra = "forbid"
 
-    def __repr_args__(self):
+    def __repr_args__(self) -> list[tuple[str, str]]:
         return [("values", "<redacted>")]
 
     def validate_core(self) -> None:
@@ -103,7 +104,7 @@ class Settings(BaseSettings):
         if self.edgedb_tls_security not in {"strict", "no_host_verification", "insecure", "default"}:
             raise ValueError("Invalid HUB_EDGEDB_TLS_SECURITY")
 
-    def require(self, *names: str):
+    def require(self, *names: str) -> Any:
         missing = [name for name in names if not getattr(self, name)]
         if missing:
             raise MissingIntegration(*missing)
