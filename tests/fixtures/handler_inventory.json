@@ -280,7 +280,6 @@
     "type": "register_message_handler",
     "handler": "process_animate",
     "aliases": [
-      "a",
       "animate"
     ]
   },
@@ -288,7 +287,6 @@
     "type": "register_message_handler",
     "handler": "process_matrix",
     "aliases": [
-      "m",
       "matrix"
     ]
   },
@@ -308,18 +306,6 @@
     "aliases": [
       "prog",
       "pr"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_cheatsheet",
-    "aliases": [
-      "ch",
-      "cheat",
-      "cheatsheet",
-      "so",
-      "stackoverflow",
-      "man"
     ]
   },
   {
@@ -364,153 +350,9 @@
   },
   {
     "type": "register_message_handler",
-    "handler": "process_dalle",
-    "aliases": [
-      "da",
-      "dalle",
-      "да"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_stable_diffusion",
-    "aliases": [
-      "std",
-      "стд",
-      "сд"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_rudalle",
-    "aliases": [
-      "ruda",
-      "rudalle",
-      "руда"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_dalle_emoji",
-    "aliases": [
-      "dae",
-      "дае"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_latent_diffusion",
-    "aliases": [
-      "la",
-      "ла"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_toonify",
-    "aliases": [
-      "toonify",
-      "toon"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_anime",
-    "aliases": [
-      "an"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_drag",
-    "aliases": [
-      "drag"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_doll",
-    "aliases": [
-      "doll"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_vintage",
-    "aliases": [
-      "vintage"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_arcane",
-    "aliases": [
-      "arcane",
-      "arc"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_inpaint",
-    "aliases": [
-      "inpaint",
-      "remove"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_paint",
-    "aliases": [
-      "paint"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_inter",
-    "aliases": [
-      "inter"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_copilot",
-    "aliases": [
-      "co",
-      "cop",
-      "copilot"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_privacy",
-    "aliases": [
-      "privacy",
-      "deepprivacy",
-      "dp"
-    ]
-  },
-  {
-    "type": "register_message_handler",
     "handler": "process_which_anime",
     "aliases": [
       "anime"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_agile_gan",
-    "aliases": [
-      "ag",
-      "agilegan",
-      "agile_gan"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_zombie",
-    "aliases": [
-      "zombie",
-      "z"
     ]
   },
   {
@@ -525,69 +367,6 @@
     "type": "register_callback_query_handler",
     "handler": "Tyan.process_cb",
     "aliases": []
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_deepdream",
-    "aliases": [
-      "deepdream",
-      "dd"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_colorizer",
-    "aliases": [
-      "colorizer",
-      "colorize",
-      "color"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_srgan",
-    "aliases": [
-      "srgan",
-      "sr",
-      "large",
-      "lg"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_waifu",
-    "aliases": [
-      "waifu",
-      "wa"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_demographic",
-    "aliases": [
-      "age",
-      "race",
-      "face",
-      "faces"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_what_hg",
-    "aliases": [
-      "wtf",
-      "what",
-      "yolo"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_nudes",
-    "aliases": [
-      "nudes",
-      "nude",
-      "nsfw"
-    ]
   },
   {
     "type": "register_message_handler",
@@ -608,82 +387,11 @@
   },
   {
     "type": "register_message_handler",
-    "handler": "process_badwiki",
-    "aliases": [
-      "badwiki",
-      "bw"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_bored",
-    "aliases": [
-      "bored",
-      "bore",
-      "скучно",
-      "скука"
-    ]
-  },
-  {
-    "type": "register_message_handler",
     "handler": "process_porfirevich",
     "aliases": [
       "gpt2",
       "гпт2"
     ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_gpt3",
-    "aliases": [
-      "gpt3",
-      "gpt",
-      "гпт",
-      "гпт3"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_rugpt3",
-    "aliases": [
-      "rugpt3",
-      "rugpt",
-      "ругпт",
-      "ругпт3"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_openai_gpt3",
-    "aliases": [
-      "ogpt3",
-      "ogpt",
-      "огпт",
-      "огпт3"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_gptn",
-    "aliases": [
-      "gptn",
-      "gn",
-      "гптн",
-      "гн"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "Balaboba.process",
-    "aliases": [
-      "boba",
-      "боба"
-    ]
-  },
-  {
-    "type": "register_callback_query_handler",
-    "handler": "Balaboba.process_cb",
-    "aliases": []
   },
   {
     "type": "register_message_handler",
@@ -718,28 +426,6 @@
     "type": "register_callback_query_handler",
     "handler": "AntiBot.process_cb",
     "aliases": []
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_orfogrammka_common",
-    "aliases": [
-      "orfogrammka",
-      "orfo"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_orfogrammka_cicero",
-    "aliases": [
-      "cicero"
-    ]
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_orfogrammka_quality",
-    "aliases": [
-      "quality"
-    ]
   },
   {
     "type": "register_message_handler",
@@ -892,13 +578,6 @@
   },
   {
     "type": "register_message_handler",
-    "handler": "process_post_poll_all",
-    "aliases": [
-      "post_poll_all"
-    ]
-  },
-  {
-    "type": "register_message_handler",
     "handler": "process_post_all",
     "aliases": [
       "post_all"
@@ -950,18 +629,6 @@
   },
   {
     "type": "register_message_handler",
-    "handler": "StatsVPN.process",
-    "aliases": [
-      "vpn"
-    ]
-  },
-  {
-    "type": "register_callback_query_handler",
-    "handler": "StatsVPN.process_cb",
-    "aliases": []
-  },
-  {
-    "type": "register_message_handler",
     "handler": "MinecraftStatus.process",
     "aliases": [
       "mc",
@@ -971,20 +638,6 @@
   {
     "type": "register_callback_query_handler",
     "handler": "MinecraftStatus.process_cb",
-    "aliases": []
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "StatHat.process",
-    "aliases": [
-      "internet",
-      "ping",
-      "isdown"
-    ]
-  },
-  {
-    "type": "register_callback_query_handler",
-    "handler": "StatHat.process_cb",
     "aliases": []
   },
   {
@@ -1335,13 +988,6 @@
     "type": "register_message_handler",
     "handler": "process_echo",
     "aliases": []
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_raise",
-    "aliases": [
-      "raise"
-    ]
   },
   {
     "type": "register_errors_handler",

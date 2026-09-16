@@ -109,30 +109,6 @@ class MakePost:
 tb_chat_id = settings.posting_tb_chat_id
 
 
-async def process_post_poll_all(message: Message):
-    if not message.reply_to_message:
-        return
-    if not (poll := message.reply_to_message.poll):
-        return
-
-    e_chats = await EcosystemChat.query(db).get_all()
-    main_chat_id = settings.posting_main_chat_id
-    chat_ids = [chat.chat_id for chat in e_chats
-                if chat.members >= 55 and chat.section != 'channel' and chat.chat_id not in (main_chat_id, tb_chat_id)]
-
-
-    post_message = await bot.send_poll(main_chat_id,
-                                       question=poll.question,
-                                       options=[o.text for o in poll.options],
-                                       type=poll.type,
-                                       allows_multiple_answers=poll.allows_multiple_answers,
-                                       correct_option_id=0,
-                                       explanation=poll.explanation)
-
-    coros = [post_message.forward(chat_id, disable_notification=True) for chat_id in chat_ids]
-    return await asyncio.gather(*coros)
-
-
 async def process_post_all(message: Message):
     if not (post_message := message.reply_to_message):
         return

@@ -9,15 +9,10 @@ cmd_start = f"""👋🏻 {hbold('Привет')}! Я бот экосистемы
 """
 
 hidden = """
-• /itp — image-to-pdf, опознает текст и выдает размеченную пдфку
-
 • /mash — превращает текст в кашу
 
 • /figlet — применить один из шрифтов {hlink('figlet', 'http://www.figlet.org/examples.html/')}
 • {hcode('стикер с говняшкой')} — считает ваши какания
-
-• /cicero — повышение красоты текста 
-• /quality — повышение качества текста
 
 • /map — карта с осадками по указанной локации
 
@@ -28,21 +23,12 @@ hidden = """
 
 • /copy, /see — дублировать сообщение
 
-• /color — раскрасить чб картинку
 • /anime — поиск аниме по кадру
 
 • /d6, /dice — бросить кубик
 • /stats — статистика бота
 
 • /homer, /sinatra, /vader, /queen, /glados — fake voices
-• /remove -- inpaint
-
-Outdated and broken:
-• /ag — маски AgileGan ({hlink('link', 'http://www.agilegan.com/')})
-• /what — получить описание картинки ({hlink('link', 'https://github.com/karpathy/neuraltalk2/')})
-• /faces, /wtf — распознавание объектов
-• /bw (/badwiki) — определение сгенерированное GPT-2 ({hlink('link', 'https://badwiki.textgen.cloud/')})
-• /avatar — сгенерировать уникальный аватар пользователя
 """
 
 cmd_help = f"""{hbold('Функции бота')}
@@ -51,7 +37,6 @@ cmd_help = f"""{hbold('Функции бота')}
 • Изначальная цель бота — объединять чаты МГУ обновляемыми закрепами
 • @chat_msu — основной чат
 • /links — ссылки на все чаты инфраструктуры
-• /ping — мониторинг интернета в общежитиях
 • /camera — камера с Главного здания
 • /minecraft — сервер МГУ
 
@@ -75,8 +60,8 @@ cmd_help = f"""{hbold('Функции бота')}
 • /debate — тема для отстаивания
 
 🤖 {hbold('Генерация случайностей')}:
-• /roll n m — ролл m чисел из n цифр
-• /rolls n m — команда /roll для всех
+• /roll n — случайное число из n цифр
+• /rolls n m — интерактивный ролл m чисел из n цифр
 • /random n m — случайное число от n до m включительно
 • /randoms n m — команда /random для всех
 • /truth — выдает истину на любой вопрос
@@ -87,28 +72,21 @@ cmd_help = f"""{hbold('Функции бота')}
 • /py — выполнить код на Python 3
 • /cpps, /pys — аналоги, но с вводом данных
 • /prog — все доступные языки (70 штук)
-• /so lang query — результаты со StackOverflow и т.п. ({hlink('cheat.sh', 'https://cheat.sh/')})
 
 🧠 {hbold('Нейронки и прочее')}:
 • /wf — результат от WolframAlpha по запросу ({hlink('link', 'https://www.wolframalpha.com/examples/mathematics/')})
 • /song — опознаёт песню ({hlink('link', 'https://www.acrcloud.com/')})
-• /sr, /wa — увеличить изображение через SRGAN и Waifu2x
 • /bg — удаление фона у изображения ({hlink('link', 'https://slazzer.com/')})
-• /dd — погрузиться в пучины безумия ({hlink('link', 'https://github.com/google/deepdream/')})
-• /da, /std, /ruda, /la, /dae — создать картинку или эмодзи по тексту
-• /nsfw — распознавание взрослого контента
-• /gpt2, /gpt3, /ogpt, /rugpt — генерация текста
-• /toon, /zombie, /an, /arc, /drag, /doll, /dp — разные маски
+• /gpt2 — генерация текста
 • /tyan — случайные аниме тянки
 
 📨 {hbold('Стикеры')}:
 • /s — добавить изображение в личный стикерпак, через пробел можно задать его эмодзи
 • /sc — аналог /s, но создает стикерпак для чата, где вызван
 • /sd — удалить стикер из пака
-• /a, /m — из текста делает анимированный стикер
+• /animate, /matrix — из текста делает анимированный стикер
 
 📝 {hbold('Обработка текста')}:
-• /orfo — проверка текста {hlink('Орфограммкой', 'https://orfogrammka.ru/?campaign=tpsjcbvj&page=home/')}
 • s/one/two — аналог sed, ищет паттерн one и заменяет на two
 • /t — компилирует LaTeX код
 • /trans — транслит текста

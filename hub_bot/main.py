@@ -2,7 +2,6 @@ from msu_hub_bot.settings import settings, MissingIntegration
 from msu_hub_bot.redaction import redact
 
 import os
-import random
 import traceback
 
 import aiogram
@@ -20,25 +19,15 @@ from commands.admin import process_ban, process_forward_builder, process_forward
 from commands.animate import process_animate, process_matrix
 from commands.antibot import AntiBot
 from commands.arxiv import process_arxiv
-from commands.balaboba import Balaboba
 from commands.camera import Camera
 from commands.crypto import Crypto
-from commands.dalle import process_dalle_emoji, process_rudalle
 from commands.debate import Debate
 from commands.debug import process_delete_after, process_json, process_logs
-from commands.deepdream import process_deepdream
 from commands.dvach import Dvach
 from commands.errors import process_error_stickers, process_donate, process_supporters
 from commands.excuses import process_excuse
-from commands.externals import process_badwiki, process_toonify, process_bg, process_zombie, process_srgan, \
-    process_waifu, process_porfirevich, \
-    process_cheatsheet, process_topdf, process_orfogrammka_quality, process_orfogrammka_cicero, \
-    process_orfogrammka_common, process_imgur, process_duckduckgo, process_gpt3, process_nudes, process_demographic, \
-    process_colorizer, process_agile_gan, \
-    process_which_anime, process_bored, process_anime, process_drag, process_ud, process_arcane, process_what_hg, \
-    process_doll, process_fake_voice, process_vintage, process_privacy, process_paint, process_inter, process_copilot, \
-    process_gptn, process_dalle, \
-    process_rugpt3, process_openai_gpt3, process_latent_diffusion, process_inpaint, process_stable_diffusion
+from commands.externals import process_bg, process_porfirevich, process_topdf, process_imgur, process_duckduckgo, \
+    process_which_anime, process_ud, process_fake_voice
 from commands.figlet import process_figlet
 from commands.fun import process_beer, process_pokakats, process_puk
 from commands.genders import process_gender
@@ -56,7 +45,7 @@ from commands.minecraft import MinecraftStatus
 from commands.other import process_me, process_transliterate, process_punto, process_md, process_html, process_id, \
     process_copy, process_file_id
 from commands.personal import process_sanya, process_dyubs, process_pookie_pook, process_popov
-from commands.posting import process_post_all, process_post_poll_all, process_post_forward_all, MakePost, MakePostStates
+from commands.posting import process_post_all, process_post_forward_all, MakePost, MakePostStates
 from commands.prog import ProgCompiler, ProgStates, process_code, register_code_submitters, \
     register_code_submitters_with_stdin
 from commands.raffle import Raffle
@@ -67,8 +56,7 @@ from commands.rolls import Randoms, Rolls, process_d6, process_dice, process_mas
 from commands.sed import process_sed
 from commands.settings import process_settings
 from commands.song import process_song
-from commands.stathat import StatHat
-from commands.stats import Stats, StatsVPN
+from commands.stats import Stats
 from commands.sticker import process_sticker, process_sticker_chat, process_animated_sticker_chat, \
     process_animated_sticker, Stickers, \
     StickerStates, process_sticker_delete
@@ -99,23 +87,6 @@ async def process_help(message: Message):
 async def process_cancel(message: Message, state: FSMContext):
     await state.finish()
     return await message.reply('👌🏻', reply_markup=ReplyKeyboardRemove())
-
-
-async def process_raise(message: Message):
-    case = random.randint(0, 4)
-
-    if case == 0:
-        await message.bot.send_message(message.chat.id + 1, 'a')
-    elif case == 1:
-        await message.bot.send_message(message.chat.id, 'a', reply_to_message_id=10 ** 10)
-    elif case == 2:
-        await message.bot.send_message(message.chat.id, 'a', parse_mode='a')
-    elif case == 3:
-        await message.bot.send_message(message.chat.id, 'a' * 4097)
-    elif case == 4:
-        await message.bot.send_message(message.chat.id, '<a')
-
-    raise Exception(message.text or message.caption)
 
 
 async def process_echo(message: Message):
@@ -206,59 +177,25 @@ async def on_startup(dp: Dispatcher):
     dp.register_message_handler(process_song, MetaCommand('song', 'shazam', 'music'), content_types=ContentType.ANY)
     dp.register_message_handler(process_imgur, MetaCommand('i', 'imgur'), content_types=ContentType.ANY)
 
-    dp.register_message_handler(process_animate, MetaCommand('a', 'animate'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_matrix, MetaCommand('m', 'matrix'), content_types=ContentType.ANY, run_task=run_task)
+    dp.register_message_handler(process_animate, MetaCommand('animate'), content_types=ContentType.ANY, run_task=run_task)
+    dp.register_message_handler(process_matrix, MetaCommand('matrix'), content_types=ContentType.ANY, run_task=run_task)
 
     register_code_submitters(dp)
     register_code_submitters_with_stdin(dp)
     dp.register_callback_query_handler(ProgCompiler.process_stdin_cb, ProgCompiler.callback_data.filter(), state='*')
     dp.register_message_handler(ProgCompiler.process_stdin_run, state=ProgStates.stdin, content_types=ContentType.ANY)
     dp.register_message_handler(process_code, MetaCommand('prog', 'pr'), content_types=ContentType.ANY)
-    dp.register_message_handler(process_cheatsheet, MetaCommand('ch', 'cheat', 'cheatsheet', 'so', 'stackoverflow', 'man'), content_types=ContentType.ANY)
 
     dp.register_message_handler(process_lobster, MetaCommand('lobster', 'l', 'л', 'лобстер'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_demotivator, MetaCommand('demotivator', 'de', 'д', 'де'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_atmta, MetaCommand('atmta', 'атмта', 'атм', 'atm'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_atmta_v, MetaCommand('atmtav', 'атмтав', 'атмв', 'atmv'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_dalle, MetaCommand('da', 'dalle', 'да'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_stable_diffusion, MetaCommand('std', 'стд', 'сд'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_rudalle, MetaCommand('ruda', 'rudalle', 'руда'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_dalle_emoji, MetaCommand('dae', 'дае'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_latent_diffusion, MetaCommand('la', 'ла'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_toonify, MetaCommand('toonify', 'toon'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_anime, MetaCommand('an'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_drag, MetaCommand('drag'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_doll, MetaCommand('doll'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_vintage, MetaCommand('vintage'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_arcane, MetaCommand('arcane', 'arc'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_inpaint, MetaCommand('inpaint', 'remove'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_paint, MetaCommand('paint'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_inter, MetaCommand('inter'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_copilot, MetaCommand('co', 'cop', 'copilot'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_privacy, MetaCommand('privacy', 'deepprivacy', 'dp'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_which_anime, MetaCommand('anime'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_agile_gan, MetaCommand('ag', 'agilegan', 'agile_gan'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_zombie, MetaCommand('zombie', 'z'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(Tyan.process, MetaCommand('tyan', 'tyans'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_callback_query_handler(Tyan.process_cb, Tyan.callback_data.filter())
-    dp.register_message_handler(process_deepdream, MetaCommand('deepdream', 'dd'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_colorizer, MetaCommand('colorizer', 'colorize', 'color'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_srgan, MetaCommand('srgan', 'sr', 'large', 'lg'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_waifu, MetaCommand('waifu', 'wa'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_demographic, MetaCommand('age', 'race', 'face', 'faces'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_what_hg, MetaCommand('wtf', 'what', 'yolo'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_nudes, MetaCommand('nudes', 'nude', 'nsfw'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_topdf, MetaCommand('pdf', 'topdf', 'to_pdf'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_bg, MetaCommand('removebg', 'bg'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_badwiki, MetaCommand('badwiki', 'bw'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_bored, MetaCommand('bored', 'bore', 'скучно', 'скука'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_porfirevich, MetaCommand('gpt2', 'гпт2'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_gpt3, MetaCommand('gpt3', 'gpt', 'гпт', 'гпт3'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_rugpt3, MetaCommand('rugpt3', 'rugpt', 'ругпт', 'ругпт3'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_openai_gpt3, MetaCommand('ogpt3', 'ogpt', 'огпт', 'огпт3'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_gptn, MetaCommand('gptn', 'gn', 'гптн', 'гн'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(Balaboba.process, MetaCommand('boba', 'боба'), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_callback_query_handler(Balaboba.process_cb, Balaboba.callback_data.filter())
     dp.register_message_handler(process_duckduckgo, MetaCommand('ddg', 'wiki', 'вики', 'duckduckgo'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_ud, MetaCommand('ud', 'urban', 'slang'), content_types=ContentType.ANY, run_task=run_task)
 
@@ -266,9 +203,6 @@ async def on_startup(dp: Dispatcher):
     dp.register_message_handler(AntiBot.process_left, content_types=ContentType.LEFT_CHAT_MEMBER)
     dp.register_callback_query_handler(AntiBot.process_cb, AntiBot.callback_data.filter())
 
-    dp.register_message_handler(process_orfogrammka_common, MetaCommand('orfogrammka', 'orfo'), content_types=ContentType.ANY)
-    dp.register_message_handler(process_orfogrammka_cicero, MetaCommand('cicero'), content_types=ContentType.ANY)
-    dp.register_message_handler(process_orfogrammka_quality, MetaCommand('quality'), content_types=ContentType.ANY)
 
     dp.register_message_handler(process_reverse, commands=['tenet'], content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_image_to_text, MetaCommand('text', 'itt'), content_types=ContentType.ANY, run_task=run_task)
@@ -296,7 +230,6 @@ async def on_startup(dp: Dispatcher):
     dp.register_message_handler(process_pin, only_for_me, commands=['pin'])
     dp.register_message_handler(process_pin_all, only_for_me, commands=['pin_all'])
     dp.register_message_handler(process_update_pins, only_for_me, commands=['update_pins'])
-    dp.register_message_handler(process_post_poll_all, only_for_me, commands=['post_poll_all'])
     dp.register_message_handler(process_post_all, only_for_me, commands=['post_all'])
     dp.register_message_handler(process_post_forward_all, only_for_me, commands=['post_forward_all'])
     dp.register_message_handler(MakePost.process, only_for_founders, commands=['make_post'])
@@ -305,13 +238,9 @@ async def on_startup(dp: Dispatcher):
     dp.register_message_handler(process_status, only_for_me, commands=['status'])
     dp.register_message_handler(Stats.process, MetaCommand('stats', 'meta'), content_types=ContentType.ANY)
     dp.register_callback_query_handler(Stats.process_cb, Stats.callback_data.filter())
-    dp.register_message_handler(StatsVPN.process, MetaCommand('vpn'), content_types=ContentType.ANY)
-    dp.register_callback_query_handler(StatsVPN.process_cb, StatsVPN.callback_data.filter())
 
     dp.register_message_handler(MinecraftStatus.process, MetaCommand('mc', 'minecraft'), content_types=ContentType.ANY)
     dp.register_callback_query_handler(MinecraftStatus.process_cb, MinecraftStatus.callback_data.filter())
-    dp.register_message_handler(StatHat.process, MetaCommand('internet', 'ping', 'isdown'), content_types=ContentType.ANY)
-    dp.register_callback_query_handler(StatHat.process_cb, StatHat.callback_data.filter())
     dp.register_message_handler(Camera.process, MetaCommand('camera', 'cam'), content_types=ContentType.ANY)
     dp.register_callback_query_handler(Camera.process_cb, Camera.callback_data.filter())
     dp.register_message_handler(Debate.process, MetaCommand('debate', 'resolution'), content_types=ContentType.ANY)
@@ -369,7 +298,6 @@ async def on_startup(dp: Dispatcher):
     dp.register_inline_handler(process_inline)
 
     dp.register_message_handler(process_echo, IDFilter(chat_id=settings.echo_chat_id), content_types=ContentType.ANY)
-    dp.register_message_handler(process_raise, only_for_me, MetaCommand('raise'), content_types=ContentType.ANY)
 
     dp.register_errors_handler(process_error)
 
