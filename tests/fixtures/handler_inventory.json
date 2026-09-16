@@ -4,7 +4,47 @@
     "handler": "process_start",
     "aliases": [
       "start"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_start:start",
+      "event": "message",
+      "event_order": 0,
+      "registration_order": 0,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "start"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "start"
+      ]
+    },
+    "registration": {
+      "handler": "process_start",
+      "filters": [],
+      "options": {
+        "commands": "['start']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -12,7 +52,50 @@
     "aliases": [
       "help",
       "рудз"
-    ]
+    ],
+    "routing": {
+      "key": "message:HelpMessage.process:help:рудз",
+      "event": "message",
+      "event_order": 1,
+      "registration_order": 1,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "help",
+            "рудз"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "help",
+        "рудз"
+      ]
+    },
+    "registration": {
+      "handler": "HelpMessage.process",
+      "filters": [
+        "MetaCommand('help', 'рудз')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -20,47 +103,322 @@
     "aliases": [
       "settings",
       "настройки"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_settings:settings:настройки",
+      "event": "message",
+      "event_order": 2,
+      "registration_order": 2,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "settings",
+            "настройки"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "settings",
+        "настройки"
+      ]
+    },
+    "registration": {
+      "handler": "process_settings",
+      "filters": [
+        "MetaCommand('settings', 'настройки')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "HelpMessage.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:HelpMessage.process_cb",
+      "event": "callback_query",
+      "event_order": 0,
+      "registration_order": 3,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "help",
+          "separator": ":",
+          "fields": [
+            "action"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "HelpMessage.process_cb",
+      "filters": [
+        "HelpMessage.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_cancel",
     "aliases": [
       "cancel"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_cancel:cancel",
+      "event": "message",
+      "event_order": 3,
+      "registration_order": 4,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            "*"
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "cancel"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "cancel"
+      ]
+    },
+    "registration": {
+      "handler": "process_cancel",
+      "filters": [],
+      "options": {
+        "commands": "['cancel']",
+        "state": "'*'"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_donate",
     "aliases": [
       "donate"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_donate:donate",
+      "event": "message",
+      "event_order": 4,
+      "registration_order": 5,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "donate"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "donate"
+      ]
+    },
+    "registration": {
+      "handler": "process_donate",
+      "filters": [],
+      "options": {
+        "commands": "['donate']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_supporters",
     "aliases": [
       "supporters"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_supporters:supporters",
+      "event": "message",
+      "event_order": 5,
+      "registration_order": 6,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "supporters"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "supporters"
+      ]
+    },
+    "registration": {
+      "handler": "process_supporters",
+      "filters": [],
+      "options": {
+        "commands": "['supporters']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_links",
     "aliases": [
       "links"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_links:links",
+      "event": "message",
+      "event_order": 6,
+      "registration_order": 7,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "links"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "links"
+      ]
+    },
+    "registration": {
+      "handler": "process_links",
+      "filters": [],
+      "options": {
+        "commands": "['links']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_json",
     "aliases": [
       "json"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_json:json",
+      "event": "message",
+      "event_order": 7,
+      "registration_order": 8,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "json"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "json"
+      ]
+    },
+    "registration": {
+      "handler": "process_json",
+      "filters": [],
+      "options": {
+        "commands": "['json']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -68,14 +426,112 @@
     "aliases": [
       "logs",
       "log"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_logs:logs:log",
+      "event": "message",
+      "event_order": 8,
+      "registration_order": 9,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "logs",
+            "log"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "logs",
+        "log"
+      ]
+    },
+    "registration": {
+      "handler": "process_logs",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['logs', 'log']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_delete_after",
     "aliases": [
       "delete_after"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_delete_after:delete_after",
+      "event": "message",
+      "event_order": 9,
+      "registration_order": 10,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "delete_after"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "delete_after"
+      ]
+    },
+    "registration": {
+      "handler": "process_delete_after",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['delete_after']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -83,12 +539,82 @@
     "aliases": [
       "7uB0",
       "beer"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_beer:7ub0:beer",
+      "event": "message",
+      "event_order": 10,
+      "registration_order": 11,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "7ub0",
+            "beer"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "7ub0",
+        "beer"
+      ]
+    },
+    "registration": {
+      "handler": "process_beer",
+      "filters": [],
+      "options": {
+        "commands": "['7uB0', 'beer']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_pokakats",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:process_pokakats",
+      "event": "message",
+      "event_order": 11,
+      "registration_order": 12,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_pokakats",
+      "filters": [],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -96,7 +622,50 @@
     "aliases": [
       "puk",
       "пук"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_puk:puk:пук",
+      "event": "message",
+      "event_order": 12,
+      "registration_order": 13,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "puk",
+            "пук"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "puk",
+        "пук"
+      ]
+    },
+    "registration": {
+      "handler": "process_puk",
+      "filters": [
+        "MetaCommand('puk', 'пук')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -105,34 +674,243 @@
       "weather",
       "w",
       "погода"
-    ]
+    ],
+    "routing": {
+      "key": "message:Weather.process:weather:w:погода",
+      "event": "message",
+      "event_order": 13,
+      "registration_order": 14,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "weather",
+            "w",
+            "погода"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "weather",
+        "w",
+        "погода"
+      ]
+    },
+    "registration": {
+      "handler": "Weather.process",
+      "filters": [
+        "MetaCommand('weather', 'w', 'погода')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "Weather.process_location",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:Weather.process_location",
+      "event": "message",
+      "event_order": 14,
+      "registration_order": 15,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "location",
+            "venue"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Weather.process_location",
+      "filters": [],
+      "options": {
+        "content_types": "(ContentType.LOCATION, ContentType.VENUE)"
+      }
+    }
   },
   {
     "type": "register_edited_message_handler",
     "handler": "Weather.process_location_edited",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "edited_message:Weather.process_location_edited",
+      "event": "edited_message",
+      "event_order": 0,
+      "registration_order": 16,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "location",
+            "venue"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Weather.process_location_edited",
+      "filters": [],
+      "options": {
+        "content_types": "(ContentType.LOCATION, ContentType.VENUE)"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Weather.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Weather.process_cb",
+      "event": "callback_query",
+      "event_order": 1,
+      "registration_order": 17,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "weather",
+          "separator": ":",
+          "fields": [
+            "lat",
+            "lon"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Weather.process_cb",
+      "filters": [
+        "Weather.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "WeatherMap.process",
     "aliases": [
       "map"
-    ]
+    ],
+    "routing": {
+      "key": "message:WeatherMap.process:map",
+      "event": "message",
+      "event_order": 15,
+      "registration_order": 18,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "map"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "map"
+      ]
+    },
+    "registration": {
+      "handler": "WeatherMap.process",
+      "filters": [],
+      "options": {
+        "commands": "['map']"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "WeatherMap.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:WeatherMap.process_cb",
+      "event": "callback_query",
+      "event_order": 2,
+      "registration_order": 19,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "map",
+          "separator": ":",
+          "fields": [
+            "action",
+            "lat",
+            "lon",
+            "zoom"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "WeatherMap.process_cb",
+      "filters": [
+        "WeatherMap.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -140,7 +918,52 @@
     "aliases": [
       "s",
       "sticker"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_sticker:s:sticker",
+      "event": "message",
+      "event_order": 16,
+      "registration_order": 20,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "s",
+            "sticker"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "s",
+        "sticker"
+      ]
+    },
+    "registration": {
+      "handler": "process_sticker",
+      "filters": [
+        "MetaCommand('s', 'sticker')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -148,21 +971,152 @@
     "aliases": [
       "sc",
       "sticker_chat"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_sticker_chat:sc:sticker_chat",
+      "event": "message",
+      "event_order": 17,
+      "registration_order": 21,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "sc",
+            "sticker_chat"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "sc",
+        "sticker_chat"
+      ]
+    },
+    "registration": {
+      "handler": "process_sticker_chat",
+      "filters": [
+        "MetaCommand('sc', 'sticker_chat')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_animated_sticker",
     "aliases": [
       "sa"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_animated_sticker:sa",
+      "event": "message",
+      "event_order": 18,
+      "registration_order": 22,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "sa"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "sa"
+      ]
+    },
+    "registration": {
+      "handler": "process_animated_sticker",
+      "filters": [
+        "MetaCommand('sa')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_animated_sticker_chat",
     "aliases": [
       "sac"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_animated_sticker_chat:sac",
+      "event": "message",
+      "event_order": 19,
+      "registration_order": 23,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "sac"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "sac"
+      ]
+    },
+    "registration": {
+      "handler": "process_animated_sticker_chat",
+      "filters": [
+        "MetaCommand('sac')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -170,19 +1124,136 @@
     "aliases": [
       "sd",
       "sticker_delete"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_sticker_delete:sd:sticker_delete",
+      "event": "message",
+      "event_order": 20,
+      "registration_order": 24,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "sd",
+            "sticker_delete"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "sd",
+        "sticker_delete"
+      ]
+    },
+    "registration": {
+      "handler": "process_sticker_delete",
+      "filters": [
+        "MetaCommand('sd', 'sticker_delete')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_error_stickers",
     "aliases": [
       "error_stickers"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_error_stickers:error_stickers",
+      "event": "message",
+      "event_order": 21,
+      "registration_order": 25,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "error_stickers"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "error_stickers"
+      ]
+    },
+    "registration": {
+      "handler": "process_error_stickers",
+      "filters": [
+        "MetaCommand('error_stickers')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "Stickers.sticker_set_name",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:Stickers.sticker_set_name",
+      "event": "message",
+      "event_order": 22,
+      "registration_order": 26,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            "StickerStates:sticker_set_name"
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Stickers.sticker_set_name",
+      "filters": [],
+      "options": {
+        "state": "StickerStates.sticker_set_name",
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -192,7 +1263,56 @@
       "згтещ",
       "пунто",
       "geynj"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_punto:punto:згтещ:пунто:geynj",
+      "event": "message",
+      "event_order": 23,
+      "registration_order": 27,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "punto",
+            "згтещ",
+            "пунто",
+            "geynj"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "punto",
+        "згтещ",
+        "пунто",
+        "geynj"
+      ]
+    },
+    "registration": {
+      "handler": "process_punto",
+      "filters": [
+        "MetaCommand('punto', 'згтещ', 'пунто', 'geynj')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -201,14 +1321,104 @@
       "trans",
       "translit",
       "transliterate"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_transliterate:trans:translit:transliterate",
+      "event": "message",
+      "event_order": 24,
+      "registration_order": 28,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "trans",
+            "translit",
+            "transliterate"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "trans",
+        "translit",
+        "transliterate"
+      ]
+    },
+    "registration": {
+      "handler": "process_transliterate",
+      "filters": [
+        "MetaCommand('trans', 'translit', 'transliterate')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_id",
     "aliases": [
       "id"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_id:id",
+      "event": "message",
+      "event_order": 25,
+      "registration_order": 29,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "id"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "id"
+      ]
+    },
+    "registration": {
+      "handler": "process_id",
+      "filters": [
+        "MetaCommand('id')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -216,14 +1426,102 @@
     "aliases": [
       "md",
       "markdown"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_md:md:markdown",
+      "event": "message",
+      "event_order": 26,
+      "registration_order": 30,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "md",
+            "markdown"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "md",
+        "markdown"
+      ]
+    },
+    "registration": {
+      "handler": "process_md",
+      "filters": [
+        "MetaCommand('md', 'markdown')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_html",
     "aliases": [
       "html"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_html:html",
+      "event": "message",
+      "event_order": 27,
+      "registration_order": 31,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "html"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "html"
+      ]
+    },
+    "registration": {
+      "handler": "process_html",
+      "filters": [
+        "MetaCommand('html')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -231,7 +1529,52 @@
     "aliases": [
       "file_id",
       "fi"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_file_id:file_id:fi",
+      "event": "message",
+      "event_order": 28,
+      "registration_order": 32,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "file_id",
+            "fi"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "file_id",
+        "fi"
+      ]
+    },
+    "registration": {
+      "handler": "process_file_id",
+      "filters": [
+        "MetaCommand('file_id', 'fi')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -239,7 +1582,52 @@
     "aliases": [
       "loc",
       "location"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_location:loc:location",
+      "event": "message",
+      "event_order": 29,
+      "registration_order": 33,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "loc",
+            "location"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "loc",
+        "location"
+      ]
+    },
+    "registration": {
+      "handler": "process_location",
+      "filters": [
+        "MetaCommand('loc', 'location')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -248,7 +1636,54 @@
       "t",
       "tex",
       "latex"
-    ]
+    ],
+    "routing": {
+      "key": "message:Latex.process:t:tex:latex",
+      "event": "message",
+      "event_order": 30,
+      "registration_order": 34,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "t",
+            "tex",
+            "latex"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "t",
+        "tex",
+        "latex"
+      ]
+    },
+    "registration": {
+      "handler": "Latex.process",
+      "filters": [
+        "MetaCommand('t', 'tex', 'latex')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_edited_message_handler",
@@ -257,7 +1692,54 @@
       "t",
       "tex",
       "latex"
-    ]
+    ],
+    "routing": {
+      "key": "edited_message:Latex.process_edited:t:tex:latex",
+      "event": "edited_message",
+      "event_order": 1,
+      "registration_order": 35,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "t",
+            "tex",
+            "latex"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "t",
+        "tex",
+        "latex"
+      ]
+    },
+    "registration": {
+      "handler": "Latex.process_edited",
+      "filters": [
+        "MetaCommand('t', 'tex', 'latex')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -266,7 +1748,54 @@
       "song",
       "shazam",
       "music"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_song:song:shazam:music",
+      "event": "message",
+      "event_order": 31,
+      "registration_order": 36,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "song",
+            "shazam",
+            "music"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "song",
+        "shazam",
+        "music"
+      ]
+    },
+    "registration": {
+      "handler": "process_song",
+      "filters": [
+        "MetaCommand('song', 'shazam', 'music')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -274,31 +1803,226 @@
     "aliases": [
       "i",
       "imgur"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_imgur:i:imgur",
+      "event": "message",
+      "event_order": 32,
+      "registration_order": 37,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "i",
+            "imgur"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "i",
+        "imgur"
+      ]
+    },
+    "registration": {
+      "handler": "process_imgur",
+      "filters": [
+        "MetaCommand('i', 'imgur')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_animate",
     "aliases": [
       "animate"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_animate:animate",
+      "event": "message",
+      "event_order": 33,
+      "registration_order": 38,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "animate"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "animate"
+      ]
+    },
+    "registration": {
+      "handler": "process_animate",
+      "filters": [
+        "MetaCommand('animate')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_matrix",
     "aliases": [
       "matrix"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_matrix:matrix",
+      "event": "message",
+      "event_order": 34,
+      "registration_order": 39,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "matrix"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "matrix"
+      ]
+    },
+    "registration": {
+      "handler": "process_matrix",
+      "filters": [
+        "MetaCommand('matrix')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "ProgCompiler.process_stdin_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:ProgCompiler.process_stdin_cb",
+      "event": "callback_query",
+      "event_order": 3,
+      "registration_order": 332,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            "*"
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "prog",
+          "separator": ":",
+          "fields": [
+            "action"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "ProgCompiler.process_stdin_cb",
+      "filters": [
+        "ProgCompiler.callback_data.filter()"
+      ],
+      "options": {
+        "state": "'*'"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "ProgCompiler.process_stdin_run",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:ProgCompiler.process_stdin_run",
+      "event": "message",
+      "event_order": 181,
+      "registration_order": 333,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            "ProgStates:stdin"
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "ProgCompiler.process_stdin_run",
+      "filters": [],
+      "options": {
+        "state": "ProgStates.stdin",
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -306,7 +2030,52 @@
     "aliases": [
       "prog",
       "pr"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_code:prog:pr",
+      "event": "message",
+      "event_order": 182,
+      "registration_order": 334,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "prog",
+            "pr"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "prog",
+        "pr"
+      ]
+    },
+    "registration": {
+      "handler": "process_code",
+      "filters": [
+        "MetaCommand('prog', 'pr')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -316,7 +2085,57 @@
       "l",
       "л",
       "лобстер"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_lobster:lobster:l:л:лобстер",
+      "event": "message",
+      "event_order": 183,
+      "registration_order": 335,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "lobster",
+            "l",
+            "л",
+            "лобстер"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "lobster",
+        "l",
+        "л",
+        "лобстер"
+      ]
+    },
+    "registration": {
+      "handler": "process_lobster",
+      "filters": [
+        "MetaCommand('lobster', 'l', 'л', 'лобстер')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -326,7 +2145,57 @@
       "de",
       "д",
       "де"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_demotivator:demotivator:de:д:де",
+      "event": "message",
+      "event_order": 184,
+      "registration_order": 336,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "demotivator",
+            "de",
+            "д",
+            "де"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "demotivator",
+        "de",
+        "д",
+        "де"
+      ]
+    },
+    "registration": {
+      "handler": "process_demotivator",
+      "filters": [
+        "MetaCommand('demotivator', 'de', 'д', 'де')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -336,7 +2205,57 @@
       "атмта",
       "атм",
       "atm"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_atmta:atmta:атмта:атм:atm",
+      "event": "message",
+      "event_order": 185,
+      "registration_order": 337,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "atmta",
+            "атмта",
+            "атм",
+            "atm"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "atmta",
+        "атмта",
+        "атм",
+        "atm"
+      ]
+    },
+    "registration": {
+      "handler": "process_atmta",
+      "filters": [
+        "MetaCommand('atmta', 'атмта', 'атм', 'atm')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -346,14 +2265,108 @@
       "атмтав",
       "атмв",
       "atmv"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_atmta_v:atmtav:атмтав:атмв:atmv",
+      "event": "message",
+      "event_order": 186,
+      "registration_order": 338,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "atmtav",
+            "атмтав",
+            "атмв",
+            "atmv"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "atmtav",
+        "атмтав",
+        "атмв",
+        "atmv"
+      ]
+    },
+    "registration": {
+      "handler": "process_atmta_v",
+      "filters": [
+        "MetaCommand('atmtav', 'атмтав', 'атмв', 'atmv')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_which_anime",
     "aliases": [
       "anime"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_which_anime:anime",
+      "event": "message",
+      "event_order": 187,
+      "registration_order": 339,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "anime"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "anime"
+      ]
+    },
+    "registration": {
+      "handler": "process_which_anime",
+      "filters": [
+        "MetaCommand('anime')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -361,12 +2374,90 @@
     "aliases": [
       "tyan",
       "tyans"
-    ]
+    ],
+    "routing": {
+      "key": "message:Tyan.process:tyan:tyans",
+      "event": "message",
+      "event_order": 188,
+      "registration_order": 340,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "tyan",
+            "tyans"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "tyan",
+        "tyans"
+      ]
+    },
+    "registration": {
+      "handler": "Tyan.process",
+      "filters": [
+        "MetaCommand('tyan', 'tyans')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Tyan.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Tyan.process_cb",
+      "event": "callback_query",
+      "event_order": 4,
+      "registration_order": 341,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "tyan",
+          "separator": ":",
+          "fields": [
+            "type",
+            "category"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Tyan.process_cb",
+      "filters": [
+        "Tyan.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -375,7 +2466,55 @@
       "pdf",
       "topdf",
       "to_pdf"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_topdf:pdf:topdf:to_pdf",
+      "event": "message",
+      "event_order": 189,
+      "registration_order": 342,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "pdf",
+            "topdf",
+            "to_pdf"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "pdf",
+        "topdf",
+        "to_pdf"
+      ]
+    },
+    "registration": {
+      "handler": "process_topdf",
+      "filters": [
+        "MetaCommand('pdf', 'topdf', 'to_pdf')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -383,7 +2522,53 @@
     "aliases": [
       "removebg",
       "bg"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_bg:removebg:bg",
+      "event": "message",
+      "event_order": 190,
+      "registration_order": 343,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "removebg",
+            "bg"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "removebg",
+        "bg"
+      ]
+    },
+    "registration": {
+      "handler": "process_bg",
+      "filters": [
+        "MetaCommand('removebg', 'bg')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -391,7 +2576,53 @@
     "aliases": [
       "gpt2",
       "гпт2"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_porfirevich:gpt2:гпт2",
+      "event": "message",
+      "event_order": 191,
+      "registration_order": 344,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "gpt2",
+            "гпт2"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "gpt2",
+        "гпт2"
+      ]
+    },
+    "registration": {
+      "handler": "process_porfirevich",
+      "filters": [
+        "MetaCommand('gpt2', 'гпт2')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -401,7 +2632,57 @@
       "wiki",
       "вики",
       "duckduckgo"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_duckduckgo:ddg:wiki:вики:duckduckgo",
+      "event": "message",
+      "event_order": 192,
+      "registration_order": 345,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "ddg",
+            "wiki",
+            "вики",
+            "duckduckgo"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "ddg",
+        "wiki",
+        "вики",
+        "duckduckgo"
+      ]
+    },
+    "registration": {
+      "handler": "process_duckduckgo",
+      "filters": [
+        "MetaCommand('ddg', 'wiki', 'вики', 'duckduckgo')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -410,29 +2691,208 @@
       "ud",
       "urban",
       "slang"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_ud:ud:urban:slang",
+      "event": "message",
+      "event_order": 193,
+      "registration_order": 346,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "ud",
+            "urban",
+            "slang"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "ud",
+        "urban",
+        "slang"
+      ]
+    },
+    "registration": {
+      "handler": "process_ud",
+      "filters": [
+        "MetaCommand('ud', 'urban', 'slang')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "AntiBot.process",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:AntiBot.process",
+      "event": "message",
+      "event_order": 194,
+      "registration_order": 347,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "new_chat_members"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "AntiBot.process",
+      "filters": [],
+      "options": {
+        "content_types": "ContentType.NEW_CHAT_MEMBERS"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "AntiBot.process_left",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:AntiBot.process_left",
+      "event": "message",
+      "event_order": 195,
+      "registration_order": 348,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "left_chat_member"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "AntiBot.process_left",
+      "filters": [],
+      "options": {
+        "content_types": "ContentType.LEFT_CHAT_MEMBER"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "AntiBot.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:AntiBot.process_cb",
+      "event": "callback_query",
+      "event_order": 5,
+      "registration_order": 349,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "antibot",
+          "separator": ":",
+          "fields": [
+            "action",
+            "chat_id",
+            "user_id"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "AntiBot.process_cb",
+      "filters": [
+        "AntiBot.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_reverse",
     "aliases": [
       "tenet"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_reverse:tenet",
+      "event": "message",
+      "event_order": 196,
+      "registration_order": 350,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "tenet"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "tenet"
+      ]
+    },
+    "registration": {
+      "handler": "process_reverse",
+      "filters": [],
+      "options": {
+        "commands": "['tenet']",
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -440,7 +2900,53 @@
     "aliases": [
       "text",
       "itt"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_image_to_text:text:itt",
+      "event": "message",
+      "event_order": 197,
+      "registration_order": 351,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "text",
+            "itt"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "text",
+        "itt"
+      ]
+    },
+    "registration": {
+      "handler": "process_image_to_text",
+      "filters": [
+        "MetaCommand('text', 'itt')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -448,19 +2954,148 @@
     "aliases": [
       "tts",
       "speech"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_tts:tts:speech",
+      "event": "message",
+      "event_order": 198,
+      "registration_order": 352,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "tts",
+            "speech"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": 1
+        }
+      ],
+      "runtime_aliases": [
+        "tts",
+        "speech"
+      ]
+    },
+    "registration": {
+      "handler": "process_tts",
+      "filters": [
+        "MetaCommand('tts', 'speech', args=1)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "wit.process_stt_command",
     "aliases": [
       "stt"
-    ]
+    ],
+    "routing": {
+      "key": "message:Wit.process_stt_command:stt",
+      "event": "message",
+      "event_order": 199,
+      "registration_order": 353,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "stt"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "stt"
+      ]
+    },
+    "registration": {
+      "handler": "wit.process_stt_command",
+      "filters": [],
+      "options": {
+        "commands": "['stt']",
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "wit.process_stt",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:Wit.process_stt",
+      "event": "message",
+      "event_order": 200,
+      "registration_order": 354,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "voice",
+            "video_note"
+          ]
+        },
+        {
+          "type": "NotFilter",
+          "target": {
+            "type": "IDFilter",
+            "chat_id": [
+              "settings.excluded_chat_id"
+            ]
+          }
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "wit.process_stt",
+      "filters": [
+        "NotFilter(IDFilter(chat_id=settings.excluded_chat_id))"
+      ],
+      "options": {
+        "content_types": "(ContentType.VOICE, ContentType.VIDEO_NOTE)",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -468,12 +3103,98 @@
     "aliases": [
       "wf",
       "wolfram"
-    ]
+    ],
+    "routing": {
+      "key": "message:WolframAPI.process_wolfram:wf:wolfram",
+      "event": "message",
+      "event_order": 201,
+      "registration_order": 355,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "wf",
+            "wolfram"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "wf",
+        "wolfram"
+      ]
+    },
+    "registration": {
+      "handler": "wolfram.process_wolfram",
+      "filters": [],
+      "options": {
+        "commands": "['wf', 'wolfram']",
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_sed",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:process_sed",
+      "event": "message",
+      "event_order": 202,
+      "registration_order": 356,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "Text",
+          "ignore_case": true,
+          "equals": null,
+          "contains": null,
+          "startswith": [
+            "s/",
+            "ы/"
+          ],
+          "endswith": null
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_sed",
+      "filters": [
+        "Text(startswith=['s/', 'ы/'], ignore_case=True)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY",
+        "run_task": "run_task"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -481,38 +3202,336 @@
     "aliases": [
       "2ch",
       "dvach"
-    ]
+    ],
+    "routing": {
+      "key": "message:Dvach.process:2ch:dvach",
+      "event": "message",
+      "event_order": 203,
+      "registration_order": 357,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "2ch",
+            "dvach"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "OrFilter",
+          "targets": [
+            {
+              "type": "IDFilter",
+              "chat_id": [
+                "settings.dvach_chat_ids[0]",
+                "settings.dvach_chat_ids[1]",
+                "settings.dvach_chat_ids[2]",
+                "settings.dvach_chat_ids[3]",
+                "settings.dvach_chat_ids[4]"
+              ]
+            },
+            {
+              "type": "ChatTypeFilter",
+              "chat_type": [
+                "private"
+              ]
+            }
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "2ch",
+        "dvach"
+      ]
+    },
+    "registration": {
+      "handler": "Dvach.process",
+      "filters": [
+        "Dvach.restriction_filter"
+      ],
+      "options": {
+        "commands": "['2ch', 'dvach']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "Dvach.process_link",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:Dvach.process_link",
+      "event": "message",
+      "event_order": 204,
+      "registration_order": 358,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "OrFilter",
+          "targets": [
+            {
+              "type": "IDFilter",
+              "chat_id": [
+                "settings.dvach_chat_ids[0]",
+                "settings.dvach_chat_ids[1]",
+                "settings.dvach_chat_ids[2]",
+                "settings.dvach_chat_ids[3]",
+                "settings.dvach_chat_ids[4]"
+              ]
+            },
+            {
+              "type": "ChatTypeFilter",
+              "chat_type": [
+                "private"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "callable",
+          "name": "Dvach.link_filter"
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Dvach.process_link",
+      "filters": [
+        "Dvach.restriction_filter",
+        "Dvach.link_filter"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Dvach.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Dvach.process_cb",
+      "event": "callback_query",
+      "event_order": 6,
+      "registration_order": 359,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "thread",
+          "separator": "_",
+          "fields": [
+            "board",
+            "url"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Dvach.process_cb",
+      "filters": [
+        "Dvach.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_sudo",
     "aliases": [
       "sudo"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_sudo:sudo",
+      "event": "message",
+      "event_order": 205,
+      "registration_order": 360,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "sudo"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "sudo"
+      ]
+    },
+    "registration": {
+      "handler": "process_sudo",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "commands": "['sudo']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_revoke",
     "aliases": [
       "revoke"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_revoke:revoke",
+      "event": "message",
+      "event_order": 206,
+      "registration_order": 361,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "revoke"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "revoke"
+      ]
+    },
+    "registration": {
+      "handler": "process_revoke",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "commands": "['revoke']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_ban",
     "aliases": [
       "ban"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_ban:ban",
+      "event": "message",
+      "event_order": 207,
+      "registration_order": 362,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "ban"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "ban"
+      ]
+    },
+    "registration": {
+      "handler": "process_ban",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "commands": "['ban']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -520,94 +3539,751 @@
     "aliases": [
       "restrict",
       "ro"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_restrict:restrict:ro",
+      "event": "message",
+      "event_order": 208,
+      "registration_order": 363,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "restrict",
+            "ro"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "restrict",
+        "ro"
+      ]
+    },
+    "registration": {
+      "handler": "process_restrict",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "commands": "['restrict', 'ro']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_unban",
     "aliases": [
       "unban"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_unban:unban",
+      "event": "message",
+      "event_order": 209,
+      "registration_order": 364,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "unban"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "unban"
+      ]
+    },
+    "registration": {
+      "handler": "process_unban",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "commands": "['unban']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_forwards",
     "aliases": [
       "forwards"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_forwards:forwards",
+      "event": "message",
+      "event_order": 210,
+      "registration_order": 365,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "forwards"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "forwards"
+      ]
+    },
+    "registration": {
+      "handler": "process_forwards",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['forwards']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_create_infra_chat",
     "aliases": [
       "create_infra_chat"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_create_infra_chat:create_infra_chat",
+      "event": "message",
+      "event_order": 211,
+      "registration_order": 366,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "create_infra_chat"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "create_infra_chat"
+      ]
+    },
+    "registration": {
+      "handler": "process_create_infra_chat",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['create_infra_chat']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_delete_infra_chat",
     "aliases": [
       "delete_infra_chat"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_delete_infra_chat:delete_infra_chat",
+      "event": "message",
+      "event_order": 212,
+      "registration_order": 367,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "delete_infra_chat"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "delete_infra_chat"
+      ]
+    },
+    "registration": {
+      "handler": "process_delete_infra_chat",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['delete_infra_chat']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_pin",
     "aliases": [
       "pin"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_pin:pin",
+      "event": "message",
+      "event_order": 213,
+      "registration_order": 368,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "pin"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "pin"
+      ]
+    },
+    "registration": {
+      "handler": "process_pin",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['pin']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_pin_all",
     "aliases": [
       "pin_all"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_pin_all:pin_all",
+      "event": "message",
+      "event_order": 214,
+      "registration_order": 369,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "pin_all"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "pin_all"
+      ]
+    },
+    "registration": {
+      "handler": "process_pin_all",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['pin_all']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_update_pins",
     "aliases": [
       "update_pins"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_update_pins:update_pins",
+      "event": "message",
+      "event_order": 215,
+      "registration_order": 370,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "update_pins"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "update_pins"
+      ]
+    },
+    "registration": {
+      "handler": "process_update_pins",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['update_pins']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_post_all",
     "aliases": [
       "post_all"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_post_all:post_all",
+      "event": "message",
+      "event_order": 216,
+      "registration_order": 371,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "post_all"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "post_all"
+      ]
+    },
+    "registration": {
+      "handler": "process_post_all",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['post_all']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_post_forward_all",
     "aliases": [
       "post_forward_all"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_post_forward_all:post_forward_all",
+      "event": "message",
+      "event_order": 217,
+      "registration_order": 372,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "post_forward_all"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "post_forward_all"
+      ]
+    },
+    "registration": {
+      "handler": "process_post_forward_all",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['post_forward_all']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "MakePost.process",
     "aliases": [
       "make_post"
-    ]
+    ],
+    "routing": {
+      "key": "message:MakePost.process:make_post",
+      "event": "message",
+      "event_order": 218,
+      "registration_order": 373,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "make_post"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "make_post"
+      ]
+    },
+    "registration": {
+      "handler": "MakePost.process",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "commands": "['make_post']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "MakePost.process_destination",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:MakePost.process_destination",
+      "event": "message",
+      "event_order": 219,
+      "registration_order": 374,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            "MakePostStates:destination"
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "MakePost.process_destination",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "state": "MakePostStates.destination",
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "MakePost.process_waiting",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:MakePost.process_waiting",
+      "event": "message",
+      "event_order": 220,
+      "registration_order": 375,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            "MakePostStates:waiting"
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.founder_ids[0]",
+            "settings.founder_ids[1]"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "MakePost.process_waiting",
+      "filters": [
+        "only_for_founders"
+      ],
+      "options": {
+        "state": "MakePostStates.waiting",
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_status",
     "aliases": [
       "status"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_status:status",
+      "event": "message",
+      "event_order": 221,
+      "registration_order": 376,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "status"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "status"
+      ]
+    },
+    "registration": {
+      "handler": "process_status",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['status']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -615,12 +4291,88 @@
     "aliases": [
       "stats",
       "meta"
-    ]
+    ],
+    "routing": {
+      "key": "message:Stats.process:stats:meta",
+      "event": "message",
+      "event_order": 222,
+      "registration_order": 377,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "stats",
+            "meta"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "stats",
+        "meta"
+      ]
+    },
+    "registration": {
+      "handler": "Stats.process",
+      "filters": [
+        "MetaCommand('stats', 'meta')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Stats.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Stats.process_cb",
+      "event": "callback_query",
+      "event_order": 7,
+      "registration_order": 378,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "stats",
+          "separator": ":",
+          "fields": [
+            "action"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Stats.process_cb",
+      "filters": [
+        "Stats.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -628,12 +4380,88 @@
     "aliases": [
       "mc",
       "minecraft"
-    ]
+    ],
+    "routing": {
+      "key": "message:MinecraftStatus.process:mc:minecraft",
+      "event": "message",
+      "event_order": 223,
+      "registration_order": 379,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "mc",
+            "minecraft"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "mc",
+        "minecraft"
+      ]
+    },
+    "registration": {
+      "handler": "MinecraftStatus.process",
+      "filters": [
+        "MetaCommand('mc', 'minecraft')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "MinecraftStatus.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:MinecraftStatus.process_cb",
+      "event": "callback_query",
+      "event_order": 8,
+      "registration_order": 380,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "minecraft",
+          "separator": "$",
+          "fields": [
+            "url"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "MinecraftStatus.process_cb",
+      "filters": [
+        "MinecraftStatus.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -641,12 +4469,89 @@
     "aliases": [
       "camera",
       "cam"
-    ]
+    ],
+    "routing": {
+      "key": "message:Camera.process:camera:cam",
+      "event": "message",
+      "event_order": 224,
+      "registration_order": 381,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "camera",
+            "cam"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "camera",
+        "cam"
+      ]
+    },
+    "registration": {
+      "handler": "Camera.process",
+      "filters": [
+        "MetaCommand('camera', 'cam')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Camera.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Camera.process_cb",
+      "event": "callback_query",
+      "event_order": 9,
+      "registration_order": 382,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "camera",
+          "separator": ":",
+          "fields": [
+            "name",
+            "action"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Camera.process_cb",
+      "filters": [
+        "Camera.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -654,45 +4559,350 @@
     "aliases": [
       "debate",
       "resolution"
-    ]
+    ],
+    "routing": {
+      "key": "message:Debate.process:debate:resolution",
+      "event": "message",
+      "event_order": 225,
+      "registration_order": 383,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "debate",
+            "resolution"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "debate",
+        "resolution"
+      ]
+    },
+    "registration": {
+      "handler": "Debate.process",
+      "filters": [
+        "MetaCommand('debate', 'resolution')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Debate.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Debate.process_cb",
+      "event": "callback_query",
+      "event_order": 10,
+      "registration_order": 384,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "debate",
+          "separator": ":",
+          "fields": [
+            "action",
+            "uid"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Debate.process_cb",
+      "filters": [
+        "Debate.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "Crypto.process",
     "aliases": [
       "crypto"
-    ]
+    ],
+    "routing": {
+      "key": "message:Crypto.process:crypto:btc:eth:xrp:bnb:doge",
+      "event": "message",
+      "event_order": 226,
+      "registration_order": 385,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "crypto",
+            "btc",
+            "eth",
+            "xrp",
+            "bnb",
+            "doge"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "crypto",
+        "btc",
+        "eth",
+        "xrp",
+        "bnb",
+        "doge"
+      ]
+    },
+    "registration": {
+      "handler": "Crypto.process",
+      "filters": [
+        "MetaCommand('crypto', *Crypto.tickers)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Crypto.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Crypto.process_cb",
+      "event": "callback_query",
+      "event_order": 11,
+      "registration_order": 386,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "crypto",
+          "separator": ":",
+          "fields": [
+            "ticker"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Crypto.process_cb",
+      "filters": [
+        "Crypto.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_vk_wall",
     "aliases": [
       "vk_wall"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_vk_wall:vk_wall",
+      "event": "message",
+      "event_order": 227,
+      "registration_order": 387,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "vk_wall"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "vk_wall"
+      ]
+    },
+    "registration": {
+      "handler": "process_vk_wall",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['vk_wall']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_vk_post",
     "aliases": [
       "vk_post"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_vk_post:vk_post",
+      "event": "message",
+      "event_order": 228,
+      "registration_order": 388,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "vk_post"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "vk_post"
+      ]
+    },
+    "registration": {
+      "handler": "process_vk_post",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['vk_post']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_list_vk_wall",
     "aliases": [
       "list_vk_wall"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_list_vk_wall:list_vk_wall",
+      "event": "message",
+      "event_order": 229,
+      "registration_order": 389,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "list_vk_wall"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        },
+        {
+          "type": "IDFilter",
+          "user_id": [
+            "settings.owner_id"
+          ]
+        }
+      ],
+      "runtime_aliases": [
+        "list_vk_wall"
+      ]
+    },
+    "registration": {
+      "handler": "process_list_vk_wall",
+      "filters": [
+        "only_for_me"
+      ],
+      "options": {
+        "commands": "['list_vk_wall']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -701,7 +4911,54 @@
       "vote",
       "votes",
       "выбираем"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_votes:vote:votes:выбираем",
+      "event": "message",
+      "event_order": 230,
+      "registration_order": 390,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "vote",
+            "votes",
+            "выбираем"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": 10
+        }
+      ],
+      "runtime_aliases": [
+        "vote",
+        "votes",
+        "выбираем"
+      ]
+    },
+    "registration": {
+      "handler": "process_votes",
+      "filters": [
+        "MetaCommand('vote', 'votes', 'выбираем', args=10)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -710,12 +4967,90 @@
       "like",
       "likes",
       "лайки"
-    ]
+    ],
+    "routing": {
+      "key": "message:Like.process:like:likes:лайки",
+      "event": "message",
+      "event_order": 231,
+      "registration_order": 391,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "like",
+            "likes",
+            "лайки"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "like",
+        "likes",
+        "лайки"
+      ]
+    },
+    "registration": {
+      "handler": "Like.process",
+      "filters": [
+        "MetaCommand('like', 'likes', 'лайки')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Like.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Like.process_cb",
+      "event": "callback_query",
+      "event_order": 12,
+      "registration_order": 392,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "like",
+          "separator": ":",
+          "fields": [
+            "count"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Like.process_cb",
+      "filters": [
+        "Like.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -725,12 +5060,92 @@
       "rates",
       "рейт",
       "зацените"
-    ]
+    ],
+    "routing": {
+      "key": "message:Rate.process:rate:rates:рейт:зацените",
+      "event": "message",
+      "event_order": 232,
+      "registration_order": 393,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "rate",
+            "rates",
+            "рейт",
+            "зацените"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "rate",
+        "rates",
+        "рейт",
+        "зацените"
+      ]
+    },
+    "registration": {
+      "handler": "Rate.process",
+      "filters": [
+        "MetaCommand('rate', 'rates', 'рейт', 'зацените')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Rate.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Rate.process_cb",
+      "event": "callback_query",
+      "event_order": 13,
+      "registration_order": 394,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "rate",
+          "separator": ":",
+          "fields": [
+            "is_up"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Rate.process_cb",
+      "filters": [
+        "Rate.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -738,7 +5153,52 @@
     "aliases": [
       "roll",
       "ролл"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_roll:roll:ролл",
+      "event": "message",
+      "event_order": 233,
+      "registration_order": 395,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "roll",
+            "ролл"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "roll",
+        "ролл"
+      ]
+    },
+    "registration": {
+      "handler": "process_roll",
+      "filters": [
+        "MetaCommand('roll', 'ролл')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -747,12 +5207,91 @@
       "rolls",
       "роллим",
       "рулетка"
-    ]
+    ],
+    "routing": {
+      "key": "message:Rolls.process:rolls:роллим:рулетка",
+      "event": "message",
+      "event_order": 234,
+      "registration_order": 396,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "rolls",
+            "роллим",
+            "рулетка"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "rolls",
+        "роллим",
+        "рулетка"
+      ]
+    },
+    "registration": {
+      "handler": "Rolls.process",
+      "filters": [
+        "MetaCommand('rolls', 'роллим', 'рулетка')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Rolls.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Rolls.process_cb",
+      "event": "callback_query",
+      "event_order": 14,
+      "registration_order": 397,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "roll",
+          "separator": ":",
+          "fields": [
+            "digits",
+            "count"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Rolls.process_cb",
+      "filters": [
+        "Rolls.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -761,7 +5300,54 @@
       "random",
       "rand",
       "рандом"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_random:random:rand:рандом",
+      "event": "message",
+      "event_order": 235,
+      "registration_order": 398,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "random",
+            "rand",
+            "рандом"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "random",
+        "rand",
+        "рандом"
+      ]
+    },
+    "registration": {
+      "handler": "process_random",
+      "filters": [
+        "MetaCommand('random', 'rand', 'рандом')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -770,12 +5356,92 @@
       "randoms",
       "рандомим",
       "числа"
-    ]
+    ],
+    "routing": {
+      "key": "message:Randoms.process:randoms:рандомим:числа",
+      "event": "message",
+      "event_order": 236,
+      "registration_order": 399,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "randoms",
+            "рандомим",
+            "числа"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "randoms",
+        "рандомим",
+        "числа"
+      ]
+    },
+    "registration": {
+      "handler": "Randoms.process",
+      "filters": [
+        "MetaCommand('randoms', 'рандомим', 'числа')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Randoms.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Randoms.process_cb",
+      "event": "callback_query",
+      "event_order": 15,
+      "registration_order": 400,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "random",
+          "separator": ":",
+          "fields": [
+            "begin",
+            "end",
+            "count"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Randoms.process_cb",
+      "filters": [
+        "Randoms.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -784,12 +5450,90 @@
       "raffle",
       "розыгрыш",
       "конкурс"
-    ]
+    ],
+    "routing": {
+      "key": "message:Raffle.process:raffle:розыгрыш:конкурс",
+      "event": "message",
+      "event_order": 237,
+      "registration_order": 401,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "raffle",
+            "розыгрыш",
+            "конкурс"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "raffle",
+        "розыгрыш",
+        "конкурс"
+      ]
+    },
+    "registration": {
+      "handler": "Raffle.process",
+      "filters": [
+        "MetaCommand('raffle', 'розыгрыш', 'конкурс')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Raffle.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Raffle.process_cb",
+      "event": "callback_query",
+      "event_order": 16,
+      "registration_order": 402,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "raffle",
+          "separator": ":",
+          "fields": [
+            "action"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Raffle.process_cb",
+      "filters": [
+        "Raffle.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -799,54 +5543,385 @@
       "истина",
       "истину",
       "истины"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_truth:truth:истина:истину:истины",
+      "event": "message",
+      "event_order": 238,
+      "registration_order": 403,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "truth",
+            "истина",
+            "истину",
+            "истины"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "truth",
+        "истина",
+        "истину",
+        "истины"
+      ]
+    },
+    "registration": {
+      "handler": "process_truth",
+      "filters": [
+        "MetaCommand('truth', 'истина', 'истину', 'истины')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_or",
     "aliases": [
       "or"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_or:or",
+      "event": "message",
+      "event_order": 239,
+      "registration_order": 404,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "or"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "or"
+      ]
+    },
+    "registration": {
+      "handler": "process_or",
+      "filters": [
+        "MetaCommand('or')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_mash",
     "aliases": [
       "mash"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_mash:mash",
+      "event": "message",
+      "event_order": 240,
+      "registration_order": 405,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "mash"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "mash"
+      ]
+    },
+    "registration": {
+      "handler": "process_mash",
+      "filters": [
+        "MetaCommand('mash')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_d6",
     "aliases": [
       "d6"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_d6:d6",
+      "event": "message",
+      "event_order": 241,
+      "registration_order": 406,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "d6"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "d6"
+      ]
+    },
+    "registration": {
+      "handler": "process_d6",
+      "filters": [
+        "MetaCommand('d6')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_dice",
     "aliases": [
       "dice"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_dice:dice",
+      "event": "message",
+      "event_order": 242,
+      "registration_order": 407,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "dice"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "dice"
+      ]
+    },
+    "registration": {
+      "handler": "process_dice",
+      "filters": [
+        "MetaCommand('dice')"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_others_dice",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:process_others_dice",
+      "event": "message",
+      "event_order": 243,
+      "registration_order": 408,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "dice"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_others_dice",
+      "filters": [],
+      "options": {
+        "content_types": "ContentType.DICE"
+      }
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_zalgo",
     "aliases": [
       "zalgo"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_zalgo:zalgo",
+      "event": "message",
+      "event_order": 244,
+      "registration_order": 409,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "zalgo"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "zalgo"
+      ]
+    },
+    "registration": {
+      "handler": "process_zalgo",
+      "filters": [
+        "MetaCommand('zalgo')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_figlet",
     "aliases": [
       "figlet"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_figlet:figlet",
+      "event": "message",
+      "event_order": 245,
+      "registration_order": 410,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "figlet"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "figlet"
+      ]
+    },
+    "registration": {
+      "handler": "process_figlet",
+      "filters": [
+        "MetaCommand('figlet')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -854,7 +5929,50 @@
     "aliases": [
       "excuse",
       "e"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_excuse:excuse:e",
+      "event": "message",
+      "event_order": 246,
+      "registration_order": 411,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "excuse",
+            "e"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "excuse",
+        "e"
+      ]
+    },
+    "registration": {
+      "handler": "process_excuse",
+      "filters": [
+        "MetaCommand('excuse', 'e')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -862,33 +5980,231 @@
     "aliases": [
       "gender",
       "g"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_gender:gender:g",
+      "event": "message",
+      "event_order": 247,
+      "registration_order": 412,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "gender",
+            "g"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "gender",
+        "g"
+      ]
+    },
+    "registration": {
+      "handler": "process_gender",
+      "filters": [
+        "MetaCommand('gender', 'g')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "Geoguess.process",
     "aliases": [
       "geoguess"
-    ]
+    ],
+    "routing": {
+      "key": "message:Geoguess.process:geoguess",
+      "event": "message",
+      "event_order": 248,
+      "registration_order": 413,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "geoguess"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "geoguess"
+      ]
+    },
+    "registration": {
+      "handler": "Geoguess.process",
+      "filters": [
+        "MetaCommand('geoguess')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "Geoguess.top",
     "aliases": [
       "geoguess_top"
-    ]
+    ],
+    "routing": {
+      "key": "message:Geoguess.top:geoguess_top",
+      "event": "message",
+      "event_order": 249,
+      "registration_order": 414,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "geoguess_top"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "geoguess_top"
+      ]
+    },
+    "registration": {
+      "handler": "Geoguess.top",
+      "filters": [
+        "MetaCommand('geoguess_top')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "Geoguess.process_cb",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:Geoguess.process_cb",
+      "event": "callback_query",
+      "event_order": 17,
+      "registration_order": 415,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "CallbackDataFilter",
+          "prefix": "geoguess",
+          "separator": ":",
+          "fields": [
+            "round",
+            "choice"
+          ],
+          "constraints": {}
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "Geoguess.process_cb",
+      "filters": [
+        "Geoguess.callback_data.filter()"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_me",
     "aliases": [
       "me"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_me:me",
+      "event": "message",
+      "event_order": 250,
+      "registration_order": 416,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "me"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "me"
+      ]
+    },
+    "registration": {
+      "handler": "process_me",
+      "filters": [
+        "MetaCommand('me')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -897,14 +6213,99 @@
       "copy",
       "see",
       "uncover"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_copy:copy:see:uncover",
+      "event": "message",
+      "event_order": 251,
+      "registration_order": 417,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "copy",
+            "see",
+            "uncover"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "copy",
+        "see",
+        "uncover"
+      ]
+    },
+    "registration": {
+      "handler": "process_copy",
+      "filters": [
+        "MetaCommand('copy', 'see', 'uncover')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_arxiv",
     "aliases": [
       "arxiv"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_arxiv:arxiv",
+      "event": "message",
+      "event_order": 252,
+      "registration_order": 418,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "Command",
+          "commands": [
+            "arxiv"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": true
+        }
+      ],
+      "runtime_aliases": [
+        "arxiv"
+      ]
+    },
+    "registration": {
+      "handler": "process_arxiv",
+      "filters": [],
+      "options": {
+        "commands": "['arxiv']"
+      }
+    }
   },
   {
     "type": "register_message_handler",
@@ -912,28 +6313,194 @@
     "aliases": [
       "translate",
       "tr"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_translate:translate:tr",
+      "event": "message",
+      "event_order": 253,
+      "registration_order": 419,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "translate",
+            "tr"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": 2
+        }
+      ],
+      "runtime_aliases": [
+        "translate",
+        "tr"
+      ]
+    },
+    "registration": {
+      "handler": "process_translate",
+      "filters": [
+        "MetaCommand('translate', 'tr', args=2)"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_en",
     "aliases": [
       "en"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_en:en",
+      "event": "message",
+      "event_order": 254,
+      "registration_order": 420,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "en"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "en"
+      ]
+    },
+    "registration": {
+      "handler": "process_en",
+      "filters": [
+        "MetaCommand('en')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_ru",
     "aliases": [
       "ru"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_ru:ru",
+      "event": "message",
+      "event_order": 255,
+      "registration_order": 421,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "ru"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "ru"
+      ]
+    },
+    "registration": {
+      "handler": "process_ru",
+      "filters": [
+        "MetaCommand('ru')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_langs",
     "aliases": [
       "langs"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_langs:langs",
+      "event": "message",
+      "event_order": 256,
+      "registration_order": 422,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "langs"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "langs"
+      ]
+    },
+    "registration": {
+      "handler": "process_langs",
+      "filters": [
+        "MetaCommand('langs')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -941,7 +6508,50 @@
     "aliases": [
       "sanya",
       "саня"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_sanya:sanya:саня",
+      "event": "message",
+      "event_order": 257,
+      "registration_order": 423,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "sanya",
+            "саня"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "sanya",
+        "саня"
+      ]
+    },
+    "registration": {
+      "handler": "process_sanya",
+      "filters": [
+        "MetaCommand('sanya', 'саня')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -949,7 +6559,50 @@
     "aliases": [
       "dyubs",
       "дюбс"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_dyubs:dyubs:дюбс",
+      "event": "message",
+      "event_order": 258,
+      "registration_order": 424,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "dyubs",
+            "дюбс"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "dyubs",
+        "дюбс"
+      ]
+    },
+    "registration": {
+      "handler": "process_dyubs",
+      "filters": [
+        "MetaCommand('dyubs', 'дюбс')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
@@ -957,41 +6610,283 @@
     "aliases": [
       "popov",
       "попов"
-    ]
+    ],
+    "routing": {
+      "key": "message:process_popov:popov:попов",
+      "event": "message",
+      "event_order": 259,
+      "registration_order": 425,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "text"
+          ]
+        },
+        {
+          "type": "MetaCommand",
+          "commands": [
+            "popov",
+            "попов"
+          ],
+          "prefixes": "/",
+          "ignore_case": true,
+          "ignore_mention": false,
+          "ignore_caption": false,
+          "args": null
+        }
+      ],
+      "runtime_aliases": [
+        "popov",
+        "попов"
+      ]
+    },
+    "registration": {
+      "handler": "process_popov",
+      "filters": [
+        "MetaCommand('popov', 'попов')"
+      ],
+      "options": {}
+    }
   },
   {
     "type": "register_channel_post_handler",
     "handler": "process_forward_builder",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "channel_post:process_forward_builder.<locals>.process_forward:settings.forward_chat_ids[1]",
+      "event": "channel_post",
+      "event_order": 0,
+      "registration_order": 426,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "IDFilter",
+          "chat_id": [
+            "settings.forward_chat_ids[0]"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_forward_builder(test_chat_id)",
+      "filters": [
+        "IDFilter(chat_id=kek_pek_id)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_channel_post_handler",
     "handler": "process_forward_builder",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "channel_post:process_forward_builder.<locals>.process_forward:settings.related_chat_ids[1]",
+      "event": "channel_post",
+      "event_order": 1,
+      "registration_order": 427,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "IDFilter",
+          "chat_id": [
+            "settings.related_chat_ids[0]"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_forward_builder(related_chat_id)",
+      "filters": [
+        "IDFilter(chat_id=unrelated_id)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_channel_post_handler",
     "handler": "process_pookie_pook",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "channel_post:process_pookie_pook",
+      "event": "channel_post",
+      "event_order": 2,
+      "registration_order": 428,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "IDFilter",
+          "chat_id": [
+            "settings.pookie_chat_id"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_pookie_pook",
+      "filters": [
+        "IDFilter(chat_id=settings.pookie_chat_id)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_inline_handler",
     "handler": "process_inline",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "inline_query:process_inline",
+      "event": "inline_query",
+      "event_order": 0,
+      "registration_order": 429,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_inline",
+      "filters": [],
+      "options": {}
+    }
   },
   {
     "type": "register_message_handler",
     "handler": "process_echo",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "message:process_echo",
+      "event": "message",
+      "event_order": 260,
+      "registration_order": 430,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            null
+          ]
+        },
+        {
+          "type": "ContentTypeFilter",
+          "content_types": [
+            "any"
+          ]
+        },
+        {
+          "type": "IDFilter",
+          "chat_id": [
+            "settings.echo_chat_id"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_echo",
+      "filters": [
+        "IDFilter(chat_id=settings.echo_chat_id)"
+      ],
+      "options": {
+        "content_types": "ContentType.ANY"
+      }
+    }
   },
   {
     "type": "register_callback_query_handler",
     "handler": "process_expired_callback",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "callback_query:process_expired_callback",
+      "event": "callback_query",
+      "event_order": 18,
+      "registration_order": 431,
+      "filters": [
+        {
+          "type": "StateFilter",
+          "states": [
+            "*"
+          ]
+        }
+      ],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_expired_callback",
+      "filters": [],
+      "options": {
+        "state": "'*'"
+      }
+    }
   },
   {
     "type": "register_errors_handler",
     "handler": "process_error",
-    "aliases": []
+    "aliases": [],
+    "routing": {
+      "key": "errors:process_error",
+      "event": "errors",
+      "event_order": 0,
+      "registration_order": 432,
+      "filters": [],
+      "runtime_aliases": []
+    },
+    "registration": {
+      "handler": "process_error",
+      "filters": [],
+      "options": {}
+    }
   }
 ]
