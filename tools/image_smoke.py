@@ -34,7 +34,8 @@ async def main():
     app.app.on_startup_all = AsyncMock()
     try:
         await app.on_startup(app.dp)
-        assert len(app.dp.message_handlers.handlers) == 302
+        assert len(app.dp.message_handlers.handlers) == 262
+        assert len(app.dp.callback_query_handlers.handlers) == 19
         assert len(app.dp.edited_message_handlers.handlers) == 148
         assert len(app.app.scheduler.get_jobs()) == 1
         from PIL import ImageFont
