@@ -50,6 +50,8 @@ seven source seconds are excluded while the earlier segment remains present.
 
 ## Suggested coverage next
 
+Tracked in [issue #7](https://github.com/uburuntu/msu_hub_bot/issues/7).
+
 1. **Reuse existing regular stickers directly.** Avoid unnecessary encoding when
    the input already has a valid sticker format, dimensions, and duration. Cover
    static WEBP, vector TGS, VP9 alpha, and duplicate additions.
@@ -64,10 +66,8 @@ seven source seconds are excluded while the earlier segment remains present.
    20 search keywords with 64 characters total; the command currently uses at
    most five emoji. Add editing through `setStickerEmojiList` and
    `setStickerKeywords`.
-5. **Modernize pack editing.** Add replacement, reordering, title editing, and
-   thumbnails through the current API. Mask packs need a separate mode with
-   face-placement metadata. Premium animation overlays need separate validation
-   rather than assuming they transfer with the base artwork.
+Pack replacement, reordering, title editing, and thumbnail management stay in
+Telegram's apps, which provide a better interface for these operations.
 
 These API operations can use the shared client on aiogram 2. A later aiogram 3
 migration can replace the adapter with current typed models without mixing that
