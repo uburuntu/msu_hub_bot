@@ -1,13 +1,12 @@
 # MSU Hub Bot
 
-A Russian-speaking Telegram community bot with media tools, OCR, speech and song
-recognition, translation, code execution through JDoodle, games, polls, and chat
-administration.
+A friends' Swiss-army Telegram bot, born in Moscow State University chats:
+media tools, OCR, speech and song recognition, translation, code execution
+through JDoodle, games, polls, chat administration, and a few inside jokes.
 
-The first release preserves the deployed aiogram 2 command set and data formats.
-Provider APIs and dependencies are intentionally kept at the observed legacy
-baseline. Some external services may have changed since the original code was
-written; provider migrations are separate work.
+The runtime uses aiogram 2, EdgeDB, and Redis. Dependencies are locked for
+reproducible builds. External tools depend on their providers' availability
+and configuration; see the bot's `/help` for commands.
 
 ## Development
 
@@ -54,9 +53,8 @@ and runs its immutable image ID. Images are kept on the runner and VPS.
 The bot reuses the existing Redis and EdgeDB services on the external `msu_db`
 network. Deployment does not run migrations or recreate shared infrastructure.
 
-The initial repository bootstrap leaves the repository variable
-`DEPLOY_ENABLED` unset until the host and secrets are ready. Once set to `true`,
-main deploys automatically. No staging bot or approval gate is required.
+The repository variable `DEPLOY_ENABLED=true` enables automatic deployment
+from main. Pull requests run checks without deploying.
 
 See [deployment operations](docs/deployment.md) for host setup, secrets,
 rollback, and moving to another VPS.
@@ -67,11 +65,10 @@ The launcher preserves the application's existing import layout. Ruff
 exceptions are limited to specific legacy files; runtime, deployment, and test
 code uses Ruff formatting.
 
-Demotivators use Liberation Serif. Image generation integrations use an external
-CAPTCHA-solving service when configured. The debate dataset and font assets are
-bundled.
+Demotivators use Liberation Serif; animated text uses Ubuntu Mono. The debate
+dataset and font assets are bundled.
 
 Application license: **GPL-3.0-only**. Fonts retain their own licenses; see
 [third-party notices](THIRD_PARTY_NOTICES.md). ACRCloud binaries remain an
-external dependency, and deployment images stay private while their
-redistribution terms are reviewed.
+external dependency; deployment images are transferred privately and are not
+published for redistribution.

@@ -14,6 +14,6 @@ Liberation Serif font SHA256:
 `29d12439831b7f59194efec85872f24f54eff05738933f9a860220d2abff88ba`.
 
 The ACRCloud Python SDK remains an external, pinned Git dependency. Its native
-binaries are not vendored in this repository. Deployment images remain private
-while redistribution terms are reviewed. All other dependencies retain their
-respective upstream licenses.
+binaries are not vendored in this repository. Deployment images are transferred
+privately and are not published for redistribution. All other dependencies
+retain their respective upstream licenses.
