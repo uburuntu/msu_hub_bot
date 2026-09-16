@@ -14,3 +14,12 @@ id = "literal-provider-password"
 description = "Literal password passed to the grammar client"
 regex = '''Orfogrammka\(\s*['"][^'"\r\n]+['"]\s*,\s*['"]([^'"\r\n]+)['"]'''
 secretGroup = 1
+
+[[rules]]
+id = "generic-api-key"
+    [[rules.allowlists]]
+    description = "Published api2ch source checksum, verified by the isolation test"
+    condition = "AND"
+    paths = ['''(?:^|/)tests/fixtures/api2ch_source\.json$''']
+    regexTarget = "secret"
+    regexes = ['''^c39b0cfe0d611420cad06c6ff3650864075e56fe74a52a837c5248985d66cb11$''']
