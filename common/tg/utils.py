@@ -19,6 +19,12 @@ from common.tg.files import download_text as download_text
 from common.utils import cut_long_text, one_liner
 
 
+def command_arguments(message: Message) -> str:
+    text = message.text or message.caption or ""
+    parts = text.split(maxsplit=1)
+    return parts[1] if len(parts) == 2 else ""
+
+
 async def send_super_reply(
     message: Message,
     text: str,

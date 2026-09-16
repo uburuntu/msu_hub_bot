@@ -7,19 +7,21 @@ from unittest.mock import AsyncMock, Mock
 
 import aiohttp
 import pytest
-from aiogram.utils.exceptions import MessageToDeleteNotFound, TelegramAPIError
+from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
+from aiogram.methods import DeleteMessage
 
-from msu_hub_bot.cli import prepare_imports
 from msu_hub_bot.settings import MissingIntegration
 
-prepare_imports()
-from utils import wit, wolfram  # noqa: E402
+from hub_bot.utils import wit, wolfram
+
+METHOD = DeleteMessage(chat_id=42, message_id=1)
 
 
 def request_message(query="2+2", reply=None):
     progress = SimpleNamespace(delete=AsyncMock())
     message = SimpleNamespace(
-        get_args=lambda: query,
+        text="/wf " + query,
+        caption=None,
         reply_to_message=reply,
         reply=AsyncMock(return_value=progress),
         reply_photo=AsyncMock(),
@@ -88,7 +90,7 @@ async def test_delivery_failure_still_cleans_progress():
     message, progress = request_message()
     client = wolfram.WolframAPI("synthetic")
     client.request = AsyncMock(return_value=(io.BytesIO(b"image"), 1.0))
-    message.reply_photo.side_effect = TelegramAPIError("synthetic delivery failure")
+    message.reply_photo.side_effect = TelegramAPIError(METHOD, "synthetic delivery failure")
 
     with pytest.raises(TelegramAPIError):
         await client.process_wolfram(message)
@@ -96,7 +98,7 @@ async def test_delivery_failure_still_cleans_progress():
     progress.delete.assert_awaited_once()
 
 
-@pytest.mark.parametrize("failure", [MessageToDeleteNotFound("Message to delete not found"), aiohttp.ClientError(), TimeoutError()])
+@pytest.mark.parametrize("failure", [TelegramBadRequest(METHOD, "Message to delete not found"), aiohttp.ClientError(), TimeoutError()])
 async def test_cleanup_failure_does_not_erase_a_delivered_result(failure):
     message, progress = request_message()
     client = wolfram.WolframAPI("synthetic")

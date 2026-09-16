@@ -7,7 +7,7 @@ from typing import Any
 
 from aiogram import Bot
 from aiogram.enums import ContentType
-from aiogram.filters import Filter
+from aiogram.filters import Command, Filter
 from aiogram.types import CallbackQuery, Document, Message
 
 from common.tg.command import CommandParser
@@ -126,3 +126,12 @@ class ChatTypeFilter(Filter):
         if isinstance(event, Message):
             return event.chat.type in self.chat_type
         return event.message is not None and event.message.chat.type in self.chat_type
+
+
+class SlashCommand(Command):
+    """Plain command registrations match text, retaining their case sensitivity."""
+
+    async def __call__(self, message: Message, bot: Bot) -> bool | dict[str, Any]:
+        if message.text is None:
+            return False
+        return await super().__call__(message, bot)

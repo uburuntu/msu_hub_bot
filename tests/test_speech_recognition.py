@@ -6,20 +6,20 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from msu_hub_bot.cli import prepare_imports
 from msu_hub_bot.settings import MissingIntegration
 
-prepare_imports()
-from utils import wit  # noqa: E402
+from hub_bot.utils import wit
 
 
 def audio_message(*, size=3, payload=b"pcm", reply=None, kind="voice"):
-    async def download(*, destination_file):
-        destination_file.write(payload)
-        return destination_file
+    async def download(file_id, *, destination):
+        destination.write(payload)
+        return destination
 
-    audio = SimpleNamespace(file_size=size, duration=1, download=AsyncMock(side_effect=download))
-    message = SimpleNamespace(voice=None, video_note=None, audio=None, video=None, reply_to_message=reply)
+    audio = SimpleNamespace(file_id="synthetic-file", file_size=size, duration=1, download=AsyncMock(side_effect=download))
+    message = SimpleNamespace(
+        voice=None, video_note=None, audio=None, video=None, reply_to_message=reply, bot=SimpleNamespace(download=audio.download)
+    )
     setattr(message, kind, audio)
     return message, audio
 
@@ -42,7 +42,7 @@ async def test_disabled_automatic_stt_never_downloads_incoming_or_replied_audio(
 @pytest.mark.parametrize("kind", ["voice", "video_note", "audio", "video"])
 async def test_explicit_stt_keeps_reply_selection_when_automatic_stt_is_disabled(monkeypatch, kind):
     reply, audio = audio_message(kind=kind, size=None)
-    command = SimpleNamespace(voice=None, video_note=None, reply_to_message=reply)
+    command = SimpleNamespace(voice=None, video_note=None, reply_to_message=reply, bot=reply.bot)
     client = wit.Wit(["synthetic"])
     client.stt = AsyncMock(return_value="transcript")
     send = AsyncMock()

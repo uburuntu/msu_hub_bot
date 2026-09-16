@@ -5,13 +5,15 @@ from functools import cached_property
 from io import BytesIO
 from typing import Tuple
 
-import aiogram
+from aiogram.exceptions import TelegramAPIError
 import aiohttp
 from PIL import Image
-from aiogram.types import InputFile, Message
+from aiogram.types import Message
 from aiogram.utils.markdown import hcode
 
 from common.utils import valid_filename, image_bytes_io
+from common.tg.files import input_file
+from common.tg.utils import command_arguments
 
 
 class WolframAPIError(Exception):
@@ -22,69 +24,70 @@ class WolframAPI:
     """
     Docs: https://products.wolframalpha.com/simple-api/documentation/
     """
-    api_url = 'https://api.wolframalpha.com/v1/simple'
 
-    def __init__(self, token: str):
+    api_url = "https://api.wolframalpha.com/v1/simple"
+
+    def __init__(self, token: str) -> None:
         self.token = token
 
     @cached_property
     def session(self) -> aiohttp.ClientSession:
         return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
 
-    async def close(self):
-        session = self.__dict__.get('session')
+    async def close(self) -> None:
+        session = self.__dict__.get("session")
         if session is not None:
             await session.close()
 
-    async def _request(self, **params) -> bytes:
-        params = {
-            'appid': self.token,
-            'layout': 'labelbar',
-            'width': 600,
-            'units': 'metric',
-            'timeout': 8,
+    async def _request(self, **params: str) -> bytes:
+        request_params: dict[str, str | int] = {
+            "appid": self.token,
+            "layout": "labelbar",
+            "width": 600,
+            "units": "metric",
+            "timeout": 8,
             **params,
         }
-        async with self.session.get(self.api_url, params=params) as response:
+        async with self.session.get(self.api_url, params=request_params) as response:
             if response.status == 200:
                 result = await response.read()
                 return result
             else:
-                raise WolframAPIError(f'[{response.status}] {response.reason}')
+                raise WolframAPIError(f"[{response.status}] {response.reason}")
 
     async def request(self, query: str) -> Tuple[BytesIO, float]:
         content = await self._request(i=query)
 
-        def crop(img: Image, from_top: int = 0, from_bottom: int = 0) -> Image:
+        def crop(img: Image.Image, from_top: int = 0, from_bottom: int = 0) -> Image.Image:
             box = (0, from_top, img.width, img.height - from_bottom)
             return img.crop(box)
 
         image = crop(Image.open(BytesIO(content)), from_top=75, from_bottom=45)
-        return image_bytes_io(image, f'wolfram_{valid_filename(query)}', 'png'), image.height / image.width
+        return image_bytes_io(image, f"wolfram_{valid_filename(query)}", "png"), image.height / image.width
 
-    async def process_wolfram(self, message: Message):
+    async def process_wolfram(self, message: Message) -> Message:
         if not self.token:
             raise MissingIntegration("wolfram_token")
 
-        query = message.get_args()
+        query = command_arguments(message)
         if not query:
             if reply_to := message.reply_to_message:
-                query = reply_to.text or reply_to.caption
+                query = reply_to.text or reply_to.caption or ""
 
         if not query:
-            return await message.reply('Использование: ' + hcode('/wf sum 1/n^2, n=1..inf'))
+            return await message.reply("Использование: " + hcode("/wf sum 1/n^2, n=1..inf"))
 
-        target = await message.reply('🔄 WolframAlpha обрабатывает запрос…')
+        target = await message.reply("🔄 WolframAlpha обрабатывает запрос…")
 
         try:
             try:
                 image, ratio = await self.request(query=query)
             except (WolframAPIError, aiohttp.ClientError, TimeoutError):
-                return await message.reply('Не удалось получить результат от WolframAlpha. Попробуйте другой запрос или повторите позже.')
+                return await message.reply("Не удалось получить результат от WolframAlpha. Попробуйте другой запрос или повторите позже.")
 
             if ratio > 2.1:
-                return await message.reply_document(InputFile(image))
-            return await message.reply_photo(InputFile(image))
+                return await message.reply_document(input_file(image, "wolfram.png"))
+            return await message.reply_photo(input_file(image, "wolfram.png"))
         finally:
-            with suppress(aiogram.exceptions.TelegramAPIError, aiohttp.ClientError, TimeoutError):
+            with suppress(TelegramAPIError, aiohttp.ClientError, TimeoutError):
                 await target.delete()
