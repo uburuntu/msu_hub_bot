@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from msu_hub_bot.telemetry import Boundary, GaugeName, Telemetry
+
 ResultT = TypeVar("ResultT")
 EventT = TypeVar("EventT")
 
@@ -51,7 +53,8 @@ class Supervisor:
     Factories are invoked only after admission, so rejection leaks no coroutine.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, telemetry: Telemetry | None = None) -> None:
+        self.telemetry = telemetry or Telemetry()
         self._updates: set[asyncio.Task[Any]] = set()
         self._jobs: set[asyncio.Task[Any]] = set()
         self._updates_open = True
@@ -83,25 +86,33 @@ class Supervisor:
             raise RuntimeError("A background job cannot become a polling worker")
         if task not in self._updates:
             self._updates.add(task)
+            self.telemetry.gauge(GaugeName.UPDATES_ACTIVE, len(self._updates))
             task.add_done_callback(self._update_done)
 
     def close_updates(self) -> None:
         self._updates_open = False
 
-    def create_job(self, factory: Callable[[], Coroutine[Any, Any, ResultT]]) -> asyncio.Task[ResultT]:
+    def create_job(self, factory: Callable[[], Coroutine[Any, Any, ResultT]], *, trace: bool = True) -> asyncio.Task[ResultT]:
         parent = asyncio.current_task()
         owned_parent = parent in self._updates or parent in self._jobs
         if self._cancelling or (not self._updates_open and not owned_parent):
             raise AdmissionClosed("Background job admission is closed")
         if not self._jobs_open and parent not in self._jobs:
             raise AdmissionClosed("Background job admission is closed")
-        task = asyncio.create_task(factory(), name="bot-background-job")
+
+        async def observed_job() -> ResultT:
+            with self.telemetry.operation(Boundary.JOB, "background", trace=trace):
+                return await factory()
+
+        task = asyncio.create_task(observed_job(), name="bot-background-job", context=self.telemetry.job_context())
         self._jobs.add(task)
+        self.telemetry.gauge(GaugeName.JOBS_ACTIVE, len(self._jobs))
         task.add_done_callback(self._job_done)
         return task
 
     def _update_done(self, task: asyncio.Task[Any]) -> None:
         self._updates.discard(task)
+        self.telemetry.gauge(GaugeName.UPDATES_ACTIVE, len(self._updates))
         if not task.cancelled():
             task.exception()  # The error boundary owns reporting, not the event loop.
 
@@ -109,6 +120,7 @@ class Supervisor:
         if task not in self._jobs:
             return
         self._jobs.discard(task)
+        self.telemetry.gauge(GaugeName.JOBS_ACTIVE, len(self._jobs))
         if not task.cancelled() and task.exception() is not None:
             self._failed_jobs += 1
 

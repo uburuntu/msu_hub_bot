@@ -67,20 +67,11 @@ class PokakatsData:
 pokakats = PokakatsData()
 
 
-async def process_pokakats(message: Message) -> Message | bool | None:
-    emojis: Final = ('💩', '🧻', '🚽', '🚻', '🚾')
-
-    def postfix(count: int) -> str:
-        count = count % 100
-        if count in range(5, 21):
-            return 'каканий'
-        count = count % 10
-        if count == 1:
-            return 'какание'
-        if count in (2, 3, 4):
-            return 'какания'
-        return 'каканий'
-
+def matches_pokakats(message: Message) -> bool:
+    """Keep the automatic joke's eligibility in routing, before telemetry/selection."""
+    emojis = ('💩', '🧻', '🚽', '🚻', '🚾')
+    if message.from_user is None:
+        return False
     if message.sticker:
         if message.sticker.emoji not in emojis and message.sticker.file_unique_id not in (
                 # https://t.me/addstickers/peepo_pack
@@ -96,11 +87,31 @@ async def process_pokakats(message: Message) -> Message | bool | None:
                 'AgADcAIAAh_2ths',
                 'AgADvwIAAh_2ths',
         ):
-            raise SkipHandler()
+            return False
     elif text := message.text:
         if text not in emojis:
-            raise SkipHandler()
+            return False
     else:
+        return False
+
+    return True
+
+
+async def process_pokakats(message: Message) -> Message | bool | None:
+    emojis: Final = ('💩', '🧻', '🚽', '🚻', '🚾')
+
+    def postfix(count: int) -> str:
+        count = count % 100
+        if count in range(5, 21):
+            return 'каканий'
+        count = count % 10
+        if count == 1:
+            return 'какание'
+        if count in (2, 3, 4):
+            return 'какания'
+        return 'каканий'
+
+    if not matches_pokakats(message):
         raise SkipHandler()
 
     count, note = 1, ''

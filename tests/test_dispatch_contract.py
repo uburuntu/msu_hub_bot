@@ -4,6 +4,8 @@ import asyncio
 import json
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from aiogram import BaseMiddleware, Dispatcher
@@ -18,7 +20,9 @@ from hub_bot.routing import build_router
 from hub_bot.utils.wit import Wit
 from hub_bot.utils.wolfram import WolframAPI
 from msu_hub_bot.settings import Settings
-from telegram_helpers import make_bot, make_message
+from msu_hub_bot.telemetry import Telemetry
+from telegram_helpers import RecordingSession, make_bot, make_message
+from telemetry_helpers import Capture, config
 
 CONTRACT = json.loads((Path(__file__).parent / "fixtures/routing_contract.json").read_text())
 
@@ -158,3 +162,50 @@ async def test_inline_tyan_callback_is_acknowledged_without_chat_preferences():
     finally:
         await fsm.close()
         await bot.session.close()
+
+
+async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(monkeypatch):
+    from hub_bot import app
+
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    private_text = "SYNTHETIC_PRIVATE_ROUTER_CANARY"
+    session, client, db = RecordingSession(), AsyncMock(), AsyncMock()
+    client.get.return_value = None
+    row_query = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(metadata={})))
+    monkeypatch.setattr(app, "AiohttpSession", lambda **kwargs: session)
+    monkeypatch.setattr(app, "Redis", lambda **kwargs: client)
+    monkeypatch.setattr(app, "EdgeDB", lambda **kwargs: db)
+    monkeypatch.setattr("common.tg.middlewares.settings.ChatDB.query", lambda db: row_query)
+    monkeypatch.setattr("hub_bot.events.EcosystemChat.query", lambda db: SimpleNamespace(exist_cached=AsyncMock(return_value=False)))
+    sink = Capture()
+    telemetry = Telemetry(config(traces_per_minute=1), transport=sink)
+    monkeypatch.setattr(app, "Telemetry", lambda config: telemetry)
+    application = await app.Application.create(
+        Settings(bot_token="123456789:" + "a" * 35, redis_host="localhost", edgedb_dsn="edgedb://localhost/msu_hub")
+    )
+    try:
+        await telemetry.start()
+        # Exercise a preference cache miss, a cache hit and both archive jobs
+        # through the actual composition root, without mocking handler selection.
+        for update_id in (1, 2):
+            message = make_message(application.bot, message_id=update_id, text=private_text)
+            result = await asyncio.create_task(
+                application.dispatcher.feed_update(application.bot, Update(update_id=update_id, message=message))
+            )
+            assert result is UNHANDLED
+        assert session.methods == []
+        message = make_message(application.bot, message_id=3, text="/roll")
+        await asyncio.create_task(application.dispatcher.feed_update(application.bot, Update(update_id=3, message=message)))
+    finally:
+        await application.close()
+
+    spans = sink.spans()
+    assert len(spans) == 1 and spans[0].name == "bot.handler"
+    assert any(attr.key == "operation" and attr.value.string_value == "process_roll" for attr in spans[0].attributes)
+    assert not spans[0].events
+    assert [method.__api_method__ for method in session.methods] == ["sendMessage"]
+    assert [call.kwargs["handled"] for call in db.insert.await_args_list] == [False, False, True]
+    row_query.get.assert_awaited_once()
+    payload = sink.serialized()
+    assert "settings.load" in payload and "archive.write" in payload and "ignored" in payload
+    assert private_text not in payload

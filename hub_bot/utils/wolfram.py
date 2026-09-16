@@ -1,4 +1,5 @@
 from msu_hub_bot.settings import MissingIntegration
+from msu_hub_bot.telemetry import Boundary, Provider, Telemetry
 
 from contextlib import suppress
 from functools import cached_property
@@ -27,8 +28,9 @@ class WolframAPI:
 
     api_url = "https://api.wolframalpha.com/v1/simple"
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, *, telemetry: Telemetry | None = None) -> None:
         self.token = token
+        self.telemetry = telemetry or Telemetry()
 
     @cached_property
     def session(self) -> aiohttp.ClientSession:
@@ -40,6 +42,10 @@ class WolframAPI:
             await session.close()
 
     async def _request(self, **params: str) -> bytes:
+        with self.telemetry.operation(Boundary.PROVIDER, "wolfram.query", provider=Provider.WOLFRAM):
+            return await self._request_raw(**params)
+
+    async def _request_raw(self, **params: str) -> bytes:
         request_params: dict[str, str | int] = {
             "appid": self.token,
             "layout": "labelbar",

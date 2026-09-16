@@ -18,16 +18,31 @@ from common.constants import TELEGRAM_CAPTION_MAX_LEN
 from common.tg.delivery import AlbumMedia, send_album
 from common.tg.utils import send_super_message
 from msu_hub_bot.health import mark_poll_success
+from msu_hub_bot.telemetry import Outcome, Telemetry, failure_outcome
 
 
 class TelegramRequestPolicy(BaseRequestMiddleware):
     """Retry rejected requests and reads; never replay an ambiguous mutation."""
 
-    def __init__(self, attempts: int = 3, max_retry_after: int = 30) -> None:
+    def __init__(self, attempts: int = 3, max_retry_after: int = 30, *, telemetry: Telemetry | None = None) -> None:
+        self.telemetry = telemetry or Telemetry()
         self.attempts = attempts
         self.max_retry_after = max_retry_after
 
     async def __call__(
+        self,
+        make_request: NextRequestMiddlewareType[TelegramType],
+        bot: Bot,
+        method: TelegramMethod[TelegramType],
+    ) -> Response[TelegramType]:
+        try:
+            return await self._request(make_request, bot, method)
+        except BaseException as error:
+            if method.__api_method__ == "getUpdates":
+                self.telemetry.record_poll(failure_outcome(error))
+            raise
+
+    async def _request(
         self,
         make_request: NextRequestMiddlewareType[TelegramType],
         bot: Bot,
@@ -63,6 +78,7 @@ class TelegramRequestPolicy(BaseRequestMiddleware):
             else:
                 if method.__api_method__ == "getUpdates":
                     mark_poll_success()
+                    self.telemetry.record_poll(Outcome.SUCCESS)
                 return result
         raise AssertionError("A request attempt must return or raise")
 
@@ -74,9 +90,9 @@ class _ChatSend:
 
 
 class BotWrapper(Bot):
-    def __init__(self, token: str, *, session: BaseSession, **kwargs: Any) -> None:
+    def __init__(self, token: str, *, session: BaseSession, telemetry: Telemetry | None = None, **kwargs: Any) -> None:
         super().__init__(token, session=session, **kwargs)
-        self.session.middleware(TelegramRequestPolicy())
+        self.session.middleware(TelegramRequestPolicy(telemetry=telemetry))
         self._chat_sends: dict[int, _ChatSend] = {}
 
     @asynccontextmanager

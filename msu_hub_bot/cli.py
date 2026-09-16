@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from msu_hub_bot.settings import settings
@@ -34,12 +35,13 @@ def configure_logging() -> None:
 def main() -> None:
     settings.validate_core()
     configure_logging()
+    from msu_hub_bot.telemetry import TelemetryConfig
     from hub_bot.app import run
     from msu_hub_bot.health import heartbeat_path
 
     heartbeat_path().unlink(missing_ok=True)
     try:
-        asyncio.run(run(settings))
+        asyncio.run(run(settings, telemetry_config=TelemetryConfig.from_env(os.environ)))
     finally:
         logging.shutdown()
 

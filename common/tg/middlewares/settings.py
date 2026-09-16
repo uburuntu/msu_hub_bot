@@ -10,6 +10,8 @@ from typing import Any, Protocol, cast
 
 from aiogram import BaseMiddleware
 from aiogram.types import Chat, TelegramObject
+from msu_hub_bot.telemetry import Backend, Boundary, Telemetry
+
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from common.db.edb import ChatDB, EdgeDB
@@ -63,16 +65,24 @@ class Settings(BaseModel):
 
 
 class SettingsMiddleware(BaseMiddleware):
-    def __init__(self, db: EdgeDB, *, cache_size: int = 128) -> None:
+    def __init__(self, db: EdgeDB, *, cache_size: int = 128, telemetry: Telemetry | None = None) -> None:
         if cache_size < 1:
             raise ValueError("Preference cache size must be positive")
         self.db = db
+        self.telemetry = telemetry or Telemetry()
         self.cache_size = cache_size
         self.proxies: OrderedDict[int, Settings] = OrderedDict()
         self._active: dict[int, int] = {}
         self._load_lock = asyncio.Lock()
 
     async def proxy(self, chat: Chat) -> Settings:
+        if chat.id in self.proxies:
+            self.proxies.move_to_end(chat.id)
+            return self.proxies[chat.id]
+        with self.telemetry.operation(Boundary.STORAGE, "settings.load", backend=Backend.EDGEDB, trace=False):
+            return await self._load(chat)
+
+    async def _load(self, chat: Chat) -> Settings:
         async with self._load_lock:
             if chat.id not in self.proxies:
                 await cast(_InsertDatabase, self.db).insert_skip_conflict(
@@ -112,11 +122,11 @@ class SettingsMiddleware(BaseMiddleware):
                 result = await handler(event, data)
             except BaseException as original:
                 try:
-                    await preferences.save(self.db)
+                    await self._save(preferences)
                 except Exception:
                     original.add_note("Chat preferences also failed to save during cleanup")
                 raise
-            await preferences.save(self.db)
+            await self._save(preferences)
             return result
         finally:
             self._active[chat.id] -= 1
@@ -126,4 +136,9 @@ class SettingsMiddleware(BaseMiddleware):
 
     async def close(self) -> None:
         for preferences in list(self.proxies.values()):
-            await preferences.save(self.db)
+            await self._save(preferences)
+
+    async def _save(self, preferences: Settings) -> None:
+        if preferences._is_dirty:
+            with self.telemetry.operation(Boundary.STORAGE, "settings.save", backend=Backend.EDGEDB):
+                await preferences.save(self.db)

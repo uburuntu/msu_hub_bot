@@ -2,6 +2,18 @@
 
 These requirements govern Logfire and OpenTelemetry implementations through the aiogram 3 application lifecycle. Instrument shared boundaries so commands inherit useful diagnostics without repeating logging code. Telemetry must preserve command behavior, protect chat privacy and remain optional for bot availability.
 
+## Runtime adapter
+
+[`msu_hub_bot.telemetry`](../msu_hub_bot/telemetry.py) uses an isolated OpenTelemetry provider and sends OTLP protobuf directly to Logfire's EU endpoint. It does not configure a global provider or the Logfire SDK, discover credentials, detect host resources, instrument clients automatically, or forward logging records. Existing logs remain local. Manual spans disable exception capture; exported failure events contain a fixed category and the registered operation key, without exception text or stack contents.
+
+The composition root constructs `TelemetryConfig()` with export disabled by default. Only the CLI explicitly reads the environment through `TelemetryConfig.from_env(env)`. Enabling export requires `HUB_TELEMETRY_ENABLED=true` and a project write token in `LOGFIRE_TOKEN`; `LOGFIRE_API_KEY` is never consulted. `HUB_ENVIRONMENT` accepts `local`, `test`, `staging` or `production`. `HUB_RELEASE` accepts a public hexadecimal release identifier or semantic version; other values are omitted. The SDK's additional `OTEL_SDK_DISABLED=true` kill switch is respected.
+
+Register handler keys before starting telemetry. A `Telemetry.operation(...)` accepts fixed boundary, provider/backend enums and allowlisted operation names; unknown names become `unknown`. Prefilter settings reads and passive update archival use `trace=False`: successful work contributes metrics without creating traces for ignored messages; an owning dispatch or job failure can still emit a sampled, sanitized incident. The executor measures queue wait, awaited execution and actual completion separately. A completion after timeout contributes aggregate metrics only. Supervised jobs start independent spans linked to their initiator and receive a fresh task context containing only that trace link.
+
+Trace head sampling defaults to 10%, configurable through `HUB_TELEMETRY_SAMPLE_RATE`, with at most 60 sampled root traces per minute. Children share the root sampling decision. Metrics do not depend on trace sampling; explicit views allow only application instruments and drop SDK internal metrics. Active work, queue depth and polling health use fixed aggregate instruments. The queue holds at most 256 completed spans and drops new spans when full; pressure can leave an incomplete trace. Export batches contain at most 32 spans. HTTP requests have a two-second total deadline, no redirects, cookies, ambient proxies or retries. A failed batch is dropped and exporter outage/recovery diagnostics remain local.
+
+The exporter is an owned asyncio task with asynchronous DNS, not a blocking exporter thread. Shutdown reserves part of a three-second budget for transport cleanup and drops unfinished batches. SDK shutdown only closes the local processors and metric reader; no SDK background exporter or exit hook is registered. Tests decode real trace and metric protobuf payloads using an explicit capture transport while networking is blocked. A successful offline capture does not establish delivery to a Logfire project; that remains a separate, explicitly enabled staging check.
+
 ## Trace ownership
 
 | Boundary | Responsibility |

@@ -29,6 +29,7 @@ from common.tg.middlewares.logs import LoggingMiddleware
 from common.tg.middlewares.settings import SettingsMiddleware
 from common.tg.middlewares.skip777000 import Skip777000
 from common.tg.middlewares.updates import UpdatesMiddleware
+from common.tg.middlewares.telemetry import DispatchTelemetryMiddleware, HandlerTelemetryMiddleware
 from common.tg.middlewares.viewer import ViewerMiddleware
 from common.tg.runtime import AdmissionMiddleware, DrainTimeout, Supervisor
 from common.tg.state import ReleasableEventIsolation, SelectiveIsolationMiddleware, StateContextMiddleware, TopicFSMContextMiddleware
@@ -42,6 +43,7 @@ from hub_bot.utils.jdoodle import ManyJDoodle
 from hub_bot.utils.wit import Wit
 from hub_bot.utils.wolfram import WolframAPI
 from msu_hub_bot.settings import Settings
+from msu_hub_bot.telemetry import Telemetry, TelemetryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -64,19 +66,24 @@ class Application:
     fsm: TopicFSMContextMiddleware
     stack: AsyncExitStack
     health: HealthCheck
+    telemetry: Telemetry
     _producer: asyncio.Task[None] | None = None
     _closed: bool = False
 
     @classmethod
-    async def create(cls, settings: Settings) -> Application:
+    async def create(cls, settings: Settings, *, telemetry_config: TelemetryConfig | None = None) -> Application:
         """Allocate on a running loop; unwind every completed allocation on failure."""
         settings.validate_core()
         stack = AsyncExitStack()
         try:
+            telemetry = Telemetry(telemetry_config)
+            stack.push_async_callback(telemetry.close)
             session = AiohttpSession(proxy=settings.proxy or None, timeout=90)
             stack.push_async_callback(session.close)
-            bot = BotWrapper(token=settings.bot_token, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-            supervisor = Supervisor()
+            bot = BotWrapper(
+                token=settings.bot_token, session=session, telemetry=telemetry, default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+            )
+            supervisor = Supervisor(telemetry=telemetry)
             client = Redis(
                 host=settings.redis_host,
                 port=settings.redis_port,
@@ -96,26 +103,26 @@ class Application:
             isolation = ReleasableEventIsolation()
             fsm = TopicFSMContextMiddleware(storage, isolation)
             stack.push_async_callback(fsm.close)
-            redis = RedisStorage(client, prefix=settings.name, supervisor=supervisor)
+            redis = RedisStorage(client, prefix=settings.name, supervisor=supervisor, telemetry=telemetry)
             database = EdgeDB(config=settings)
             stack.push_async_callback(database.close)
-            executor = TPExecutor(max_workers=3)
+            executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
             vk_api = VkApi(token=settings.vk_user_token)
             stack.push_async_callback(vk_api.close)
             dvach = Api2chAsync()
             stack.push_async_callback(dvach.close)
-            wit = Wit(settings.wit_tokens, executor=executor)
+            wit = Wit(settings.wit_tokens, executor=executor, telemetry=telemetry)
             stack.push_async_callback(wit.close)
-            wolfram = WolframAPI(settings.wolfram_token)
+            wolfram = WolframAPI(settings.wolfram_token, telemetry=telemetry)
             stack.push_async_callback(wolfram.close)
-            jdoodle = ManyJDoodle(settings.jdoodle_tokens)
+            jdoodle = ManyJDoodle(settings.jdoodle_tokens, telemetry=telemetry)
             stack.push_async_callback(jdoodle.close)
             crypto_exchange = binance()
             stack.push_async_callback(crypto_exchange.close)
             health = HealthCheck(settings.health_check_url)
             stack.push_async_callback(health.stop)
-            preferences = SettingsMiddleware(database)
+            preferences = SettingsMiddleware(database, telemetry=telemetry)
             stack.push_async_callback(preferences.close)
             stack.push_async_callback(Geoguess.shutdown)
             events = EventsMiddleware(bot, database, settings.events_chat_id)
@@ -124,12 +131,14 @@ class Application:
             dispatcher.update.outer_middleware(AdmissionMiddleware(supervisor))
             dispatcher.update.outer_middleware(StateContextMiddleware())
             dispatcher.update.outer_middleware(LoggingMiddleware())
-            dispatcher.update.outer_middleware(UpdatesMiddleware(database, supervisor))
+            dispatcher.update.outer_middleware(DispatchTelemetryMiddleware(telemetry))
+            dispatcher.update.outer_middleware(UpdatesMiddleware(database, supervisor, telemetry=telemetry))
             dispatcher.update.outer_middleware(fsm)
             for kind, observer in dispatcher.observers.items():
                 if kind not in ("update", "error"):
                     observer.outer_middleware(preferences)
                     observer.middleware(SelectiveIsolationMiddleware())
+                    observer.middleware(HandlerTelemetryMiddleware(telemetry))
             # These automatic behaviors apply only to new messages. Running them
             # for edits or channel posts would repeat previews and membership work.
             dispatcher.message.outer_middleware(Skip777000())
@@ -137,6 +146,7 @@ class Application:
             dispatcher.message.outer_middleware(events)
             dispatcher.message.outer_middleware(ViewerMiddleware(bot, vk_api, executor))
             dispatcher.workflow_data.update(
+                telemetry=telemetry,
                 db=database,
                 redis=redis,
                 supervisor=supervisor,
@@ -154,7 +164,16 @@ class Application:
                 posting_tb_chat_id=settings.posting_tb_chat_id,
             )
             dispatcher.include_router(build_router(wit=wit, wolfram=wolfram, config=settings))
-            return cls(bot, dispatcher, supervisor, database, client, redis, fsm, stack, health)
+            telemetry.register_handlers(
+                {
+                    handler.flags["handler_key"]
+                    for router in dispatcher.chain_tail
+                    for observer in router.observers.values()
+                    for handler in observer.handlers
+                    if "handler_key" in handler.flags
+                }
+            )
+            return cls(bot, dispatcher, supervisor, database, client, redis, fsm, stack, health, telemetry)
         except BaseException:
             await stack.aclose()
             raise
@@ -168,6 +187,7 @@ class Application:
                 logger.exception("Scheduled deletion scan failed")
 
     async def start(self) -> None:
+        await self.telemetry.start()
         await self.database.client.query_single("SELECT 1")
         await cast(Awaitable[bool], self.redis_client.ping())
         await self.bot.me()
@@ -214,6 +234,6 @@ class Application:
             await self.close()
 
 
-async def run(settings: Settings) -> None:
-    app = await Application.create(settings)
+async def run(settings: Settings, *, telemetry_config: TelemetryConfig | None = None) -> None:
+    app = await Application.create(settings, telemetry_config=telemetry_config)
     await app.run()

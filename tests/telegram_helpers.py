@@ -36,6 +36,8 @@ class RecordingSession(BaseSession):
         name = method.__api_method__
         if name == "getMe":
             result: object = User(id=123456789, is_bot=True, first_name="Test bot", username="test_bot")
+        elif name == "getUpdates":
+            result = []
         elif name == "getFile":
             result = File(file_id="file", file_unique_id="unique", file_path="test.txt")
         elif name == "sendMediaGroup":

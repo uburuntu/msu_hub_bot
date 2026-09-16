@@ -16,6 +16,7 @@ from pendulum import DateTime
 from redis.asyncio import Redis
 
 from common.tg.runtime import Supervisor
+from msu_hub_bot.telemetry import Boundary, Provider, Telemetry
 
 _REMOVE_IF_UNCHANGED = """
 if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
@@ -28,7 +29,8 @@ return 0
 class RedisStorage:
     """Borrow the application's decoded Redis client; never close it here."""
 
-    def __init__(self, client: Redis, *, prefix: str, supervisor: Supervisor) -> None:
+    def __init__(self, client: Redis, *, prefix: str, supervisor: Supervisor, telemetry: Telemetry | None = None) -> None:
+        self.telemetry = telemetry or Telemetry()
         self.client = client
         self.prefix = prefix
         self.supervisor = supervisor
@@ -93,7 +95,8 @@ class RedisStorage:
             return
         chat_id, message_id = map(int, field.split("_"))
         try:
-            await bot.delete_message(chat_id, message_id)
+            with self.telemetry.operation(Boundary.PROVIDER, "telegram.delete", provider=Provider.TELEGRAM):
+                await bot.delete_message(chat_id, message_id)
         except (TelegramBadRequest, TelegramForbiddenError):
             pass
         except TelegramAPIError:

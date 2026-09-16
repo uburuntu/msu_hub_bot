@@ -79,3 +79,26 @@ async def test_heartbeat_records_only_successful_getupdates(monkeypatch):
     assert marked == []
     await bot(GetUpdates(timeout=0))
     assert marked == [True]
+
+
+async def test_poll_telemetry_uses_metrics_without_traces(monkeypatch):
+    from msu_hub_bot.telemetry import Telemetry
+    from telemetry_helpers import Capture, config
+
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    capture = Capture()
+    telemetry = Telemetry(config(), transport=capture)
+    await telemetry.start()
+    session = RecordingSession()
+    bot = BotWrapper("123456789:" + "a" * 35, session=session, telemetry=telemetry)
+    try:
+        await bot(GetUpdates(timeout=0))
+        await bot(GetUpdates(timeout=0))
+    finally:
+        await bot.session.close()
+        await telemetry.close()
+    assert capture.spans() == []
+    output = capture.serialized()
+    assert "bot.poll.requests" in output
+    assert "success" in output
+    assert "123456789" not in output

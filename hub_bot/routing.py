@@ -38,7 +38,7 @@ from hub_bot.commands.externals import (
     process_ud,
 )
 from hub_bot.commands.figlet import process_figlet
-from hub_bot.commands.fun import process_beer, process_pokakats, process_puk
+from hub_bot.commands.fun import matches_pokakats, process_beer, process_pokakats, process_puk
 from hub_bot.commands.genders import process_gender
 from hub_bot.commands.geoguess import Geoguess
 from hub_bot.commands.help import HelpMessage
@@ -214,7 +214,9 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
         F.content_type == ContentType.TEXT,
         flags={"handler_key": "process_beer", "fsm_release": True},
     )
-    group("fun").message.register(process_pokakats, StateFilter(None), flags={"handler_key": "process_pokakats", "fsm_release": False})
+    group("fun").message.register(
+        process_pokakats, matches_pokakats, StateFilter(None), flags={"handler_key": "process_pokakats", "fsm_release": True}
+    )
     group("fun").message.register(
         process_puk,
         MetaCommand("puk", "пук"),

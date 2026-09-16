@@ -9,6 +9,7 @@ import aiohttp
 from pydantic import BaseModel, ConfigDict
 
 from common.mixins import LoggerMixin
+from msu_hub_bot.telemetry import Boundary, Outcome, Provider, Telemetry
 
 LANGUAGES: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "ada": ("Ada", [("GNATMAKE 6.1.1", "0"), ("GNATMAKE 7.2.0", "1"), ("GNATMAKE 8.1.0", "2"), ("GNATMAKE 9.1.0", "3")]),
@@ -108,9 +109,10 @@ class JDoodleError(Exception):
 class JDoodle(LoggerMixin):
     api_base = "https://api.jdoodle.com/v1/"
 
-    def __init__(self, client_id: str, client_secret: str) -> None:
+    def __init__(self, client_id: str, client_secret: str, telemetry: Telemetry | None = None) -> None:
         self.client_id = client_id
         self.client_secret = client_secret
+        self.telemetry = telemetry or Telemetry()
 
     @cached_property
     def session(self) -> aiohttp.ClientSession:
@@ -123,10 +125,14 @@ class JDoodle(LoggerMixin):
     async def _request(self, endpoint: str, json: dict[str, object] | None = None) -> bytes:
         json = json or {}
         json = dict(clientId=self.client_id, clientSecret=self.client_secret, **json)
-        async with self.session.post(self.api_base + endpoint, json=json) as response:
-            if response.status != 200:
-                raise JDoodleError(response.status, await response.read())
-            return await response.read()
+        key = "jdoodle.execute" if endpoint == "execute" else "http.request"
+        with self.telemetry.operation(Boundary.PROVIDER, key, provider=Provider.JDOODLE) as operation:
+            async with self.session.post(self.api_base + endpoint, json=json) as response:
+                operation.http_status(response.status)
+                if response.status != 200:
+                    operation.set_outcome(Outcome.UNAVAILABLE)
+                    raise JDoodleError(response.status, await response.read())
+                return await response.read()
 
     async def credit_spent(self) -> JDoodleCreditResponse:
         result = await self._request("credit-spent")
@@ -164,10 +170,10 @@ class JDoodle(LoggerMixin):
 
 
 class ManyJDoodle:
-    def __init__(self, tokens: list[tuple[str, str]]) -> None:
+    def __init__(self, tokens: list[tuple[str, str]], telemetry: Telemetry | None = None) -> None:
         tokens = list(tokens)
         random.shuffle(tokens)
-        self.instances = [JDoodle(*t) for t in tokens]
+        self.instances = [JDoodle(*t, telemetry=telemetry) for t in tokens]
         self.it = cycle(self.instances)
 
     async def close(self) -> None:

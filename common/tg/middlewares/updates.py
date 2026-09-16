@@ -13,6 +13,7 @@ from aiogram.dispatcher.middlewares.user_context import UserContextMiddleware
 from aiogram.types import Chat, TelegramObject, Update
 
 from common.tg.runtime import Supervisor
+from msu_hub_bot.telemetry import Backend, Boundary, Telemetry
 
 
 class ArchiveDatabase(Protocol):
@@ -31,10 +32,19 @@ def _telegram_json(value: Any) -> Any:
 
 
 class UpdatesMiddleware(BaseMiddleware):
-    def __init__(self, db: ArchiveDatabase, supervisor: Supervisor, *, concurrency: int = 100, pending_limit: int = 10_000) -> None:
+    def __init__(
+        self,
+        db: ArchiveDatabase,
+        supervisor: Supervisor,
+        *,
+        concurrency: int = 100,
+        pending_limit: int = 10_000,
+        telemetry: Telemetry | None = None,
+    ) -> None:
         if concurrency < 1 or pending_limit < 0:
             raise ValueError("Archive concurrency must be positive and pending limit nonnegative")
         self.db = db
+        self.telemetry = telemetry or Telemetry()
         self.supervisor = supervisor
         self._workers = asyncio.Semaphore(concurrency)
         self._slots = asyncio.Semaphore(concurrency + pending_limit)
@@ -52,6 +62,10 @@ class UpdatesMiddleware(BaseMiddleware):
         )
 
     async def _archive(self, update: Update, handled: bool) -> None:
+        with self.telemetry.operation(Boundary.STORAGE, "archive.write", backend=Backend.EDGEDB, trace=False):
+            await self._archive_rows(update, handled)
+
+    async def _archive_rows(self, update: Update, handled: bool) -> None:
         async with self._workers:
             failures: list[Exception] = []
 
@@ -88,7 +102,7 @@ class UpdatesMiddleware(BaseMiddleware):
     async def _submit(self, update: Update, handled: bool) -> None:
         await self._slots.acquire()
         try:
-            task = self.supervisor.create_job(lambda: self._archive(update, handled))
+            task = self.supervisor.create_job(lambda: self._archive(update, handled), trace=False)
         except BaseException:
             self._slots.release()
             raise

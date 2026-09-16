@@ -15,6 +15,8 @@ from aiogram import html
 from pydub.effects import normalize
 from throttler import Throttler
 
+from msu_hub_bot.telemetry import Boundary, Provider, Telemetry
+
 from common.executor import TPExecutor
 from common.externals.exceptions import ExternalServiceError
 from common.tg.middlewares.settings import Settings
@@ -53,8 +55,9 @@ class WitAPI:
     api_base = "https://api.wit.ai/"
     api_version = "20200513"
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, *, telemetry: Telemetry | None = None) -> None:
         self.token = token
+        self.telemetry = telemetry or Telemetry()
         self.throttler = Throttler(rate_limit=60, period=60)
 
     @cached_property
@@ -68,6 +71,12 @@ class WitAPI:
             await session.close()
 
     async def _request(
+        self, endpoint: str, method: str = "POST", headers: dict[str, str] | None = None, data: io.BytesIO | None = None, **params: str
+    ) -> dict[str, object]:
+        with self.telemetry.operation(Boundary.PROVIDER, "wit.recognize", provider=Provider.WIT):
+            return await self._request_raw(endpoint, method, headers, data, **params)
+
+    async def _request_raw(
         self, endpoint: str, method: str = "POST", headers: dict[str, str] | None = None, data: io.BytesIO | None = None, **params: str
     ) -> dict[str, object]:
         async with self.throttler:
@@ -94,8 +103,8 @@ class WitAPI:
 
 
 class ManyWitAPI:
-    def __init__(self, tokens: List[str]) -> None:
-        self.instances = [WitAPI(t) for t in tokens]
+    def __init__(self, tokens: List[str], *, telemetry: Telemetry | None = None) -> None:
+        self.instances = [WitAPI(t, telemetry=telemetry) for t in tokens]
         self.it = cycle(self.instances)
 
     async def close(self) -> None:
@@ -109,8 +118,8 @@ class ManyWitAPI:
 
 
 class Wit(ManyWitAPI):
-    def __init__(self, tokens: List[str], executor: TPExecutor | None = None) -> None:
-        super().__init__(tokens)
+    def __init__(self, tokens: List[str], executor: TPExecutor | None = None, *, telemetry: Telemetry | None = None) -> None:
+        super().__init__(tokens, telemetry=telemetry)
         self.executor = executor
 
     @staticmethod
