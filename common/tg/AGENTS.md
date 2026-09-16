@@ -7,3 +7,4 @@
 - Preserve authorization and chat preferences across message, callback, edited-message and automatic routes, including stale callback handling.
 - Check callback state ownership, expiry and concurrent updates when changing interactive flows.
 - Keep reply formatting, cancellation and middleware ordering explicit when adapting Telegram APIs.
+- Treat command parsing, state eligibility, callback formats and delivery context as compatibility contracts. Verify aiogram behavior in `references/aiogram` and Telegram semantics in `references/telegram-bot-api` from the repository root before choosing adapters or defaults.
