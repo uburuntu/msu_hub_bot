@@ -221,17 +221,10 @@ async def test_concurrent_broken_futures_share_one_replacement_pool():
         executor.shutdown(wait=True)
 
 
-async def test_application_applet_uses_three_threads_and_closes_them():
-    from common.applets import AppCPUExecutor
-
-    applet = AppCPUExecutor()
-    applet.init()
-    try:
-        assert isinstance(applet.cpu_executor, TPExecutor)
-        assert applet.cpu_executor.max_workers == 3
-        worker, timeouted = await applet.cpu_executor.run(threading.get_ident)
-        assert worker != threading.get_ident() and not timeouted
-    finally:
-        await applet.on_shutdown()
+async def test_owned_thread_executor_closes_after_work():
+    executor = TPExecutor(max_workers=3)
+    worker, timed_out = await executor.run(threading.get_ident)
+    assert worker != threading.get_ident() and not timed_out
+    await asyncio.to_thread(executor.shutdown, wait=True)
     with pytest.raises(RuntimeError, match="shutdown"):
-        await applet.cpu_executor.run(lambda: None)
+        await executor.run(lambda: None)

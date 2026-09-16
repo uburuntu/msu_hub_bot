@@ -1,48 +1,15 @@
-import ast
-import traceback
-from contextlib import suppress
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
-import aiogram
 import pytest
-from aiogram.utils.markdown import hbold, hpre, quote_html
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import SendMessage
+from aiogram.types import CallbackQuery, ErrorEvent, Update
 from aiohttp import ClientError
 
 from common.externals.exceptions import ExternalServiceError
-from msu_hub_bot.redaction import redact
+from hub_bot.commands import control
 from msu_hub_bot.settings import MissingIntegration, settings
-
-
-@pytest.fixture
-def handlers():
-    tree = ast.parse(Path("hub_bot/main.py").read_text())
-    tree.body = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.AsyncFunctionDef) and node.name in {"process_error", "reply_error", "process_expired_callback"}
-    ]
-    namespace = dict(
-        aiogram=aiogram,
-        ClientError=ClientError,
-        MissingIntegration=MissingIntegration,
-        ExternalServiceError=ExternalServiceError,
-        Update=object,
-        CallbackQuery=object,
-        suppress=suppress,
-        redact=redact,
-        logger=Mock(),
-        settings=settings,
-        quote_html=quote_html,
-        hbold=hbold,
-        hpre=hpre,
-        traceback=traceback,
-        errors={},
-        bot=SimpleNamespace(send_message=AsyncMock()),
-    )
-    exec(compile(tree, "<error-feedback>", "exec"), namespace)
-    return namespace
+from telegram_helpers import make_bot, make_message
 
 
 @pytest.mark.asyncio
@@ -55,36 +22,50 @@ def handlers():
         (MissingIntegration("unused"), "не настроена"),
     ],
 )
-async def test_provider_error_replies_are_useful_and_safe(handlers, error, expected):
-    message = SimpleNamespace(reply=AsyncMock())
-    update = SimpleNamespace(callback_query=None, message=message)
-    assert await handlers["process_error"](update, error) is True
-    assert expected in message.reply.call_args.args[0]
-    assert "transport details" not in message.reply.call_args.args[0]
+async def test_provider_error_replies_are_useful_and_safe(error, expected):
+    bot = make_bot()
+    session = bot.session
+    update = Update(update_id=1, message=make_message(bot=bot))
+    assert await control.process_error(ErrorEvent(update=update, exception=error), bot) is True
+    method = session.methods[-1]
+    assert expected in method.text
+    assert "transport details" not in method.text
+    await bot.session.close()
 
 
 @pytest.mark.asyncio
-async def test_callback_errors_are_acknowledged(handlers):
-    query = SimpleNamespace(answer=AsyncMock())
-    await handlers["process_error"](SimpleNamespace(callback_query=query), TimeoutError())
-    assert query.answer.call_args.kwargs["show_alert"] is True
-    query.answer.reset_mock()
-    await handlers["process_expired_callback"](query)
-    assert "заново" in query.answer.call_args.args[0]
+async def test_callback_errors_are_acknowledged():
+    bot = make_bot()
+    session = bot.session
+    query = CallbackQuery.model_validate(
+        dict(id="query", from_user=dict(id=4, is_bot=False, first_name="Synthetic"), chat_instance="instance", inline_message_id="inline"),
+        context={"bot": bot},
+    )
+    await control.process_error(ErrorEvent(update=Update(update_id=1, callback_query=query), exception=TimeoutError()), bot)
+    assert session.methods[-1].show_alert is True
+    await control.process_expired_callback(query)
+    assert "заново" in session.methods[-1].text
+    await bot.session.close()
 
 
 @pytest.mark.asyncio
-async def test_deleted_message_does_not_trigger_another_error(handlers):
-    message = SimpleNamespace(reply=AsyncMock(side_effect=aiogram.exceptions.MessageToReplyNotFound("Message to reply not found")))
-    update = SimpleNamespace(callback_query=None, message=message)
-    assert await handlers["process_error"](update, TimeoutError()) is True
+async def test_deleted_message_does_not_trigger_another_error(monkeypatch):
+    bot = make_bot()
+    session = bot.session
+    method = SendMessage(chat_id=1, text="test")
+    monkeypatch.setattr(session, "make_request", AsyncMock(side_effect=TelegramBadRequest(method, "message to reply not found")))
+    update = Update(update_id=1, message=make_message(bot=bot))
+    assert await control.process_error(ErrorEvent(update=update, exception=TimeoutError()), bot) is True
+    await bot.session.close()
 
 
 @pytest.mark.asyncio
-async def test_provider_error_redacts_configured_secret(handlers, monkeypatch):
+async def test_provider_error_redacts_configured_secret(monkeypatch):
     monkeypatch.setattr(settings, "redis_password", "synthetic-private-password")
-    message = SimpleNamespace(reply=AsyncMock())
-    update = SimpleNamespace(callback_query=None, message=message)
-    await handlers["process_error"](update, ExternalServiceError("failed: synthetic-private-password"))
-    assert "synthetic-private-password" not in message.reply.call_args.args[0]
-    assert "[REDACTED]" in message.reply.call_args.args[0]
+    bot = make_bot()
+    session = bot.session
+    update = Update(update_id=1, message=make_message(bot=bot))
+    await control.process_error(ErrorEvent(update=update, exception=ExternalServiceError("failed: synthetic-private-password")), bot)
+    assert "synthetic-private-password" not in session.methods[-1].text
+    assert "[REDACTED]" in session.methods[-1].text
+    await bot.session.close()

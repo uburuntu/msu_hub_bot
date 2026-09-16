@@ -6,6 +6,8 @@ from typing import Dict, Final, Iterable, List, Tuple, Union
 import aiohttp
 from throttler import throttle
 
+from msu_hub_bot.settings import MissingIntegration
+
 from common import json
 from common.utils import chunks, unique_by
 
@@ -37,7 +39,7 @@ class VkErrorApi(VkError):
 class VkApiCaller:
     api_url = 'https://api.vk.com/method/'
 
-    def __init__(self, token: str, version: str = None):
+    def __init__(self, token: str, version: str | None = None) -> None:
         self.token = token
         self.version = version or '5.124'
 
@@ -45,8 +47,10 @@ class VkApiCaller:
     def session(self) -> aiohttp.ClientSession:
         return aiohttp.ClientSession()
 
-    async def close(self):
-        await self.session.close()
+    async def close(self) -> None:
+        session = self.__dict__.get("session")
+        if session is not None:
+            await session.close()
 
     async def _request(self, method, **params):
         params['access_token'] = self.token
@@ -64,6 +68,8 @@ class VkApiCaller:
 
     @throttle(rate_limit=3, period=1.1)
     async def request(self, method, **params):
+        if not self.token:
+            raise MissingIntegration("vk_user_token")
         try:
             return await self._request(method, **params)
         except VkErrorApi as e:

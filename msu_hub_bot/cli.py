@@ -1,28 +1,47 @@
-"""Keep legacy imports local to the executable, not to package imports."""
+"""Installed executable; imports are canonical and allocate no services."""
 
-import runpy
-import sys
+import asyncio
+import logging
 from pathlib import Path
 
+from msu_hub_bot.settings import settings
 
-def prepare_imports() -> None:
-    app_dir = Path(__file__).resolve().parent.parent / "hub_bot"
-    if str(app_dir) not in sys.path:
-        sys.path.insert(0, str(app_dir))
+
+def configure_logging() -> None:
+    from common.logger import LoggerBuilder
+    from msu_hub_bot.redaction import RedactingFormatter, install_redaction
+
+    install_redaction()
+    filename = settings.logs_file.format(name=settings.name)
+    LoggerBuilder.set_defaults(filename)
+    formatter = RedactingFormatter("[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s")
+    console = logging.StreamHandler()
+    console.setFormatter(formatter)
+    handlers: list[logging.Handler] = [console]
+    if filename:
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        file = logging.FileHandler(filename, encoding="utf-8")
+        file.setLevel(logging.WARNING)
+        file.setFormatter(formatter)
+        handlers.append(file)
+    logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
+    # aiogram's routine records include bot/user/update identifiers. Aggregate
+    # middleware diagnostics own dispatch logging instead.
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+    logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)
 
 
 def main() -> None:
-    from msu_hub_bot.settings import settings
-
     settings.validate_core()
-    from msu_hub_bot.redaction import install_redaction
-
-    install_redaction()
+    configure_logging()
+    from hub_bot.app import run
     from msu_hub_bot.health import heartbeat_path
 
     heartbeat_path().unlink(missing_ok=True)
-    prepare_imports()
-    runpy.run_module("main", run_name="__main__")
+    try:
+        asyncio.run(run(settings))
+    finally:
+        logging.shutdown()
 
 
 if __name__ == "__main__":

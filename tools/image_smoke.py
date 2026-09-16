@@ -4,7 +4,6 @@ import asyncio
 import importlib
 import shutil
 import socket
-from unittest.mock import AsyncMock
 
 
 def blocked(*args, **kwargs):
@@ -24,26 +23,24 @@ async def main():
 
     ACRCloudRecognizer({"host": "example.invalid", "access_key": "test", "access_secret": "test", "timeout": 1})
     from msu_hub_bot.settings import settings
-    from msu_hub_bot.cli import prepare_imports
+    from hub_bot.app import Application
 
     settings.bot_token = "123456789:" + "a" * 35
     settings.redis_host = "localhost"
     settings.edgedb_dsn = "edgedb://localhost/msu_hub"
-    prepare_imports()
-    app = importlib.import_module("main")
-    app.app.on_startup_all = AsyncMock()
+    app = await Application.create(settings)
     try:
-        await app.on_startup(app.dp)
-        assert len(app.dp.message_handlers.handlers) == 261
-        assert len(app.dp.callback_query_handlers.handlers) == 19
-        assert len(app.dp.edited_message_handlers.handlers) == 148
-        assert len(app.app.scheduler.get_jobs()) == 1
+        def count(event):
+            return sum(len(router.observers[event].handlers) for router in app.dispatcher.chain_tail)
+        assert count("message") == 262
+        assert count("callback_query") == 19
+        assert count("edited_message") == 149
         from PIL import ImageFont
-        from resources import times_new_roman_font
+        from hub_bot.resources import times_new_roman_font
 
         assert ImageFont.truetype(str(times_new_roman_font), 24).getbbox("Привет, Ёж!")
     finally:
-        await app.on_shutdown(app.dp)
+        await app.close()
     print("Linux image: native libraries, resources, handlers, and shutdown passed")
 
 

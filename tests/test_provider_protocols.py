@@ -10,10 +10,8 @@ import pytest
 
 from common.externals import other, topdf, urbandictionary
 from common.externals.exceptions import BadRequestError, ExternalServiceError
-from msu_hub_bot.cli import prepare_imports
 
-prepare_imports()
-from utils import wit  # noqa: E402
+from hub_bot.utils import wit
 
 
 class Response:

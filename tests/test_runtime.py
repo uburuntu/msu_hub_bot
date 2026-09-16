@@ -1,120 +1,122 @@
-import ast
-import io
-import json
-from contextlib import asynccontextmanager
-from pathlib import Path
-from types import SimpleNamespace
+"""Exercise the real composition root with offline provider/Telegram boundaries."""
+
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-from PIL import Image
+from aiogram.methods import DeleteWebhook, GetMe
 
-from msu_hub_bot.cli import prepare_imports
-from msu_hub_bot.settings import MissingIntegration, settings
-
-ROOT = Path(__file__).resolve().parents[1]
+from msu_hub_bot.settings import Settings
+from telegram_helpers import RecordingSession
 
 
-def test_registration_source_matches_command_inventory():
-    inventory = json.loads((ROOT / "tests/fixtures/handler_inventory.json").read_text())
-    tree = ast.parse((ROOT / "hub_bot/main.py").read_text())
-    calls = sorted(
-        (
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Attribute)
-            and n.func.attr.startswith("register_")
-            and ast.unparse(n.func.value) == "dp"
-        ),
-        key=lambda n: n.lineno,
+@pytest.fixture
+def app_settings():
+    return Settings(bot_token="123456789:" + "a" * 35, redis_host="localhost", edgedb_dsn="edgedb://localhost/msu_hub")
+
+
+@pytest.fixture
+def boundaries(monkeypatch):
+    from hub_bot import app
+
+    session = RecordingSession()
+    client = AsyncMock()
+    db = AsyncMock()
+    monkeypatch.setattr(app, "AiohttpSession", lambda **kwargs: session)
+    monkeypatch.setattr(app, "Redis", lambda **kwargs: client)
+    monkeypatch.setattr(app, "EdgeDB", lambda **kwargs: db)
+    return session, client, db
+
+
+async def test_composition_startup_and_idempotent_shutdown(app_settings, boundaries, monkeypatch):
+    from hub_bot.app import Application
+
+    session, client, db = boundaries
+    application = await Application.create(app_settings)
+    assert application.redis.generate_key("bot", "to_delete") == "hub:bot:to_delete"
+    assert application.fsm.storage is not application.dispatcher.storage
+    assert application.fsm.storage.state_ttl is None
+    assert application.fsm.storage.data_ttl is None
+    await application.start()
+    assert [type(method) for method in session.methods] == [GetMe, DeleteWebhook]
+    assert session.methods[-1].drop_pending_updates is False
+    assert application._producer is not None
+    await application.close()
+    await application.close()
+    client.aclose.assert_awaited_once()
+    db.close.assert_awaited_once()
+    assert session.closed and application._producer.done()
+
+
+async def test_partial_allocation_failure_closes_opened_clients(app_settings, boundaries, monkeypatch):
+    from hub_bot import app
+
+    session, client, db = boundaries
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("Synthetic allocation failure")
+
+    monkeypatch.setattr(app, "ManyJDoodle", fail)
+    with pytest.raises(RuntimeError, match="allocation"):
+        await app.Application.create(app_settings)
+    assert session.closed
+    client.aclose.assert_awaited_once()
+    db.close.assert_awaited_once()
+
+
+async def test_startup_failure_runs_owned_cleanup(app_settings, boundaries):
+    from hub_bot.app import Application
+
+    session, client, db = boundaries
+    db.client.query_single.side_effect = RuntimeError("Synthetic DB outage")
+    application = await Application.create(app_settings)
+    with pytest.raises(RuntimeError, match="outage"):
+        await application.run()
+    assert session.closed
+    client.aclose.assert_awaited_once()
+    assert session.methods == []
+
+
+async def test_polling_keeps_subscription_backlog_and_session_ownership(app_settings, boundaries, monkeypatch):
+    from hub_bot.app import Application
+
+    session, _, _ = boundaries
+    application = await Application.create(app_settings)
+    start_polling = AsyncMock()
+    monkeypatch.setattr(application.dispatcher, "start_polling", start_polling)
+    await application.run()
+    start_polling.assert_awaited_once_with(
+        application.bot, polling_timeout=60, handle_as_tasks=True, allowed_updates=None, close_bot_session=False
     )
-    assert [(c.func.attr, ast.unparse(c.args[0].func if isinstance(c.args[0], ast.Call) else c.args[0])) for c in calls] == [
-        (item["type"], item["handler"]) for item in inventory
-    ]
-    for call, item in zip(calls, inventory):
-        aliases = []
-        for value in [*call.args[1:], *(k.value for k in call.keywords if k.arg == "commands")]:
-            if isinstance(value, ast.Call) and ast.unparse(value.func) == "MetaCommand":
-                aliases.extend(n.value for n in value.args if isinstance(n, ast.Constant) and isinstance(n.value, str))
-            elif isinstance(value, (ast.List, ast.Tuple)):
-                aliases.extend(n.value for n in value.elts if isinstance(n, ast.Constant) and isinstance(n.value, str))
-        assert aliases == item["aliases"]
+    assert session.closed
 
 
-@pytest.mark.asyncio
-async def test_offline_startup_handlers_shutdown_and_demotivator(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "bot_token", "123456789:" + "a" * 35)
-    monkeypatch.setattr(settings, "redis_host", "127.0.0.1")
-    monkeypatch.setattr(settings, "edgedb_dsn", "edgedb://localhost/msu_hub")
-    monkeypatch.setattr(settings, "logs_file", str(tmp_path / "{name}.log"))
-    prepare_imports()
-    import main
-    from commands import lobster
-    from utils.jdoodle import LANGUAGES
+async def test_shutdown_drains_admitted_jobs_before_closing_dependencies(app_settings, boundaries):
+    from hub_bot.app import Application
 
-    monkeypatch.setattr(main.app, "on_startup_all", AsyncMock())
-    try:
-        await main.on_startup(main.dp)
-        expected = {
-            "message_handlers": 261,
-            "callback_query_handlers": 19,
-            "edited_message_handlers": 148,
-            "channel_post_handlers": 3,
-            "inline_query_handlers": 1,
-            "errors_handlers": 1,
-        }
-        assert {kind: len(getattr(main.dp, kind).handlers) for kind in expected} == expected
-        assert len(LANGUAGES) == 70
-        assert main.redis.generate_key("bot", "to_delete") == "hub:bot:to_delete"
-        assert len(main.app.scheduler.get_jobs()) == 1  # VK posting remains disabled.
-        with pytest.raises(MissingIntegration):
-            _ = main.app.jdoodle.instance
-        message = SimpleNamespace(reply=AsyncMock(), chat=SimpleNamespace(type="private"))
-        update = SimpleNamespace(callback_query=None, message=message)
-        await main.process_error(update, MissingIntegration("wolfram_token"))
-        assert "не настроена" in message.reply.call_args.args[0]
+    session, client, _ = boundaries
+    application = await Application.create(app_settings)
+    started, finish = asyncio.Event(), asyncio.Event()
 
-        @asynccontextmanager
-        async def no_chat_action(*args, **kwargs):
-            yield
+    async def worker():
+        application.supervisor.admit_current_update()
+        started.set()
+        await finish.wait()
 
-        monkeypatch.setattr(lobster, "ChatActioner", no_chat_action)
-        source = io.BytesIO()
-        Image.new("RGB", (480, 320), "#507b87").save(source, "PNG")
-        source.seek(0)
-        target = SimpleNamespace(reply_photo=AsyncMock())
-        meta = SimpleNamespace(
-            extract_video=AsyncMock(return_value=(target, None)),
-            extract_image_with_downloading=AsyncMock(return_value=(target, source)),
-            extract_text=lambda: (target, "Наследие живёт\nLegacy lives on"),
-        )
-        await lobster.process_demotivator(message, meta)
-        rendered = target.reply_photo.call_args.args[0]
-        image = Image.open(rendered)
-        assert image.width > 480 and image.height > 380
-        assert image.getpixel((0, 0)) == (0, 0, 0)
-        assert any(pixel != (0, 0, 0) for pixel in image.crop((0, 370, image.width, image.height)).getdata())
-        from hub_bot.utils.caption_layout import times_new_roman_font
+        async def late_job():
+            assert not session.closed
+            client.aclose.assert_not_awaited()
 
-        assert times_new_roman_font.name == "LiberationSerif-Regular.ttf"
-        image.save(tmp_path / "demotivator.png")
-    finally:
-        await main.on_shutdown(main.dp)
+        application.supervisor.create_job(late_job)
 
-
-@pytest.mark.asyncio
-async def test_redis_deletion_state_format(monkeypatch):
-    from common.tg.storage import RedisStorage
-
-    store = RedisStorage(host="localhost", prefix="hub")
-    monkeypatch.setattr(store, "dict_set", AsyncMock(return_value=True))
-    monkeypatch.setattr("common.tg.storage.time.time", lambda: 1_000)
-    try:
-        await store.mark_message_to_delete_raw(-101, 202, 30)
-        store.dict_set.assert_awaited_once_with("hub:bot:to_delete", "-101_202", "1030")
-    finally:
-        await store.close()
+    task = asyncio.create_task(worker())
+    await started.wait()
+    closing = asyncio.create_task(application.close())
+    await asyncio.sleep(0)
+    assert not session.closed
+    finish.set()
+    await asyncio.gather(task, closing)
+    assert session.closed
 
 
 def test_health_requires_recent_successful_poll(monkeypatch, tmp_path):

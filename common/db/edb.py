@@ -1,4 +1,4 @@
-from msu_hub_bot.settings import settings
+from msu_hub_bot.settings import Settings, settings
 
 import datetime
 from abc import ABC
@@ -18,11 +18,11 @@ from common import json
 
 
 class EdgeDB:
-    def __init__(self, database: str = 'msu_hub'):
+    def __init__(self, database: str = 'msu_hub', *, config: Settings = settings) -> None:
         self.client = edgedb.create_async_client(
-            dsn=settings.edgedb_dsn,
-            tls_ca=settings.edgedb_tls_ca or None,
-            tls_security=settings.edgedb_tls_security,
+            dsn=config.edgedb_dsn,
+            tls_ca=config.edgedb_tls_ca or None,
+            tls_security=config.edgedb_tls_security,
         )
 
     @classmethod
@@ -117,8 +117,8 @@ class EdgeDB:
                                        f'else (select {type_name})'
                                        f');', data=data)
 
-    async def close(self):
-        return await self.client.aclose()
+    async def close(self) -> None:
+        await self.client.aclose()
 
 
 def obj_to_dict(o: edgedb.Object) -> dict:

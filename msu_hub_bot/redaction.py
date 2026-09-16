@@ -43,7 +43,7 @@ def _strings(value, sensitive=False):
 def redact(value: object) -> str:
     text = str(value)
     variants = set()
-    for secret in _strings(settings.dict()):
+    for secret in _strings(settings.model_dump()):
         variants.update(
             (secret, quote(secret, safe=""), quote_plus(secret), json.dumps(secret, ensure_ascii=False)[1:-1], repr(secret)[1:-1])
         )
@@ -89,7 +89,7 @@ class RedactingStream(io.TextIOBase):
         return self.wrapped.isatty()
 
 
-def install_redaction():
+def install_redaction() -> None:
     if isinstance(sys.stdout, RedactingStream):
         return
     factory = logging.getLogRecordFactory()

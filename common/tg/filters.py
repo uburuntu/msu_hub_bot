@@ -129,7 +129,10 @@ class ChatTypeFilter(Filter):
 
 
 class SlashCommand(Command):
-    """Plain command registrations match text, retaining their case sensitivity."""
+    """Plain command registrations ignore case and never match captions."""
+
+    def __init__(self, *commands: str) -> None:
+        super().__init__(*commands, ignore_case=True, ignore_mention=False)
 
     async def __call__(self, message: Message, bot: Bot) -> bool | dict[str, Any]:
         if message.text is None:

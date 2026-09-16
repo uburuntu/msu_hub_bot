@@ -1,10 +1,14 @@
 from msu_hub_bot.settings import settings
 
+from aiogram.types import Message
+
 from common.tg.wrapper import BotWrapper
 from common.vk.posts import VkPost
 
 
-async def publish_vk_post(post: VkPost, bot: BotWrapper, chat_id: int, reply_to: int = None, with_header: bool = True):
+async def publish_vk_post(
+    post: VkPost, bot: BotWrapper, chat_id: int, reply_to: int | None = None, with_header: bool = True
+) -> Message | None:
     # Override for https://vk.com/dmitrybaleofficial
     if chat_id == settings.vk_default_chat_id:
         text, web_preview, photos_urls, gifs_urls = post.for_publish(False, False)
