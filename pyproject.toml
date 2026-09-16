@@ -6,6 +6,7 @@ requires-python = ">=3.11,<3.12"
 license = "GPL-3.0-only"
 dependencies = [
     "aiocache==0.12.2",
+    "aiodns==3.2.0",
     "aiogram[proxy,redis]==3.31.0",
     "aiohttp==3.14.3",
     "aiohttp-socks==0.12.0",
@@ -200,7 +201,7 @@ constraint-dependencies = [
     "MarkupSafe==2.1.5",
     "PyExecJS==1.5.1",
     "aiocache==0.12.2",
-    "aiodns==3.1.1",
+    "aiodns==3.2.0",
     "aiofiles==23.2.1",
     "aiogram==3.31.0",
     "aiohttp==3.14.3",

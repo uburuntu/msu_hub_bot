@@ -1,8 +1,12 @@
+import asyncio
 import importlib
 import json
-from unittest.mock import AsyncMock
+import socket
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import aiohttp
+import pycares
 import pytest
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.base import DefaultKeyBuilder, StorageKey
@@ -15,6 +19,73 @@ from redis.asyncio import Redis
 @pytest.mark.parametrize("name", ["aiogram", "pydantic_settings", "aiohttp_socks", "redis.asyncio", "bs4", "dns", "common.externals.dvach"])
 def test_required_dependency_integrations_import(name):
     importlib.import_module(name)
+
+
+@pytest.mark.parametrize(
+    ("family", "address"),
+    [(socket.AF_INET, (b"192.0.2.42", 443)), (socket.AF_INET6, (b"2001:db8::42", 443, 0, 0))],
+)
+async def test_async_dns_resolver_reaches_native_callback_interface(monkeypatch, family, address):
+    calls = []
+
+    def getaddrinfo(channel, host, port, callback, **kwargs):
+        calls.append((host, port, kwargs))
+        result = SimpleNamespace(nodes=[SimpleNamespace(family=family, addr=address)])
+        asyncio.get_running_loop().call_soon(callback, result, None)
+
+    # Keep aiohttp, aiodns and the native channel real; replace only DNS I/O.
+    monkeypatch.setattr(pycares.Channel, "getaddrinfo", getaddrinfo)
+    resolver = aiohttp.AsyncResolver()
+    try:
+        results = await resolver.resolve("synthetic.invalid", 443, family=family)
+    finally:
+        await resolver.close()
+    assert len(calls) == 1
+    host, port, options = calls[0]
+    assert (host, port) == ("synthetic.invalid", 443)
+    assert options["family"] == family and options["type"] == socket.SOCK_STREAM
+    assert len(results) == 1
+    assert results[0]["hostname"] == "synthetic.invalid"
+    assert results[0]["host"] == address[0].decode("ascii")
+    assert results[0]["port"] == 443 and results[0]["family"] == family
+
+
+async def test_async_dns_resolver_cancellation_ignores_late_native_callback_and_closes(monkeypatch):
+    callbacks = []
+    started = asyncio.Event()
+
+    def getaddrinfo(channel, host, port, callback, **kwargs):
+        callbacks.append(callback)
+        started.set()
+
+    monkeypatch.setattr(pycares.Channel, "getaddrinfo", getaddrinfo)
+    resolver = aiohttp.AsyncResolver()
+    channel = resolver._resolver._channel
+    cancel = Mock(wraps=channel.cancel)
+    monkeypatch.setattr(channel, "cancel", cancel)
+    task = asyncio.create_task(resolver.resolve("synthetic.invalid", 443))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # The real aiodns callback must tolerate native completion after cancellation.
+        callbacks[0](None, pycares.errno.ARES_ECANCELLED)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await resolver.close()
+    cancel.assert_called_once_with()
+
+
+async def test_async_dns_resolver_native_numeric_address_without_network():
+    resolver = aiohttp.AsyncResolver()
+    try:
+        # c-ares resolves numeric addresses synchronously without sending DNS packets.
+        results = await resolver.resolve("192.0.2.42", 443, family=socket.AF_INET)
+    finally:
+        await resolver.close()
+    assert [(result["host"], result["port"], result["family"]) for result in results] == [("192.0.2.42", 443, socket.AF_INET)]
 
 
 @pytest.mark.asyncio
