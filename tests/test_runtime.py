@@ -57,7 +57,7 @@ async def test_offline_startup_handlers_shutdown_and_demotivator(monkeypatch, tm
     try:
         await main.on_startup(main.dp)
         expected = {
-            "message_handlers": 262,
+            "message_handlers": 261,
             "callback_query_handlers": 19,
             "edited_message_handlers": 148,
             "channel_post_handlers": 3,

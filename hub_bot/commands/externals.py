@@ -4,11 +4,8 @@ from aiogram.types import ChatActions, Message, ContentType, InputFile, MediaGro
 from aiogram.utils.markdown import hitalic, quote_html, hbold, hlink, hcode
 from yarl import URL
 
-from app import cpu_executor
 from common.constants import TELEGRAM_MESSAGE_MAX_LEN
 from common.externals.exceptions import ExternalServiceError
-from common.externals.fakeyou import fake_you, Voices
-from common.externals.lingvanex import translate
 from common.externals.moe import which_anime
 from common.externals.other import remove_bg, porfirevich, imgur_upload, duckduckgo
 from common.externals.topdf import convert_to_pdf
@@ -16,8 +13,7 @@ from common.externals.urbandictionary import urban_dictionary
 from common.tg.chat_actioner import ChatActioner
 from common.tg.filters import MetaInfo
 from common.tg.utils import download, extract_image, action_by_type, send_super_reply
-from common.utils import one_liner, prettify_bytes, cut_long_text, download_content, FakeBytesIO
-from utils.ffmpeg import to_ogg_opus
+from common.utils import one_liner, prettify_bytes, cut_long_text
 
 
 def _escaped_excerpt(text: str, limit: int, *, tail: bool = False) -> str:
@@ -203,30 +199,6 @@ async def process_ud(message: Message, meta: MetaInfo):
 
     result = f"\n".join(texts)
     return await target.reply(result)
-
-
-async def process_fake_voice(message: Message, meta: MetaInfo):
-    target, text = meta.extract_text()
-    if not text:
-        return True
-
-    try:
-        async with ChatActioner(message.chat, action_by_type(ContentType.AUDIO)):
-            text = await translate(text, 'ru', 'en')
-            wav_url = await fake_you(text, voice=Voices[meta.keyword.lower()].value)
-            file = FakeBytesIO(await download_content(wav_url))
-    except TimeoutError:
-        return await message.reply('Озвучка заняла слишком много времени. Попробуйте ещё раз позже.')
-    except ExternalServiceError:
-        return await message.reply('Не удалось озвучить текст этим голосом. Попробуйте другой голос или повторите позже.')
-
-    voice, timeouted = await cpu_executor.run(to_ogg_opus, file)
-    if timeouted:
-        return await message.reply(hcode('🤷🏻‍♂️ Timeout'))
-    if not voice:
-        return await message.reply(hcode('🤷🏻‍♂️ Не удалось выполнить запрос'))
-
-    return await target.reply_voice(voice)
 
 
 async def process_topdf(message: Message, meta: MetaInfo):

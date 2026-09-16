@@ -29,7 +29,7 @@ from commands.dvach import Dvach
 from commands.errors import process_error_stickers, process_donate, process_supporters
 from commands.excuses import process_excuse
 from commands.externals import process_bg, process_porfirevich, process_topdf, process_imgur, process_duckduckgo, \
-    process_which_anime, process_ud, process_fake_voice
+    process_which_anime, process_ud
 from commands.figlet import process_figlet
 from commands.fun import process_beer, process_pokakats, process_puk
 from commands.genders import process_gender
@@ -70,7 +70,6 @@ from commands.vk import process_list_vk_wall, process_vk_wall, process_vk_wall_p
 from commands.votes import process_votes
 from commands.weather import Weather, WeatherMap
 from commands.zalgo import process_zalgo
-from common.externals.fakeyou import Voices
 from common.externals.exceptions import ExternalServiceError
 from common.tg.filters import MetaCommand
 from texts import cmd_help, cmd_start
@@ -234,7 +233,6 @@ async def on_startup(dp: Dispatcher):
     dp.register_message_handler(process_reverse, commands=['tenet'], content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_image_to_text, MetaCommand('text', 'itt'), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(process_tts, MetaCommand('tts', 'speech', args=1), content_types=ContentType.ANY, run_task=run_task)
-    dp.register_message_handler(process_fake_voice, MetaCommand(*Voices.__members__.keys()), content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(wit.process_stt_command, commands=['stt'], content_types=ContentType.ANY, run_task=run_task)
     dp.register_message_handler(wit.process_stt, NotFilter(IDFilter(chat_id=settings.excluded_chat_id)), content_types=(ContentType.VOICE, ContentType.VIDEO_NOTE),
                                 run_task=run_task)

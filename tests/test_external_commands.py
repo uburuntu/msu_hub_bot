@@ -1,10 +1,7 @@
 """Provider replies are synthetic; no Telegram or provider requests are sent."""
 
-import ast
 import asyncio
-import importlib
 import io
-import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from aiohttp import ClientError
 
+from common.externals import topdf
 from common.externals.exceptions import ExternalServiceError
 from hub_bot.commands import lingvanex
 
@@ -20,11 +18,9 @@ from hub_bot.commands import lingvanex
 @pytest.fixture
 def external_handlers():
     path = Path(__file__).resolve().parents[1] / "hub_bot/commands/externals.py"
-    tree = ast.parse(path.read_text())
-    # Isolate application globals and unrelated native conversion, not handler logic.
-    tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or node.module not in {"app", "utils.ffmpeg"}]
+    # Each test owns its provider stubs without changing other imported handlers.
     namespace = {}
-    exec(compile(tree, str(path), "exec"), namespace)
+    exec(compile(path.read_text(), str(path), "exec"), namespace)
 
     @asynccontextmanager
     async def no_chat_action(*args):
@@ -158,9 +154,9 @@ async def test_translation_cancellation_propagates(monkeypatch):
     target.reply.assert_not_awaited()
 
 
-@pytest.fixture(params=["fakeyou", "topdf"])
-def pending_provider(request, monkeypatch):
-    module = importlib.import_module(f"common.externals.{request.param}")
+@pytest.fixture
+def pending_pdf(monkeypatch):
+    module = topdf
     original_sleep = asyncio.sleep
 
     async def yield_to_loop(_delay):
@@ -181,9 +177,6 @@ def pending_provider(request, monkeypatch):
         async def json(self):
             return self.data
 
-        async def read(self):
-            return json.dumps(self.data).encode()
-
     class Session:
         closed = False
         complete = False
@@ -198,21 +191,12 @@ def pending_provider(request, monkeypatch):
             self.closed = True
 
         def post(self, *args, **kwargs):
-            return Response({"inference_job_token": "synthetic-job"})
+            return Response({})
 
         def get(self, url, **kwargs):
             if "/convert/" in url:
                 return Response({})
             self.polling.set()
-            if request.param == "fakeyou":
-                return Response(
-                    {
-                        "state": {
-                            "status": "complete_success" if self.complete else "pending",
-                            "maybe_public_bucket_wav_audio_path": "/synthetic.wav",
-                        }
-                    }
-                )
             return Response(
                 {
                     "status": "ready" if self.complete else "processing",
@@ -226,15 +210,13 @@ def pending_provider(request, monkeypatch):
     monkeypatch.setattr(module.asyncio, "sleep", yield_to_loop)
 
     async def invoke():
-        if request.param == "fakeyou":
-            return await module.fake_you("Synthetic sentence")
         return await module.convert_to_pdf(io.BytesIO(b"document"), "synthetic.txt", "text/plain")
 
     return module, session, invoke
 
 
-async def test_provider_polling_deadline_closes_session(pending_provider, monkeypatch):
-    module, session, invoke = pending_provider
+async def test_pdf_polling_deadline_closes_session(pending_pdf, monkeypatch):
+    module, session, invoke = pending_pdf
     monkeypatch.setattr(module, "JOB_TIMEOUT_SECONDS", 0.02)
     started = asyncio.get_running_loop().time()
 
@@ -246,8 +228,8 @@ async def test_provider_polling_deadline_closes_session(pending_provider, monkey
     assert session.closed
 
 
-async def test_provider_caller_cancellation_closes_session(pending_provider):
-    _, session, invoke = pending_provider
+async def test_pdf_caller_cancellation_closes_session(pending_pdf):
+    _, session, invoke = pending_pdf
     task = asyncio.create_task(invoke())
     try:
         await asyncio.wait_for(session.polling.wait(), 1)
@@ -260,36 +242,25 @@ async def test_provider_caller_cancellation_closes_session(pending_provider):
         await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_provider_ready_result_still_returns(pending_provider):
-    module, session, invoke = pending_provider
+async def test_pdf_ready_result_still_returns(pending_pdf):
+    _, session, invoke = pending_pdf
     session.complete = True
 
     result = await asyncio.wait_for(invoke(), 1)
 
     assert session.closed
-    if module.__name__.endswith("fakeyou"):
-        assert result.endswith("/synthetic.wav")
-    else:
-        assert result[0].endswith("/synthetic.pdf")
-        assert result[2] == "synthetic.pdf"
+    assert result[0].endswith("/synthetic.pdf")
+    assert result[2] == "synthetic.pdf"
 
 
-@pytest.mark.parametrize("kind", ["voice", "pdf"])
-async def test_job_timeout_has_actionable_command_reply(external_handlers, kind):
+async def test_pdf_timeout_has_actionable_command_reply(external_handlers):
     target = SimpleNamespace(reply=AsyncMock(), chat=object())
-    if kind == "voice":
-        meta = SimpleNamespace(extract_text=lambda: (target, "Synthetic sentence"), keyword="homer")
-        external_handlers["translate"] = AsyncMock(return_value="Synthetic sentence")
-        external_handlers["fake_you"] = AsyncMock(side_effect=TimeoutError)
-        await external_handlers["process_fake_voice"](target, meta)
-        assert "Озвучка заняла слишком много времени" in target.reply.call_args.args[0]
-    else:
-        document = SimpleNamespace(file_name="synthetic.txt", mime_type="text/plain")
-        meta = SimpleNamespace(extract_doc=AsyncMock(return_value=(target, document)))
-        external_handlers["download"] = AsyncMock(return_value=io.BytesIO(b"document"))
-        external_handlers["convert_to_pdf"] = AsyncMock(side_effect=TimeoutError)
-        await external_handlers["process_topdf"](target, meta)
-        assert "Конвертация заняла слишком много времени" in target.reply.call_args.args[0]
+    document = SimpleNamespace(file_name="synthetic.txt", mime_type="text/plain")
+    meta = SimpleNamespace(extract_doc=AsyncMock(return_value=(target, document)))
+    external_handlers["download"] = AsyncMock(return_value=io.BytesIO(b"document"))
+    external_handlers["convert_to_pdf"] = AsyncMock(side_effect=TimeoutError)
+    await external_handlers["process_topdf"](target, meta)
+    assert "Конвертация заняла слишком много времени" in target.reply.call_args.args[0]
     target.reply.assert_awaited_once()
 
 

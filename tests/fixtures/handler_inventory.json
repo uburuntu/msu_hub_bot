@@ -452,11 +452,6 @@
   },
   {
     "type": "register_message_handler",
-    "handler": "process_fake_voice",
-    "aliases": []
-  },
-  {
-    "type": "register_message_handler",
     "handler": "wit.process_stt_command",
     "aliases": [
       "stt"

@@ -28,7 +28,6 @@ hidden = """
 • /d6, /dice — бросить кубик
 • /stats — статистика бота
 
-• /homer, /sinatra, /vader, /queen, /glados — fake voices
 """
 
 cmd_help = f"""{hbold('Функции бота')}
