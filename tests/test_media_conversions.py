@@ -1,6 +1,7 @@
 import io
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import wave
@@ -53,26 +54,30 @@ def test_failure_removes_input_and_output_without_logging_native_details(monkeyp
     assert "private-native-details" not in caplog.text
 
 
-def test_native_deadline_kills_and_reaps_child(monkeypatch, tmp_path):
+def test_native_deadline_kills_and_reaps_child(monkeypatch):
     run = subprocess.run
-    pid_file = tmp_path / "child.pid"
+    popen = subprocess.Popen
+    children = []
     source_paths = []
+
+    def capture_child(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        children.append(child)
+        return child
 
     def slow_native(command, **kwargs):
         source_paths.append(Path(command[command.index("-i") + 1]))
-        return run(
-            [
-                sys.executable,
-                "-c",
-                "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)",
-                str(pid_file),
-            ],
-            **kwargs,
-        )
+        return run([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
 
     monkeypatch.setattr(media, "FFMPEG_TIMEOUT", 0.5)
+    monkeypatch.setattr(media.subprocess, "Popen", capture_child)
     monkeypatch.setattr(media.subprocess, "run", slow_native)
     assert media.ffmpeg(io.BytesIO(b"input"), out_suffix=".wav") is None
+    assert len(children) == 1
+    child = children[0]
+    assert child.returncode == -signal.SIGKILL
     with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_file.read_text()), 0)
+        os.kill(child.pid, 0)
+    with pytest.raises(ChildProcessError):
+        os.waitpid(child.pid, os.WNOHANG)
     assert not source_paths[0].parent.exists()
