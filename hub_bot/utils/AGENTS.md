@@ -7,3 +7,4 @@
 - Separate service results from Telegram presentation while preserving the command's input and output contract.
 - Treat provider access, preprocessing and final Telegram delivery as separate checks; success at one stage does not validate the whole command.
 - Trace registrations and callers before removing a helper; colocated functions may serve unrelated features.
+- Preserve Wolfram's established crop/layout behavior; caption-layout changes for Lobster and demotivators do not authorize changing it.
