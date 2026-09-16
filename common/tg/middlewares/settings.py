@@ -40,12 +40,15 @@ class Settings(BaseSettings):
 
     async def save(self, db: EdgeDB, force=False) -> 'Settings':
         if self._is_dirty or force:
+            snapshot = self.dict(exclude={'_is_dirty', '_chat_id'})
             chat_db = await ChatDB.query(db).get(self._chat_id)
             if not isinstance(chat_db.metadata, dict):
                 chat_db.metadata = {}
-            chat_db.metadata['settings'] = self.dict(exclude={'_is_dirty', '_chat_id'})
+            chat_db.metadata['settings'] = snapshot
             await ChatDB.query(db).update(self._chat_id, metadata=chat_db.metadata)
-        self.__dict__['_is_dirty'] = False  # to skip validator
+            # A handler may change preferences while the database write is pending.
+            if self.dict(exclude={'_is_dirty', '_chat_id'}) == snapshot:
+                self.__dict__['_is_dirty'] = False  # to skip validator
         return self
 
 
@@ -80,4 +83,5 @@ class SettingsMiddleware(LifetimeControllerMiddleware):
     async def post_process(self, obj, data, *args):
         proxy = data.get('settings', None)
         if isinstance(proxy, Settings):
-            await proxy.save(self.db)
+            async with self.throttler:
+                await proxy.save(self.db)
