@@ -3,15 +3,24 @@
 import asyncio
 import json
 import traceback
+from collections import Counter
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import UUID
 
 import aiohttp
 import pytest
+from aiogram.dispatcher.event.bases import UNHANDLED
+from aiogram.types import Chat, Message, Update, User
+from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 
 from common.db import supabase as module
 from common.db.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, UserObservation, VkPatch
+from common.tg.middlewares.settings import SettingsMiddleware
+from common.tg.middlewares.updates import UpdatesMiddleware
+from common.tg.runtime import AdmissionMiddleware, Supervisor
+from msu_hub_bot.telemetry import Backend, Telemetry
+from telemetry_helpers import Capture, config
 
 CANARY = "synthetic-private-value"
 NOW = datetime(2026, 9, 17, tzinfo=UTC)
@@ -130,6 +139,95 @@ def configured(monkeypatch):
 
     yield create
     assert all(repo._session.closed for repo in repositories), "Each test must close its owned HTTP pool"
+
+
+@pytest.mark.parametrize("change_settings", [False, True])
+async def test_middleware_and_api_telemetry_have_distinct_owners(configured, monkeypatch, change_settings):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    sink = Capture()
+    telemetry = Telemetry(config(), transport=sink)
+    responses = [Response(token()), Response({})]
+    if change_settings:
+        responses.append(Response({"with_nsfw": True}))
+    responses.append(Response(None, status=204, raw=b""))
+    repo, _ = configured(responses, telemetry=telemetry)
+    preferences = SettingsMiddleware(repo, telemetry=telemetry, backend=Backend.SUPABASE)
+    supervisor = Supervisor(telemetry)
+    archive = UpdatesMiddleware(repo, supervisor, telemetry=telemetry, backend=Backend.SUPABASE)
+    update = Update(
+        update_id=1,
+        message=Message(
+            message_id=1,
+            date=NOW,
+            chat=Chat(id=-100, type="supergroup", title=CANARY),
+            from_user=User(id=101, is_bot=False, first_name=CANARY),
+            text=CANARY,
+        ),
+    )
+
+    async def handler(message, data):
+        if change_settings:
+            data["settings"].with_nsfw = True
+            return None
+        return UNHANDLED
+
+    async def dispatch(event, data):
+        return await preferences(handler, event.message, data)
+
+    async def admitted(event, data):
+        return await archive(dispatch, event, data)
+
+    await telemetry.start()
+    try:
+        await asyncio.create_task(AdmissionMiddleware(supervisor)(admitted, update, {}))
+        await supervisor.drain(1, cancel_timeout=0.1)
+    finally:
+        await preferences.close()
+        await repo.close()
+        await telemetry.close()
+
+    counts = Counter()
+    for message in sink.messages():
+        if isinstance(message, ExportMetricsServiceRequest):
+            for resource in message.resource_metrics:
+                for scope in resource.scope_metrics:
+                    for metric in scope.metrics:
+                        if metric.name == "bot.operations":
+                            for point in metric.sum.data_points:
+                                operation = next(attr.value.string_value for attr in point.attributes if attr.key == "operation")
+                                counts[operation] += point.as_int
+    assert counts["settings.load"] == counts["archive.write"] == counts["database.read"] == counts["database.auth"] == 1
+    assert counts["settings.save"] == int(change_settings)
+    assert counts["database.write"] == 1 + int(change_settings)
+    spans = sink.spans()
+    if change_settings:
+        by_operation = {next(attr.value.string_value for attr in span.attributes if attr.key == "operation"): span for span in spans}
+        assert set(by_operation) == {"settings.save", "database.write"}
+        assert by_operation["database.write"].parent_span_id == by_operation["settings.save"].span_id
+    else:
+        assert spans == []
+    assert CANARY not in sink.serialized()
+
+
+async def test_legacy_archive_payload_never_enters_supabase_request(configured):
+    repo, session = configured([Response(token()), Response(None, status=204, raw=b"")])
+    update = ArchivedUpdate(
+        update_id=1,
+        kind="message",
+        handled=True,
+        data={"message": {"message_id": 1}},
+        legacy_data={"message": {"message_id": 1, "text": CANARY}},
+    )
+    try:
+        await repo.archive_update(update)
+        payload = session.calls[-1][1]["json"]["p_update"]
+        assert "legacy_data" not in payload
+        assert CANARY not in json.dumps(payload)
+        assert CANARY not in repr(update)
+        assert "legacy_data" not in update.model_dump()
+        assert update.legacy_data["message"]["text"] == CANARY
+    finally:
+        await repo.close()
 
 
 async def test_password_auth_health_reuses_token_and_scopes_requests(configured):

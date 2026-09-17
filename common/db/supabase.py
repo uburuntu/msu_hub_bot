@@ -280,10 +280,9 @@ class SupabaseRepository:
         decode: Callable[[JsonValue], _Result],
         *,
         operation: str = "database.read",
+        trace: bool = True,
     ) -> _Result:
-        with self._telemetry.operation(
-            Boundary.STORAGE, operation, backend=Backend.SUPABASE, trace=operation not in {"archive.write", "settings.load"}
-        ) as span:
+        with self._telemetry.operation(Boundary.STORAGE, operation, backend=Backend.SUPABASE, trace=trace) as span:
             try:
                 async with asyncio.timeout(self._timeout):
                     token = await self._access_token()
@@ -322,10 +321,10 @@ class SupabaseRepository:
         return await self._rpc("get_chat", {"p_chat_id": chat_id}, lambda value: _optional(ChatRecord, value))
 
     async def load_settings(self, chat: ChatObservation) -> dict[str, JsonValue]:
-        return await self._rpc("load_settings", {"p_chat": _observation(chat)}, _settings, operation="settings.load")
+        return await self._rpc("load_settings", {"p_chat": _observation(chat)}, _settings, trace=False)
 
     async def patch_settings(self, chat_id: int, changes: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        return await self._rpc("patch_settings", {"p_chat_id": chat_id, "p_changes": changes}, _settings, operation="settings.save")
+        return await self._rpc("patch_settings", {"p_chat_id": chat_id, "p_changes": changes}, _settings, operation="database.write")
 
     async def archive_update(self, update: ArchivedUpdate) -> None:
         payload: dict[str, JsonValue] = update.model_dump(mode="json")
@@ -336,7 +335,7 @@ class SupabaseRepository:
             topics=[_observation(value) for value in update.topics],
             messages=[_observation(value) for value in update.messages],
         )
-        await self._rpc("archive_update", {"p_update": payload}, _void, operation="archive.write")
+        await self._rpc("archive_update", {"p_update": payload}, _void, operation="database.write", trace=False)
 
     async def statistics(self, since: datetime) -> UsageStats:
         if since.tzinfo is None or since.utcoffset() is None:
