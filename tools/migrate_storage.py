@@ -14,9 +14,10 @@ import re
 import stat
 import subprocess
 import sys
-from collections import Counter
+import time
+from collections import Counter, deque
 from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,15 @@ COLUMNS = {
     "directory": "id created chat_id name section is_hidden username_alias members pinned_message_id",
     "vk_subscriptions": "id created owner_id chat_id last_post_id with_reposts with_header is_suspended description",
     "updates": "id created data handled",
+}
+SOURCE_TYPES = {
+    "id": "std::uuid",
+    "created": "std::datetime",
+    "metadata": "std::json",
+    "data": "std::json",
+    **dict.fromkeys(("user_id", "chat_id", "owner_id"), "std::int64"),
+    **dict.fromkeys(("members", "pinned_message_id", "last_post_id"), "std::int32"),
+    **dict.fromkeys(("is_bot", "is_hidden", "with_reposts", "with_header", "is_suspended", "handled"), "std::bool"),
 }
 SCHEMA_QUERY = """
 SELECT schema::ObjectType {
@@ -76,6 +86,13 @@ def decode(raw: str) -> Any:
         raise MigrationError("nonfinite_number")
 
     return json.loads(raw, parse_float=Decimal, parse_constant=invalid, object_pairs_hook=_pairs)
+
+
+def decode_object(raw: str) -> dict[str, Any]:
+    result = decode(raw)
+    if not isinstance(result, dict):
+        raise MigrationError("json_object_required")
+    return result
 
 
 def canonical(value: Any) -> str:
@@ -186,6 +203,7 @@ def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int) 
         names = fields(schema)
         count = source.query_single(f"SELECT count({type_name});")
         digest = Digests(names)
+        last_progress = time.monotonic()
         with (directory / (table + ".jsonl")).open("x", encoding="utf-8") as output:
             os.chmod(output.name, 0o600)
             while True:
@@ -201,6 +219,9 @@ def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int) 
                     raise MigrationError("source_page_shape")
                 for row in rows:
                     output.write(digest.add(normalized_row(row, schema)))
+                if time.monotonic() - last_progress >= 30:
+                    print(canonical({"exporting_table": table, "rows": digest.count, "expected_rows": count}), flush=True)
+                    last_progress = time.monotonic()
                 if len(rows) < batch_size:
                     break
             output.flush()
@@ -217,7 +238,12 @@ def export(config: dict[str, Any], directory: Path, bot_id: int, batch_size: int
 
     allowed = {"dsn", "host", "port", "database", "user", "password", "tls_security", "tls_ca", "credentials_file"}
     connection = config["connection"]
-    if not isinstance(connection, dict) or set(connection) - allowed or not config.get("expected_database"):
+    if (
+        not isinstance(connection, dict)
+        or set(connection) - allowed
+        or not config.get("expected_database")
+        or not any(connection.get(key) for key in ("dsn", "host", "credentials_file"))
+    ):
         raise MigrationError("source_configuration")
     directory.mkdir(mode=0o700)
     client = edgedb.create_client(**connection, max_concurrency=1, timeout=15, wait_until_available=15)
@@ -304,6 +330,19 @@ class Postgres:
         self.command = config.get("psql_command", ["psql"])
         if not isinstance(self.command, list) or not self.command or not all(isinstance(v, str) for v in self.command):
             raise MigrationError("target_command")
+        if self.command != ["psql"]:
+            # Docker may forward named PG environment variables; credential
+            # values and arbitrary executable arguments never belong in argv.
+            prefix = self.command[:-2]
+            if (
+                len(self.command) < 7
+                or self.command[:3] != ["docker", "exec", "-i"]
+                or self.command[-1] != "psql"
+                or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", self.command[-2])
+                or len(prefix[3:]) % 2
+                or any(prefix[i] != "-e" or prefix[i + 1] not in allowed for i in range(3, len(prefix), 2))
+            ):
+                raise MigrationError("target_command_not_allowlisted")
         self.command = [*self.command, "-X", "-qAt", "-v", "ON_ERROR_STOP=1"]
         self.fingerprint = hashlib.sha256(
             canonical(
@@ -325,6 +364,15 @@ class Postgres:
             raise MigrationError("target_operation_failed")
         return result.stdout
 
+    def run_file(self, path: Path) -> str:
+        with path.open() as source, (self.directory / "target-diagnostics.log").open("ab") as diagnostics:
+            result = subprocess.run(
+                self.command, stdin=source, text=True, stdout=subprocess.PIPE, stderr=diagnostics, env=self.environment, timeout=600
+            )
+        if result.returncode:
+            raise MigrationError("target_audit_failed")
+        return result.stdout
+
     def guard(self) -> None:
         result = decode(
             self.run(f"""
@@ -337,7 +385,7 @@ FROM pg_control_system();
         if result != {
             "database": self.config["expected_database"],
             "cluster": self.config["expected_system_identifier"],
-            "version": 1,
+            "version": self.config.get("expected_schema_version", 2),
             "principal": True,
         }:
             raise MigrationError("target_identity_mismatch")
@@ -375,6 +423,8 @@ def import_fields(table: str, schema: dict[str, Any]) -> list[str]:
         expected.add("full_name")
     if set(names) != expected:
         raise MigrationError("unmapped_source_fields")
+    if any(item["target"]["name"] != SOURCE_TYPES.get(item["name"], "std::str") for item in schema["properties"]):
+        raise MigrationError("unmapped_source_scalar_type")
     return sorted(set(names) - {"full_name"})
 
 
@@ -444,6 +494,8 @@ def batches(values: Iterable[dict[str, Any]], size: int) -> Iterator[list[dict[s
 
 
 def import_data(target: Postgres, directory: Path, manifest: dict[str, Any], batch_size: int, *, replay: bool = False) -> None:
+    if any(directory.glob("normalization-*/applied-" + target.fingerprint + ".json")):
+        raise MigrationError("normalized_target_requires_new_export")
     for table, entry in manifest["tables"].items():
         import_fields(table, entry["schema"])
     target.guard()
@@ -466,7 +518,7 @@ def import_data(target: Postgres, directory: Path, manifest: dict[str, Any], bat
         print(canonical({"imported_table": table, "source_rows": manifest["tables"][table]["count"]}), flush=True)
 
 
-def target_query(table: str, schema: dict[str, Any], bot_id: int) -> str:
+def target_query(table: str, schema: dict[str, Any], bot_id: int, *, cutoff: str | None = None) -> str:
     import_fields(table, schema)
     expressions: list[str] = []
     for name in fields(schema):
@@ -478,6 +530,8 @@ def target_query(table: str, schema: dict[str, Any], bot_id: int) -> str:
             expression = name
         expressions.extend(("'" + name + "'", expression))
     condition = f" WHERE bot_id={bot_id} AND is_legacy" if table == "updates" else ""
+    if table == "updates" and cutoff is not None:
+        condition += f" AND created>'{utc(cutoff)}'::timestamptz"
     return f"SELECT jsonb_build_object({','.join(expressions)})::text FROM hub_private.{table}{condition} ORDER BY id"
 
 
@@ -515,52 +569,387 @@ def compare_rows(expected: Iterable[dict[str, Any]], actual: Iterable[dict[str, 
     }
 
 
-def reconcile(target: Postgres, directory: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+def reconcile(
+    target: Postgres,
+    directory: Path,
+    manifest: dict[str, Any],
+    *,
+    normalized: bool = False,
+    as_of: str | None = None,
+    retained_only: bool = False,
+) -> dict[str, Any]:
     target.guard()
     report: dict[str, Any] = {"export_id": manifest["export_id"], "tables": {}}
+    cutoff = utc(datetime.fromisoformat(utc(as_of)) - timedelta(days=30)) if as_of else None
+
+    def expected_rows(table: str, schema: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        from common.db.observations import reference_payload
+
+        for row in rows(directory, table, schema):
+            if table == "updates":
+                if retained_only and cutoff is not None and utc(row["created"]) <= cutoff:
+                    continue
+                if normalized:
+                    row["data"] = reference_payload(row["data"])
+            yield row
+
     for table, entry in manifest["tables"].items():
         report["tables"][table] = compare_rows(
-            rows(directory, table, entry["schema"]),
-            target.stream(target_query(table, entry["schema"], manifest["bot_id"])),
+            expected_rows(table, entry["schema"]),
+            target.stream(target_query(table, entry["schema"], manifest["bot_id"], cutoff=cutoff if retained_only else None)),
             entry["schema"],
         )
     report["exact"] = all(not item["missing"] and not item["extra"] and not item["field_mismatches"] for item in report["tables"].values())
-    save_json(directory / ("reconciliation-" + target.fingerprint + ".json"), report)
+    report["source_parity"] = all(not item["missing"] and not item["field_mismatches"] for item in report["tables"].values())
+    report["validated"] = report["exact"]
+    if normalized and as_of is not None:
+        report["derived_entities"] = audit_entities(target, directory, manifest, as_of)
+        entities = report["derived_entities"]
+        report["validated"] = (
+            report["source_parity"]
+            and not entities["unexplained_extra_entities"]
+            and not entities["missing_observed_entities"]
+            and entities["derived_users"] == report["tables"]["users"]["extra"]
+            and entities["derived_chats"] == report["tables"]["chats"]["extra"]
+            and not any(report["tables"][table]["extra"] for table in ("directory", "vk_subscriptions", "updates"))
+        )
+    suffix = "-normalized" if normalized else ""
+    save_json(directory / ("reconciliation-" + target.fingerprint + suffix + ".json"), report)
     return report
+
+
+def transform_update(row: dict[str, Any], as_of: str) -> dict[str, Any]:
+    """Typed identities plus original JSON bodies; never round opaque JSON numbers."""
+    from aiogram.types import Update
+
+    from common.db.observations import archive_observation, reference_payload
+
+    raw = row["data"]
+    if not isinstance(raw, dict) or type(raw.get("update_id")) is not int:
+        raise MigrationError("legacy_update_shape")
+    archive = archive_observation(
+        # The typed copy discovers identities/relationships only. Every stored
+        # receipt/message body below comes from the original Decimal-valued tree.
+        Update.model_validate_json(canonical(raw)),
+        row["handled"],
+        received_at=datetime.fromisoformat(utc(row["created"])),
+        retention_at=datetime.fromisoformat(utc(as_of)),
+    )
+    archive.id = UUID(row["id"])
+    result = decode_object(archive.model_dump_json(exclude_unset=True))
+    result["data"] = reference_payload(raw)
+    message_sources: dict[tuple[Any, Any, Any], dict[str, Any]] = {}
+    pending: deque[Any] = deque([raw])
+    seen = 0
+    while pending:
+        value = pending.popleft()
+        seen += 1
+        if seen > 4096:
+            raise MigrationError("legacy_traversal_limit")
+        if isinstance(value, dict):
+            chat = value.get("chat")
+            if "message_id" in value and "date" in value and isinstance(chat, dict):
+                key = (value.get("business_connection_id") or "", chat.get("id"), value["message_id"])
+                message_sources.setdefault(key, value)
+            pending.extend(item for item in value.values() if isinstance(item, (dict, list)))
+        elif isinstance(value, list):
+            pending.extend(item for item in value if isinstance(item, (dict, list)))
+    for message in result["messages"]:
+        key = (message["business_connection_id"], message["chat_id"], message["message_id"])
+        if key not in message_sources:
+            raise MigrationError("legacy_message_source_missing")
+        message["data"] = reference_payload(message_sources[key], message_body=True)
+    extracted = {(item["business_connection_id"], item["chat_id"], item["message_id"]) for item in result["messages"]}
+    cutoff = datetime.fromisoformat(utc(as_of)) - timedelta(days=30)
+
+    def eligible(value: Any) -> bool:
+        if isinstance(value, str):
+            return utc(value) > utc(cutoff)
+        if isinstance(value, (int, Decimal)) and not isinstance(value, bool):
+            return value > Decimal(str(cutoff.timestamp()))
+        raise MigrationError("legacy_message_date")
+
+    if any(key not in extracted and eligible(value["date"]) for key, value in message_sources.items()):
+        raise MigrationError("eligible_legacy_message_not_extracted")
+    return result
+
+
+def normalization_path(directory: Path, as_of: str) -> Path:
+    return directory / ("normalization-" + hashlib.sha256(utc(as_of).encode()).hexdigest()[:16])
+
+
+def json_lines(path: Path) -> Iterator[dict[str, Any]]:
+    if path.is_symlink() or stat.S_IMODE(path.stat().st_mode) & 0o077:
+        raise MigrationError("private_artifact_required")
+    with path.open(encoding="utf-8") as source:
+        while line := source.readline(MAX_LINE + 1):
+            if len(line) > MAX_LINE or not line.endswith("\n"):
+                raise MigrationError("artifact_size_or_truncation")
+            value = decode(line)
+            if not isinstance(value, dict):
+                raise MigrationError("artifact_shape")
+            yield value
+
+
+def prepare_normalization(directory: Path, manifest: dict[str, Any], as_of: str) -> dict[str, Any]:
+    destination = normalization_path(directory, as_of)
+    destination.mkdir(mode=0o700)
+    digest = hashlib.sha256()
+    counts: Counter[str] = Counter()
+    categories: Counter[str] = Counter()
+    cutoff = utc(datetime.fromisoformat(utc(as_of)) - timedelta(days=30))
+    last_progress = time.monotonic()
+    with (destination / "records.jsonl").open("x") as output, (destination / "rejects.jsonl").open("x") as rejects:
+        os.chmod(output.name, 0o600)
+        os.chmod(rejects.name, 0o600)
+        for row in rows(directory, "updates", manifest["tables"]["updates"]["schema"]):
+            counts["source_rows"] += 1
+            counts["expired_receipts" if utc(row["created"]) <= cutoff else "retained_receipts"] += 1
+            try:
+                transformed = transform_update(row, as_of)
+                line = canonical(transformed) + "\n"
+            except Exception as error:
+                # Malformed historical records stay in the exact export/target;
+                # all transformation failures are visible and block application.
+                category = str(error) if isinstance(error, MigrationError) else type(error).__name__
+                categories[category] += 1
+                rejects.write(canonical({"category": category, "source": row}) + "\n")
+                continue
+            output.write(line)
+            digest.update(line.encode())
+            counts["accepted"] += 1
+            counts["message_observations"] += len(transformed["messages"])
+            if time.monotonic() - last_progress >= 30:
+                print(canonical({"normalizing_rows": counts["source_rows"], "rejected": sum(categories.values())}), flush=True)
+                last_progress = time.monotonic()
+        for file in (output, rejects):
+            file.flush()
+            os.fsync(file.fileno())
+    report = {
+        "format": FORMAT,
+        "export_id": manifest["export_id"],
+        "as_of": utc(as_of),
+        "cutoff": cutoff,
+        "sha256": digest.hexdigest(),
+        "counts": dict(counts),
+        "rejections": dict(categories),
+    }
+    save_json(destination / "manifest.json", report)
+    return report
+
+
+def verify_normalization(directory: Path, manifest: dict[str, Any], as_of: str) -> tuple[Path, dict[str, Any]]:
+    destination = normalization_path(directory, as_of)
+    report = private_json(destination / "manifest.json")
+    if report.get("format") != FORMAT or report.get("export_id") != manifest["export_id"] or report.get("as_of") != utc(as_of):
+        raise MigrationError("normalization_manifest_mismatch")
+    digest = hashlib.sha256()
+    count = 0
+    for row in json_lines(destination / "records.jsonl"):
+        digest.update((canonical(row) + "\n").encode())
+        count += 1
+    if digest.hexdigest() != report["sha256"] or count != report["counts"].get("accepted", 0):
+        raise MigrationError("normalization_checksum_mismatch")
+    if report["rejections"] or count != manifest["tables"]["updates"]["count"]:
+        raise MigrationError("normalization_requires_rejection_review")
+    return destination, report
+
+
+def normalization_script(batch: list[dict[str, Any]], bot_id: int, as_of: str) -> str:
+    copied = "".join(copy_escape(canonical(row)) + "\n" for row in batch)
+    return f"""BEGIN;
+SET LOCAL statement_timeout='240s';
+SELECT pg_advisory_xact_lock({bot_id});
+CREATE TEMP TABLE migration_batch(payload jsonb) ON COMMIT DROP;
+COPY migration_batch(payload) FROM STDIN;
+{copied}\\.
+DO $$ DECLARE item jsonb; BEGIN
+ FOR item IN SELECT payload FROM migration_batch LOOP
+  IF NOT EXISTS(SELECT 1 FROM hub_private.updates WHERE id=(item->>'id')::uuid AND bot_id={bot_id}
+                AND is_legacy AND created=(item->>'received_at')::timestamptz AND handled=(item->>'handled')::boolean) THEN
+   RAISE EXCEPTION 'Legacy receipt does not match verified source';
+  END IF;
+  PERFORM hub_private.observe_archive(item,{bot_id},(item->>'id')::uuid,(item->>'received_at')::timestamptz,'{utc(as_of)}'::timestamptz);
+  UPDATE hub_private.updates SET data=item->'data',update_id=(item->>'update_id')::bigint,kind=item->>'kind'
+   WHERE id=(item->>'id')::uuid;
+ END LOOP;
+END $$;
+COMMIT;
+"""
+
+
+def normalize(target: Postgres, directory: Path, manifest: dict[str, Any], as_of: str, batch_size: int) -> dict[str, Any]:
+    destination, report = verify_normalization(directory, manifest, as_of)
+    parity = private_json(directory / ("reconciliation-" + target.fingerprint + ".json"))
+    if parity.get("export_id") != manifest["export_id"] or not parity.get("exact"):
+        raise MigrationError("verified_raw_parity_required")
+    target.guard()
+    checkpoint = destination / ("applied-" + target.fingerprint + ".json")
+    state = private_json(checkpoint) if checkpoint.exists() else {"completed": 0, "batch_size": batch_size, "sha256": report["sha256"]}
+    if state.get("batch_size") != batch_size or state.get("sha256") != report["sha256"]:
+        raise MigrationError("normalization_resume_mismatch")
+    completed = state["completed"]
+    for number, batch in enumerate(batches(json_lines(destination / "records.jsonl"), batch_size), 1):
+        if number > completed:
+            target.run(normalization_script(batch, manifest["bot_id"], as_of))
+            state["completed"] = number
+            save_json(checkpoint, state)
+    return report
+
+
+def retention_report(target: Postgres, as_of: str) -> dict[str, Any]:
+    target.guard()
+    return decode_object(
+        target.run(f"""
+SELECT jsonb_build_object('as_of','{utc(as_of)}','expired_updates',
+ (SELECT count(*) FROM hub_private.updates WHERE bot_id={target.bot_id} AND created<='{utc(as_of)}'::timestamptz-interval '30 days'),
+ 'retained_updates',(SELECT count(*) FROM hub_private.updates WHERE bot_id={target.bot_id} AND created>'{utc(as_of)}'::timestamptz-interval '30 days'),
+ 'expired_messages',(SELECT count(*) FROM hub_private.messages WHERE bot_id={target.bot_id} AND sent_at<='{utc(as_of)}'::timestamptz-interval '30 days'),
+ 'retained_messages',(SELECT count(*) FROM hub_private.messages WHERE bot_id={target.bot_id} AND sent_at>'{utc(as_of)}'::timestamptz-interval '30 days'));
+""")
+    )
+
+
+def audit_messages(target: Postgres, directory: Path, manifest: dict[str, Any], as_of: str) -> dict[str, Any]:
+    """Compare keys, winning versions and exact JSON body hashes inside PostgreSQL."""
+    destination, report = verify_normalization(directory, manifest, as_of)
+    target.guard()
+    path = destination / "message-audit.sql"
+    with path.open("w") as output:
+        os.chmod(path, 0o600)
+        output.write(
+            "BEGIN ISOLATION LEVEL REPEATABLE READ;\nSET LOCAL statement_timeout='540s';\n"
+            "CREATE TEMP TABLE migration_expected(payload jsonb) ON COMMIT DROP;\n"
+            "COPY migration_expected(payload) FROM STDIN;\n"
+        )
+        for receipt in json_lines(destination / "records.jsonl"):
+            for message in receipt["messages"]:
+                payload = {**message, "bot_id": manifest["bot_id"], "source_update_id": receipt["id"]}
+                output.write(copy_escape(canonical(payload)) + "\n")
+        output.write(f"""\\.
+WITH typed AS (SELECT r.* FROM migration_expected
+ CROSS JOIN LATERAL jsonb_populate_record(NULL::hub_private.messages,payload) AS r), ranked AS (
+ SELECT *,min(sent_at) OVER(PARTITION BY bot_id,chat_id,message_id,business_connection_id) AS earliest,
+ row_number() OVER(PARTITION BY bot_id,chat_id,message_id,business_connection_id
+ ORDER BY coalesce(edited_at,sent_at) DESC,observed_at DESC,source_update_id DESC) AS position FROM typed), expected AS (
+ SELECT (to_jsonb(r)-ARRAY['position','earliest']::text[]) || jsonb_build_object('sent_at',earliest) AS value,
+ bot_id,chat_id,message_id,business_connection_id,data FROM ranked r WHERE position=1), actual AS (
+ SELECT * FROM hub_private.messages WHERE bot_id={target.bot_id} AND sent_at>'{report["cutoff"]}'::timestamptz)
+SELECT jsonb_build_object('expected',count(e.bot_id),'actual',count(a.bot_id),
+ 'missing',count(*) FILTER(WHERE a.bot_id IS NULL),'extra',count(*) FILTER(WHERE e.bot_id IS NULL),
+ 'key_version_body_mismatches',count(*) FILTER(WHERE e.bot_id IS NOT NULL AND a.bot_id IS NOT NULL AND e.value<>to_jsonb(a)),
+ 'body_sha256_mismatches',count(*) FILTER(WHERE e.bot_id IS NOT NULL AND a.bot_id IS NOT NULL
+ AND sha256(convert_to(e.data::text,'UTF8'))<>sha256(convert_to(a.data::text,'UTF8'))))
+FROM expected e FULL JOIN actual a USING(bot_id,chat_id,message_id,business_connection_id);
+ROLLBACK;
+""")
+    result = decode_object(target.run_file(path))
+    save_json(destination / ("message-audit-" + target.fingerprint + ".json"), result)
+    return result
+
+
+def audit_entities(target: Postgres, directory: Path, manifest: dict[str, Any], as_of: str) -> dict[str, Any]:
+    """Account for newly discovered identities against verified observations."""
+    destination, _ = verify_normalization(directory, manifest, as_of)
+    path = destination / "entity-audit.sql"
+    with path.open("w") as output:
+        os.chmod(path, 0o600)
+        output.write(
+            "BEGIN ISOLATION LEVEL REPEATABLE READ;\nSET LOCAL statement_timeout='540s';\n"
+            "CREATE TEMP TABLE migration_original(kind text,id uuid,telegram_id bigint) ON COMMIT DROP;\n"
+            "COPY migration_original FROM STDIN;\n"
+        )
+        for table, identity in (("users", "user_id"), ("chats", "chat_id")):
+            for row in rows(directory, table, manifest["tables"][table]["schema"]):
+                output.write(f"{table}\t{UUID(row['id'])}\t{int(row[identity])}\n")
+        output.write(
+            "\\.\nCREATE TEMP TABLE migration_observed(kind text,telegram_id bigint) ON COMMIT DROP;\nCOPY migration_observed FROM STDIN;\n"
+        )
+        for receipt in json_lines(destination / "records.jsonl"):
+            for table, identity in (("users", "user_id"), ("chats", "chat_id")):
+                for row in receipt[table]:
+                    output.write(f"{table}\t{int(row[identity])}\n")
+        output.write("""\\.
+WITH observed AS (SELECT DISTINCT kind,telegram_id FROM migration_observed), current AS (
+ SELECT 'users' AS kind,id,user_id AS telegram_id FROM hub_private.users UNION ALL
+ SELECT 'chats',id,chat_id FROM hub_private.chats), extra AS (
+ SELECT c.* FROM current c LEFT JOIN migration_original o USING(kind,id) WHERE o.id IS NULL)
+SELECT jsonb_build_object('derived_users',(SELECT count(*) FROM extra WHERE kind='users'),
+ 'derived_chats',(SELECT count(*) FROM extra WHERE kind='chats'),
+ 'unexplained_extra_entities',(SELECT count(*) FROM extra e LEFT JOIN observed o USING(kind,telegram_id) WHERE o.telegram_id IS NULL),
+ 'missing_observed_entities',(SELECT count(*) FROM observed o LEFT JOIN current c USING(kind,telegram_id) WHERE c.id IS NULL));
+ROLLBACK;
+""")
+    return decode_object(target.run_file(path))
 
 
 def main() -> int:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("export", "verify", "import", "reconcile"))
+    parser.add_argument(
+        "action",
+        choices=("export", "verify", "import", "reconcile", "prepare-normalization", "normalize", "audit-messages", "retention-report"),
+    )
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--source-config", type=Path)
     parser.add_argument("--target-config", type=Path)
     parser.add_argument("--bot-id", type=int)
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--replay", action="store_true", help="Reapply acknowledged import batches; never delete rows")
+    parser.add_argument("--as-of", help="Fixed timezone-aware retention instant for preparation and validation")
+    parser.add_argument("--normalized", action="store_true", help="Compare receipt references after successful normalization")
+    parser.add_argument("--retained-only", action="store_true", help="Compare only receipts newer than the fixed 30-day cutoff")
+    parser.add_argument("--target-writers-stopped", action="store_true", help="Operator assertion that application writers are stopped")
     args = parser.parse_args()
     try:
         if not 1 <= args.batch_size <= 1000:
             raise MigrationError("batch_size_range")
+        if args.action in {"import", "normalize", "reconcile"} and not args.target_writers_stopped:
+            raise MigrationError("target_writer_freeze_required")
+        if (
+            args.action in {"prepare-normalization", "normalize", "audit-messages", "retention-report"}
+            or args.retained_only
+            or args.normalized
+        ) and not args.as_of:
+            raise MigrationError("fixed_retention_instant_required")
+        if args.as_of:
+            utc(args.as_of)
         if args.action == "export":
             if args.source_config is None or args.bot_id is None or not 0 < args.bot_id < 2**63:
                 raise MigrationError("source_and_bot_required")
             export(private_json(args.source_config), args.directory, args.bot_id, args.batch_size)
         else:
             manifest = verify_export(args.directory)
-            if args.action != "verify":
+            if args.action == "prepare-normalization":
+                report = prepare_normalization(args.directory, manifest, args.as_of)
+                print(canonical({"normalization": report["counts"], "rejections": report["rejections"]}), flush=True)
+                if report["rejections"]:
+                    return 2
+            elif args.action != "verify":
                 if args.target_config is None:
                     raise MigrationError("target_required")
                 target = Postgres(private_json(args.target_config), args.directory, manifest["bot_id"])
                 if args.action == "import":
                     import_data(target, args.directory, manifest, args.batch_size, replay=args.replay)
+                elif args.action == "normalize":
+                    report = normalize(target, args.directory, manifest, args.as_of, args.batch_size)
+                    print(canonical({"normalized": report["counts"]}), flush=True)
+                elif args.action == "retention-report":
+                    print(canonical(retention_report(target, args.as_of)), flush=True)
+                elif args.action == "audit-messages":
+                    report = audit_messages(target, args.directory, manifest, args.as_of)
+                    print(canonical(report), flush=True)
+                    if any(report[key] for key in ("missing", "extra", "key_version_body_mismatches", "body_sha256_mismatches")):
+                        return 2
                 else:
-                    report = reconcile(target, args.directory, manifest)
+                    report = reconcile(
+                        target, args.directory, manifest, normalized=args.normalized, as_of=args.as_of, retained_only=args.retained_only
+                    )
                     print(
                         canonical(
                             {
-                                "reconciled": report["exact"],
+                                "reconciled": report["validated"],
+                                "derived_entities": report.get("derived_entities", {}),
                                 "tables": {
                                     table: {key: value for key, value in item.items() if key not in {"expected", "actual"}}
                                     for table, item in report["tables"].items()
@@ -569,7 +958,7 @@ def main() -> int:
                         ),
                         flush=True,
                     )
-                    if not report["exact"]:
+                    if not report["validated"]:
                         return 2
         print(canonical({"complete": True, "action": args.action}), flush=True)
         return 0

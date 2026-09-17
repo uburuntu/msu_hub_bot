@@ -25,7 +25,7 @@ def source_schema(table):
                 "name": name,
                 "cardinality": "One",
                 "required": name in {"id", "created"},
-                "target": {"name": "std::datetime" if name == "created" else "std::json" if name in {"data", "metadata"} else "std::str"},
+                "target": {"name": migration.SOURCE_TYPES.get(name, "std::str")},
             }
             for name in names
         ],
@@ -129,9 +129,9 @@ class Source:
         raise AssertionError(query)
 
 
-def make_export(directory):
+def make_export(directory, records=None):
     directory.mkdir(mode=0o700)
-    source = Source()
+    source = Source(records)
     manifest = migration.export_snapshot(source, directory, 999, 1)
     migration.save_json(directory / "manifest.json", manifest)
     return manifest
@@ -202,7 +202,7 @@ def test_export_wraps_every_read_in_one_nonretrying_readonly_transaction(monkeyp
             transaction_entries.append("close")
 
     monkeypatch.setattr(edgedb, "create_client", lambda **kwargs: Client())
-    migration.export({"connection": {}, "expected_database": "source_test"}, tmp_path / "snapshot", 999, 1)
+    migration.export({"connection": {"host": "source.invalid"}, "expected_database": "source_test"}, tmp_path / "snapshot", 999, 1)
     assert transaction_entries == ["begin", "commit", "close"]
     assert options == {"transaction": "START TRANSACTION ISOLATION SERIALIZABLE, READ ONLY, DEFERRABLE;", "attempts": 1}
 
@@ -221,6 +221,13 @@ def test_unknown_actual_scalar_is_exportable_but_import_requires_explicit_mappin
     schema["properties"].append({"name": "future_property", "cardinality": "One", "target": {"name": "std::str"}})
     assert "future_property" in migration.fields(schema)
     with pytest.raises(migration.MigrationError, match="unmapped_source_fields"):
+        migration.import_fields("users", schema)
+
+
+def test_changed_scalar_type_requires_explicit_import_mapping():
+    schema = source_schema("users")
+    next(item for item in schema["properties"] if item["name"] == "first_name")["target"]["name"] = "std::json"
+    with pytest.raises(migration.MigrationError, match="unmapped_source_scalar_type"):
         migration.import_fields("users", schema)
 
 
@@ -289,3 +296,107 @@ def test_private_config_required(tmp_path):
     path.chmod(0o644)
     with pytest.raises(migration.MigrationError, match="private_configuration_required"):
         migration.private_json(path)
+
+
+AS_OF = "2026-09-17T00:00:00Z"
+
+
+def message_records():
+    records = source_records()
+    user = {"id": records["users"][0]["user_id"], "is_bot": False, "first_name": "Друг"}
+    chat = {"id": records["chats"][0]["chat_id"], "type": "supergroup", "title": "Чат"}
+
+    def message(identifier, date, text, **extra):
+        return {
+            "message_id": identifier,
+            "date": int(datetime.fromisoformat(date).timestamp()),
+            "chat": chat,
+            "from": user,
+            "text": text,
+            **extra,
+        }
+
+    child = message(41, "2026-08-19T12:00:00Z", "child-body")
+    parent = message(42, "2026-09-16T12:00:00Z", "parent-body", reply_to_message=child, opaque=Decimal("0.12345678901234567890123456789"))
+    records["updates"] = [
+        {"id": str(UUID(int=5)), "created": "2026-09-16T12:01:00Z", "handled": True, "data": {"update_id": 10, "message": parent}},
+        {
+            "id": str(UUID(int=6)),
+            "created": "2026-09-16T14:00:00Z",
+            "handled": True,
+            "data": {
+                "update_id": 11,
+                "edited_message": {
+                    **parent,
+                    "text": "edited-parent-body",
+                    "edit_date": int(datetime(2026, 9, 16, 13, tzinfo=UTC).timestamp()),
+                },
+            },
+        },
+        {
+            "id": str(UUID(int=7)),
+            "created": "2020-01-01T12:01:00Z",
+            "handled": False,
+            "data": {"update_id": 12, "message": message(40, "2020-01-01T12:00:00Z", "expired-body")},
+        },
+    ]
+    return records
+
+
+def test_normalization_preserves_precise_bodies_and_separates_nested_message_lifetimes():
+    row = message_records()["updates"][0]
+    result = migration.transform_update(row, AS_OF)
+    assert result["id"] == row["id"]
+    assert "parent-body" not in migration.canonical(result["data"])
+    parent, child = result["messages"]
+    assert parent["data"]["opaque"] == Decimal("0.12345678901234567890123456789")
+    assert parent["data"]["text"] == "parent-body"
+    assert "text" not in parent["data"]["reply_to_message"]
+    assert child["data"]["text"] == "child-body"
+    assert migration.transform_update(message_records()["updates"][2], AS_OF)["messages"] == []
+
+
+def test_eligible_unknown_nested_message_is_reported_not_silently_lost():
+    row = message_records()["updates"][0]
+    row["data"]["future_message"] = {**row["data"]["message"], "message_id": 88}
+    with pytest.raises(migration.MigrationError, match="eligible_legacy_message_not_extracted"):
+        migration.transform_update(row, AS_OF)
+
+
+def test_nullable_business_identity_and_iso_dates_keep_original_wire_values():
+    row = message_records()["updates"][0]
+    row["data"]["message"]["business_connection_id"] = None
+    row["data"]["message"]["date"] = "2026-09-16T12:00:00Z"
+    result = migration.transform_update(row, AS_OF)
+    assert result["messages"][0]["business_connection_id"] == ""
+    assert result["messages"][0]["data"]["business_connection_id"] is None
+    assert result["messages"][0]["data"]["date"] == "2026-09-16T12:00:00Z"
+
+
+def test_malformed_receipts_have_private_reject_artifacts_and_block_application(tmp_path):
+    directory = tmp_path / "export"
+    manifest = make_export(directory)
+    result = migration.prepare_normalization(directory, manifest, AS_OF)
+    assert sum(result["rejections"].values()) == 2
+    rejects = migration.normalization_path(directory, AS_OF) / "rejects.jsonl"
+    assert rejects.stat().st_mode & 0o077 == 0
+    assert len(list(migration.json_lines(rejects))) == 2
+    with pytest.raises(migration.MigrationError, match="rejection_review"):
+        migration.verify_normalization(directory, manifest, AS_OF)
+
+
+@pytest.mark.parametrize(
+    "command", [["psql", "--password=private-canary"], ["docker", "exec", "-i", "-e", "PGPASSWORD=private-canary", "db", "psql"]]
+)
+def test_target_command_never_embeds_credentials(tmp_path, command):
+    with pytest.raises(migration.MigrationError, match="not_allowlisted"):
+        migration.Postgres(
+            {
+                "connection": {"PGDATABASE": "postgres"},
+                "expected_database": "postgres",
+                "expected_system_identifier": "123",
+                "psql_command": command,
+            },
+            tmp_path,
+            999,
+        )

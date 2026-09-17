@@ -176,14 +176,113 @@ def test_administrative_copy_json_null_metadata_survives(db, tmp_path):
     assert db.run("SELECT metadata='null'::jsonb AND metadata IS NOT NULL FROM hub_private.users;").stdout.strip() == "t"
 
 
+def test_administrative_normalization_is_replayable_and_hashes_winning_bodies(db, tmp_path):
+    from test_migrate_storage import AS_OF, make_export, message_records
+
+    from tools.migrate_storage import (
+        MigrationError,
+        audit_messages,
+        import_data,
+        normalize,
+        prepare_normalization,
+        reconcile,
+        retention_report,
+    )
+
+    directory = tmp_path / "private-export"
+    manifest = make_export(directory, message_records())
+    target = migration_target(db, directory)
+    import_data(target, directory, manifest, 1)
+    assert reconcile(target, directory, manifest)["exact"]
+    prepared = prepare_normalization(directory, manifest, AS_OF)
+    assert prepared["counts"]["source_rows"] == 3 and not prepared["rejections"]
+    normalize(target, directory, manifest, AS_OF, 1)
+    normalize(target, directory, manifest, AS_OF, 1)
+    assert reconcile(target, directory, manifest, normalized=True, as_of=AS_OF)["validated"]
+    assert audit_messages(target, directory, manifest, AS_OF) == {
+        "expected": 2,
+        "actual": 2,
+        "missing": 0,
+        "extra": 0,
+        "key_version_body_mismatches": 0,
+        "body_sha256_mismatches": 0,
+    }
+    assert db.value("SELECT count(*) FROM hub_private.updates;") == 3
+    assert db.value("SELECT count(*) FROM hub_private.updates WHERE data::text LIKE '%body%';") == 0
+    assert db.value("SELECT to_jsonb(data->>'text') FROM hub_private.messages WHERE message_id=42;") == "edited-parent-body"
+    assert retention_report(target, AS_OF) == {
+        "as_of": "2026-09-17T00:00:00.000000Z",
+        "expired_updates": 1,
+        "retained_updates": 2,
+        "expired_messages": 0,
+        "retained_messages": 2,
+    }
+    with pytest.raises(MigrationError, match="new_export"):
+        import_data(target, directory, manifest, 1, replay=True)
+    db.run("UPDATE hub_private.messages SET data=jsonb_set(data,'{opaque}','0.12345678901234567890123456788') WHERE message_id=42;")
+    assert audit_messages(target, directory, manifest, AS_OF)["body_sha256_mismatches"] == 1
+
+
+def test_administrative_normalization_failure_keeps_receipts_and_observations_atomic(db, tmp_path):
+    from test_migrate_storage import AS_OF, make_export, message_records
+
+    from tools.migrate_storage import MigrationError, import_data, normalization_script, transform_update
+
+    directory = tmp_path / "private-export"
+    records = message_records()
+    manifest = make_export(directory, records)
+    target = migration_target(db, directory)
+    import_data(target, directory, manifest, 1)
+    good = transform_update(records["updates"][0], AS_OF)
+    bad = {**good, "id": "00000000-0000-0000-0000-000000000099"}
+    with pytest.raises(MigrationError, match="target_operation_failed"):
+        target.run(normalization_script([good, bad], 999, AS_OF))
+    assert db.value("SELECT count(*) FROM hub_private.messages;") == 0
+    assert db.value("SELECT count(*) FROM hub_private.updates WHERE data::text LIKE '%body%';") == 3
+
+
+def test_normalized_parity_accounts_only_observed_extra_entities(db, tmp_path):
+    from test_migrate_storage import AS_OF, make_export, message_records
+
+    from tools.migrate_storage import import_data, normalize, prepare_normalization, reconcile
+
+    directory = tmp_path / "private-export"
+    records = message_records()
+    records["updates"][0]["data"]["message"]["from"]["id"] = 98765
+    manifest = make_export(directory, records)
+    target = migration_target(db, directory)
+    import_data(target, directory, manifest, 10)
+    assert reconcile(target, directory, manifest)["exact"]
+    prepare_normalization(directory, manifest, AS_OF)
+    normalize(target, directory, manifest, AS_OF, 10)
+    report = reconcile(target, directory, manifest, normalized=True, as_of=AS_OF)
+    assert not report["exact"] and report["source_parity"] and report["validated"]
+    assert report["derived_entities"] == {
+        "derived_users": 1,
+        "derived_chats": 0,
+        "unexplained_extra_entities": 0,
+        "missing_observed_entities": 0,
+    }
+    db.run("INSERT INTO hub_private.users(user_id,is_bot,first_name) VALUES(87654,false,'Unexplained');")
+    report = reconcile(target, directory, manifest, normalized=True, as_of=AS_OF)
+    assert not report["validated"] and report["derived_entities"]["unexplained_extra_entities"] == 1
+
+
 def test_private_observation_helper_reuses_a_receipt_and_fixed_retention_instant(db):
     as_of = datetime(2024, 6, 1, tzinfo=UTC)
     stamp = as_of.isoformat()
     receipt = str(UUID(int=71))
-    payload = archive(71, messages=[{
-        "chat_id": -101, "message_id": 10, "sent_at": (as_of - timedelta(days=1)).isoformat(),
-        "data": {"text": "One normalized body"},
-    }])
+    payload = archive(
+        71,
+        messages=[
+            {
+                "chat_id": -101,
+                "message_id": 10,
+                "sent_at": (as_of - timedelta(days=1)).isoformat(),
+                "data": {"text": "One normalized body"},
+            }
+        ],
+    )
     db.run(f"""
         INSERT INTO hub_private.updates(id,created,data,handled,bot_id,is_legacy)
         VALUES ('{receipt}','{stamp}','{{"original":true}}',false,999,true);

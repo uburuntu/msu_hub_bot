@@ -184,6 +184,7 @@ files = [
     "msu_hub_bot/settings.py",
     "msu_hub_bot/telemetry.py",
     "tools/check_types.py",
+    "tools/migrate_storage.py",
 ]
 
 [[tool.mypy.overrides]]
