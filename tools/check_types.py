@@ -10,9 +10,31 @@ from pathlib import Path, PurePosixPath
 from typing import cast
 
 ROOT = Path(__file__).resolve().parents[1]
-APPLICATION_ROOTS = ("msu_hub_bot", "common", "hub_bot")
+APPLICATION_ROOTS = ("msu_hub_bot", "common", "hub_bot", "src/msu_hub_bot")
 # Third-party source is verified by test_api2ch_compat.py and has a narrow API stub.
-VENDORED_PREFIX = "common/externals/_api2ch/"
+VENDORED_PREFIXES = ("common/externals/_api2ch/", "src/msu_hub_bot/providers/_api2ch/")
+
+
+def is_application(path: str) -> bool:
+    return (
+        path.endswith(".py") and any(path.startswith(f"{root}/") for root in APPLICATION_ROOTS) and not path.startswith(VENDORED_PREFIXES)
+    )
+
+
+def renamed_files(diff: str) -> dict[str, str]:
+    """Read Git's NUL-delimited name-status format without guessing file identity."""
+    fields = iter(diff.rstrip("\0").split("\0") if diff else [])
+    renames = {}
+    for status in fields:
+        try:
+            source = next(fields)
+            if status.startswith(("R", "C")):
+                destination = next(fields)
+                if status.startswith("R"):
+                    renames[source] = destination
+        except StopIteration as error:
+            raise ValueError("Incomplete Git name-status output") from error
+    return renames
 
 
 def table(value: object) -> Mapping[str, object]:
@@ -61,7 +83,7 @@ def policy_errors(options: Mapping[str, object], scope: frozenset[str]) -> list[
     raw_overrides = options.get("overrides", [])
     if not isinstance(raw_overrides, list):
         return [*errors, "mypy.overrides must be a list"]
-    modules = {path.removesuffix(".py").replace("/", ".").removesuffix(".__init__") for path in scope}
+    modules = {path.removeprefix("src/").removesuffix(".py").replace("/", ".").removesuffix(".__init__") for path in scope}
     for raw in raw_overrides:
         override = table(raw)
         selectors = override.get("module", [])
@@ -71,15 +93,23 @@ def policy_errors(options: Mapping[str, object], scope: frozenset[str]) -> list[
             errors.append("Each mypy override must name specific modules")
             continue
         for selector in selectors:
-            if selector == "*" or selector in {f"{root}.*" for root in APPLICATION_ROOTS}:
+            if selector == "*" or selector in {f"{root.rsplit('/', 1)[-1]}.*" for root in APPLICATION_ROOTS}:
                 errors.append(f"Broad application override is not allowed: {selector}")
             if any(fnmatch.fnmatchcase(module, selector) for module in modules):
                 errors.append(f"Checked modules must use the strict global policy: {selector}")
     return errors
 
 
-def coverage_errors(scope: frozenset[str], previous: frozenset[str], existing: set[str], added: set[str]) -> list[str]:
-    errors = [f"Checked module left the scope: {path}" for path in sorted((previous & existing) - scope)]
+def coverage_errors(
+    scope: frozenset[str],
+    previous: frozenset[str],
+    existing: set[str],
+    added: set[str],
+    renames: Mapping[str, str] | None = None,
+) -> list[str]:
+    identities = renames or {}
+    retained = {identities.get(path, path) for path in previous}
+    errors = [f"Checked module left the scope: {path}" for path in sorted((retained & existing) - scope)]
     errors.extend(f"New application module is outside the scope: {path}" for path in sorted(added - scope))
     errors.extend(f"Checked module does not exist: {path}" for path in sorted(scope - existing))
     return errors
@@ -98,15 +128,20 @@ def main() -> int:
         options = mypy_options((ROOT / "pyproject.toml").read_text())
         scope = checked_files(options)
         previous = checked_files(mypy_options(git("show", f"{base}:pyproject.toml")))
-        tracked = set(filter(None, git("ls-files", "-z").split("\0")))
+        tracked = set(filter(None, git("ls-files", "--cached", "--others", "--exclude-standard", "-z").split("\0")))
         existing = {path for path in tracked | scope if (ROOT / path).is_file()}
-        baseline = set(filter(None, git("ls-tree", "-r", "--name-only", "-z", base, "--", *APPLICATION_ROOTS).split("\0")))
-        application = {
-            path
-            for path in tracked
-            if path.endswith(".py") and path.split("/", 1)[0] in APPLICATION_ROOTS and not path.startswith(VENDORED_PREFIX)
+        baseline = {
+            path for path in git("ls-tree", "-r", "--name-only", "-z", base, "--", *APPLICATION_ROOTS).split("\0") if is_application(path)
         }
-        errors = policy_errors(options, scope) + coverage_errors(scope, previous, existing, application - baseline)
+        renames = renamed_files(git("diff", "--name-status", "-z", "--find-renames", base, "--", "*.py"))
+        application = {path for path in existing if is_application(path)}
+        relocated = {destination for source, destination in renames.items() if source in baseline}
+        added = application - baseline - relocated
+        errors = policy_errors(options, scope) + coverage_errors(scope, previous, existing, added, renames)
+        if added - scope and baseline - existing:
+            untracked = set(git("ls-files", "--others", "--exclude-standard", "-z").split("\0"))
+            if (added - scope) & untracked:
+                errors.append("Stage renamed files before checking type scope so Git can identify their original paths")
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Type scope check could not complete: {type(error).__name__}")
         return 1

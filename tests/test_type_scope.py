@@ -1,8 +1,11 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from tools.check_types import checked_files, coverage_errors, mypy_options, policy_errors
+from tools import check_types
+from tools.check_types import checked_files, coverage_errors, is_application, mypy_options, policy_errors, renamed_files
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +30,38 @@ def test_scope_allows_a_typed_module_rename_and_rejects_nonexistent_files():
     assert coverage_errors(frozenset({"common/missing.py"}), frozenset(), set(), set()) == [
         "Checked module does not exist: common/missing.py"
     ]
+
+
+def test_scope_keeps_a_renamed_checked_module_strict():
+    old = "common/checked.py"
+    new = "src/msu_hub_bot/checked.py"
+    assert coverage_errors(frozenset(), frozenset({old}), {new}, set(), {old: new}) == [f"Checked module left the scope: {new}"]
+    assert not coverage_errors(frozenset({new}), frozenset({old}), {new}, set(), {old: new})
+
+
+def test_git_rename_format_preserves_spaces_and_does_not_treat_copies_as_moves():
+    assert renamed_files("M\0same.py\0R090\0old file.py\0new file.py\0C100\0source.py\0copy.py\0D\0removed.py\0") == {
+        "old file.py": "new file.py"
+    }
+    with pytest.raises(ValueError, match="Incomplete"):
+        renamed_files("R100\0old.py\0")
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("common/old.py", True),
+        ("hub_bot/commands/old.py", True),
+        ("msu_hub_bot/settings.py", True),
+        ("src/msu_hub_bot/settings.py", True),
+        ("src/msu_hub_bot_extra/new.py", False),
+        ("common/externals/_api2ch/api.py", False),
+        ("src/msu_hub_bot/providers/_api2ch/api.py", False),
+        ("src/msu_hub_bot/providers/dvach.py", True),
+    ],
+)
+def test_application_paths_and_narrow_vendor_exclusion(path, expected):
+    assert is_application(path) is expected
 
 
 @pytest.mark.parametrize("paths", [["common/*.py"], ["../elsewhere.py"], ["/tmp/module.py"], ["common/a.py", "common/a.py"], "common/a.py"])
@@ -62,3 +97,96 @@ def test_scope_allows_a_narrow_untyped_dependency_boundary():
         "overrides": [{"module": "external_sdk", "ignore_missing_imports": True}],
     }
     assert not policy_errors(options, frozenset({"common/checked.py"}))
+
+
+@pytest.mark.parametrize("selector", ["msu_hub_bot.*", "msu_hub_bot.checked"])
+def test_src_layout_does_not_hide_checked_modules_from_override_policy(selector):
+    options = {
+        "strict": True,
+        "warn_unused_configs": True,
+        "warn_unused_ignores": True,
+        "show_error_codes": True,
+        "overrides": [{"module": selector, "follow_imports": "skip"}],
+    }
+    assert policy_errors(options, frozenset({"src/msu_hub_bot/checked.py"}))
+
+
+def run_git(repo, *arguments):
+    return subprocess.run(
+        ["git", "-c", "user.name=Type Scope Test", "-c", "user.email=types@example.invalid", *arguments],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def write_scope(repo, *paths):
+    entries = ", ".join(f'"{path}"' for path in paths)
+    (repo / "pyproject.toml").write_text(
+        "[tool.mypy]\nstrict = true\nwarn_unused_configs = true\nwarn_unused_ignores = true\nshow_error_codes = true\n"
+        f"files = [{entries}]\n"
+    )
+
+
+@pytest.fixture
+def type_repo(tmp_path, monkeypatch):
+    run_git(tmp_path, "init", "-q")
+    (tmp_path / "common").mkdir()
+    for name in ("checked", "legacy", "stable"):
+        (tmp_path / "common" / f"{name}.py").write_text(
+            f"def {name}():\n" + "".join(f"    # {name} item {number}\n" for number in range(20)) + "    return 1\n"
+        )
+    write_scope(tmp_path, "common/checked.py", "common/stable.py")
+    run_git(tmp_path, "add", ".")
+    run_git(tmp_path, "commit", "-qm", "Baseline")
+    monkeypatch.setattr(check_types, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["check_types.py", "--base-ref", "HEAD"])
+    return tmp_path
+
+
+def relocate_modules(repo):
+    destination = repo / "src/msu_hub_bot"
+    destination.mkdir(parents=True)
+    for name in ("checked", "legacy"):
+        (repo / "common" / f"{name}.py").rename(destination / f"{name}.py")
+    write_scope(repo, "src/msu_hub_bot/checked.py", "common/stable.py")
+
+
+@pytest.mark.parametrize("commit_move", [False, True])
+def test_git_scope_accepts_staged_and_committed_moves_with_worktree_edits(type_repo, monkeypatch, capsys, commit_move):
+    baseline = run_git(type_repo, "rev-parse", "HEAD").strip()
+    relocate_modules(type_repo)
+    run_git(type_repo, "add", "-A")
+    if commit_move:
+        run_git(type_repo, "commit", "-qm", "Relocate")
+    checked = type_repo / "src/msu_hub_bot/checked.py"
+    checked.write_text(checked.read_text().replace("return 1", "return 2"))
+    monkeypatch.setattr(sys, "argv", ["check_types.py", "--base-ref", baseline])
+    assert check_types.main() == 0
+    assert "Strict mypy scope checked: 2 files" in capsys.readouterr().out
+
+
+def test_git_scope_does_not_lose_coverage_during_a_rename(type_repo, capsys):
+    relocate_modules(type_repo)
+    write_scope(type_repo, "common/stable.py")
+    run_git(type_repo, "add", "-A")
+    assert check_types.main() == 1
+    assert "Checked module left the scope: src/msu_hub_bot/checked.py" in capsys.readouterr().out
+
+
+def test_unstaged_move_has_actionable_error_without_changing_the_index(type_repo, capsys):
+    relocate_modules(type_repo)
+    index_before = run_git(type_repo, "ls-files", "--stage", "-z")
+    assert check_types.main() == 1
+    assert "Stage renamed files" in capsys.readouterr().out
+    assert run_git(type_repo, "ls-files", "--stage", "-z") == index_before
+
+
+@pytest.mark.parametrize("stage", [False, True])
+def test_git_scope_requires_new_application_modules_to_be_checked(type_repo, capsys, stage):
+    (type_repo / "common/new.py").write_text("def new():\n    return 'new'\n")
+    if stage:
+        run_git(type_repo, "add", "common/new.py")
+    assert check_types.main() == 1
+    assert "New application module is outside the scope: common/new.py" in capsys.readouterr().out
