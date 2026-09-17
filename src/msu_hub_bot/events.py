@@ -8,17 +8,32 @@ from time import monotonic
 from contextlib import suppress
 from enum import Enum
 
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram import Bot
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatType
 from aiogram.types import ChatFullInfo, Message, TelegramObject, InlineKeyboardMarkup
 from aiogram.utils.markdown import hbold, hitalic, hlink, hcode, hide_link
+from cachetools import TTLCache
 
 from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.models import DirectoryPatch, DirectoryRecord
 from msu_hub_bot.telegram.utils import chat_url, chat_link, sender_mention
 from msu_hub_bot.utils import random_cycle
+
+
+def _chat_unavailable(error: TelegramBadRequest | TelegramForbiddenError) -> bool:
+    if isinstance(error, TelegramBadRequest):
+        return error.message.casefold().removeprefix("bad request: ") in {"chat not found", "private chat not found"}
+    return error.message.casefold().removeprefix("forbidden: ") in {
+        "the group chat was deleted",
+        "bot was kicked from the group chat",
+        "bot was kicked from the supergroup chat",
+        "bot was kicked from the channel chat",
+        "bot is not a member of the group chat",
+        "bot is not a member of the supergroup chat",
+        "bot is not a member of the channel chat",
+    }
 
 
 class EventsMiddleware(BaseMiddleware):
@@ -126,7 +141,7 @@ class EcosystemManager:
         self._directory: dict[int, DirectoryRecord] = {}
         self._directory_until = 0.0
         self._directory_lock = asyncio.Lock()
-        self._chats: dict[int, tuple[float, ChatFullInfo]] = {}
+        self._chats: TTLCache[int, ChatFullInfo | None] = TTLCache(maxsize=1024, ttl=600, timer=monotonic)
         self._pins_until = 0.0
         self._pins_lock = asyncio.Lock()
 
@@ -155,6 +170,10 @@ class EcosystemManager:
 
     async def pin(self, chat_id: int, forced: bool = False) -> Message | bool:
         e_chat = (await self.directory()).get(chat_id)
+        if forced:
+            self._chats.pop(chat_id, None)
+        if await self.get_chat(chat_id) is None:
+            return False
 
         if e_chat and e_chat.pinned_message_id:
             if not forced:
@@ -183,14 +202,30 @@ class EcosystemManager:
         await self.update_ic_members()
 
         e_chats = await self.directory(refresh=True)
-        coros = [
-            self.bot.edit_message_text(await self.text(ec.chat_id), chat_id=ec.chat_id, message_id=ec.pinned_message_id)
-            for ec in e_chats.values()
-            if ec.pinned_message_id
-        ]
-        results = await asyncio.gather(*coros, return_exceptions=True)
+
+        async def update_pin(ec: DirectoryRecord) -> None:
+            if not ec.pinned_message_id or await self.get_chat(ec.chat_id) is None:
+                return
+            text = await self.text(ec.chat_id)
+            try:
+                await self.bot.edit_message_text(text, chat_id=ec.chat_id, message_id=ec.pinned_message_id)
+            except (TelegramBadRequest, TelegramForbiddenError) as error:
+                if _chat_unavailable(error):
+                    self._chats[ec.chat_id] = None
+                    return
+                if isinstance(error, TelegramBadRequest):
+                    description = error.message.casefold().removeprefix("bad request: ")
+                    if description in {
+                        "message is not modified",
+                        "message to edit not found",
+                        "message can't be edited",
+                    } or description.startswith("message is not modified: "):
+                        return
+                raise
+
+        results = await asyncio.gather(*(update_pin(ec) for ec in e_chats.values()), return_exceptions=True)
         for result in results:
-            if isinstance(result, BaseException) and not isinstance(result, TelegramBadRequest):
+            if isinstance(result, BaseException):
                 raise result
 
     async def update_ic_members(self) -> list[DirectoryRecord | None]:
@@ -198,7 +233,15 @@ class EcosystemManager:
 
         async def update_single(ec: DirectoryRecord) -> DirectoryRecord | None:
             chat = await self.get_chat(ec.chat_id)
-            members = await self.bot.get_chat_member_count(chat.id)
+            if chat is None:
+                return None
+            try:
+                members = await self.bot.get_chat_member_count(chat.id)
+            except (TelegramBadRequest, TelegramForbiddenError) as error:
+                if not _chat_unavailable(error):
+                    raise
+                self._chats[ec.chat_id] = None
+                return None
             if members != ec.members:
                 return await self.db.patch_directory(ec.chat_id, DirectoryPatch(members=members))
             return None
@@ -212,23 +255,32 @@ class EcosystemManager:
             saved.append(result)
         return saved
 
-    async def get_chat(self, chat_id: int) -> ChatFullInfo:
-        cached = self._chats.get(chat_id)
-        if cached is not None and monotonic() < cached[0]:
-            return cached[1]
-        chat = await self.bot.get_chat(chat_id)
-        self._chats[chat_id] = (monotonic() + 600, chat)
+    async def get_chat(self, chat_id: int) -> ChatFullInfo | None:
+        try:
+            return self._chats[chat_id]
+        except KeyError:
+            pass
+        try:
+            chat = await self.bot.get_chat(chat_id)
+        except (TelegramBadRequest, TelegramForbiddenError) as error:
+            if not _chat_unavailable(error):
+                raise
+            chat = None
+        # Access can return later; never remove directory data for a failed lookup.
+        self._chats[chat_id] = chat
         return chat
 
     async def link(self, chat_id: int) -> str:
         chat = await self.get_chat(chat_id)
-        if chat.username:
+        if chat is not None and chat.username:
             return "@" + chat.username
 
         entry = (await self.directory()).get(chat_id)
         if entry is not None and (alias := entry.username_alias):
             return "@" + str(alias)
 
+        if chat is None:
+            return "временно недоступен"
         url = await chat_url(chat, force_link=True)
         return hlink("ссылка", url) if url else "ссылка"
 

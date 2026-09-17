@@ -1,14 +1,16 @@
 import asyncio
 import io
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import EditMessageText
-from aiogram.types import Chat, Document, Message, Update, User
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError
+from aiogram.methods import EditMessageText, GetChat, GetChatMemberCount
+from aiogram.types import Chat, ChatFullInfo, Document, Message, Update, User
 
 from msu_hub_bot.telegram.middlewares.check_gets import CheckGets
 from msu_hub_bot.telegram.middlewares.logs import LoggingMiddleware
@@ -18,6 +20,7 @@ from msu_hub_bot.telegram.middlewares.updates import UpdatesMiddleware
 from msu_hub_bot.telegram.middlewares.viewer import ViewerMiddleware
 from msu_hub_bot.telegram.runtime import AdmissionMiddleware, Supervisor
 from msu_hub_bot.events import EcosystemManager, EventsMiddleware
+from msu_hub_bot.storage.models import DirectoryRecord
 from telegram_helpers import RecordingSession
 
 
@@ -195,12 +198,13 @@ async def test_pin_update_waits_for_other_api_calls_after_one_rejected_edit(monk
 
     async def edit(text, chat_id, message_id):
         if chat_id == 1:
-            raise TelegramBadRequest(method=EditMessageText(chat_id=1, message_id=1, text="synthetic"), message="not modified")
+            raise TelegramBadRequest(method=EditMessageText(chat_id=1, message_id=1, text="synthetic"), message="message is not modified")
         entered.set()
         await finish.wait()
 
     manager = EcosystemManager(SimpleNamespace(edit_message_text=edit), SimpleNamespace())
     manager.update_ic_members = AsyncMock()
+    manager.get_chat = AsyncMock(return_value=SimpleNamespace())
     manager.text = AsyncMock(return_value="synthetic")
     rows = {index: SimpleNamespace(chat_id=index, pinned_message_id=1) for index in (1, 2)}
     manager.db = SimpleNamespace(list_directory=AsyncMock(return_value=list(rows.values())))
@@ -219,6 +223,7 @@ async def test_pin_edit_targets_real_bot_api_fields_and_forced_refresh_bypasses_
     repository = SimpleNamespace(list_directory=AsyncMock(return_value=[entry]))
     manager = EcosystemManager(bot, repository)
     manager.update_ic_members = AsyncMock()
+    manager.get_chat = AsyncMock(return_value=SimpleNamespace())
     manager.text = AsyncMock(return_value="Synthetic links")
     try:
         await manager.update_pins()
@@ -244,3 +249,189 @@ async def test_directory_cache_is_local_and_invalidated_after_mutation():
     assert set(await manager.directory()) == {-1002}
     other = EcosystemManager(SimpleNamespace(), SimpleNamespace(list_directory=AsyncMock(return_value=[])))
     assert await other.directory() == {}
+
+
+def ecosystem_chat(chat_id):
+    return ChatFullInfo(
+        id=chat_id,
+        type="supergroup",
+        title="Synthetic directory chat",
+        username=f"synthetic_{abs(chat_id)}",
+        accent_color_id=1,
+        max_reaction_count=1,
+        accepted_gift_types=dict.fromkeys(
+            ("unlimited_gifts", "limited_gifts", "unique_gifts", "premium_subscription", "gifts_from_channels"), False
+        ),
+    )
+
+
+@pytest.fixture
+def ecosystem(monkeypatch):
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr("msu_hub_bot.events.monotonic", lambda: clock.now)
+    entries = {
+        chat_id: DirectoryRecord(
+            id=UUID(int=abs(chat_id)),
+            created=datetime(2026, 1, 1, tzinfo=UTC),
+            chat_id=chat_id,
+            name=f"Synthetic {abs(chat_id)}",
+            section="other",
+            is_hidden=False,
+            members=5,
+            pinned_message_id=7,
+        )
+        for chat_id in (-101, -102)
+    }
+
+    async def patch(chat_id, changes):
+        entries[chat_id] = entries[chat_id].model_copy(update=changes.model_dump(exclude_unset=True))
+        return entries[chat_id]
+
+    repository = SimpleNamespace(
+        list_directory=AsyncMock(side_effect=lambda: list(entries.values())),
+        patch_directory=AsyncMock(side_effect=patch),
+        delete_directory=AsyncMock(),
+    )
+    bot = SimpleNamespace(
+        id=123,
+        get_chat=AsyncMock(side_effect=ecosystem_chat),
+        get_chat_member_count=AsyncMock(side_effect=lambda chat_id: 5 if chat_id == -101 else 8),
+        edit_message_text=AsyncMock(),
+        delete_message=AsyncMock(),
+        send_message=AsyncMock(),
+    )
+    return SimpleNamespace(manager=EcosystemManager(bot, repository), bot=bot, repository=repository, entries=entries, clock=clock)
+
+
+@pytest.mark.parametrize("stage", ["lookup", "members"])
+@pytest.mark.parametrize("alias", [None, "synthetic_alias"])
+async def test_unavailable_directory_chat_preserves_data_and_other_pins(ecosystem, stage, alias):
+    rig = ecosystem
+    rig.entries[-101] = rig.entries[-101].model_copy(update={"username_alias": alias})
+    original = rig.entries[-101].model_dump()
+
+    async def lookup(chat_id):
+        if chat_id == -101:
+            raise TelegramBadRequest(method=GetChat(chat_id=chat_id), message="Bad Request: chat not found")
+        return ecosystem_chat(chat_id)
+
+    async def members(chat_id):
+        if chat_id == -101:
+            raise TelegramForbiddenError(
+                method=GetChatMemberCount(chat_id=chat_id), message="Forbidden: bot is not a member of the supergroup chat"
+            )
+        return 8
+
+    if stage == "lookup":
+        rig.bot.get_chat.side_effect = lookup
+    else:
+        rig.bot.get_chat_member_count.side_effect = members
+    await rig.manager.update_pins()
+    assert rig.entries[-101].model_dump() == original
+    rig.repository.delete_directory.assert_not_awaited()
+    assert rig.repository.patch_directory.await_count == 1
+    assert rig.repository.patch_directory.call_args.args[0] == -102
+    assert rig.repository.patch_directory.call_args.args[1].model_dump(exclude_unset=True) == {"members": 8}
+    rig.bot.edit_message_text.assert_awaited_once()
+    assert rig.bot.edit_message_text.call_args.kwargs == {"chat_id": -102, "message_id": 7}
+    text = rig.bot.edit_message_text.call_args.args[0]
+    assert "Synthetic 101" in text and "5 уч." in text
+    assert ("@synthetic_alias" if alias else "временно недоступен") in text
+    assert "@synthetic_102" in text
+    assert await rig.manager.link(-101) == ("@synthetic_alias" if alias else "временно недоступен")
+    assert await rig.manager.pin(-101) is False
+    assert rig.bot.get_chat.await_count == 2
+    rig.bot.send_message.assert_not_awaited()
+    rig.bot.delete_message.assert_not_awaited()
+
+
+async def test_unavailable_chat_cooldown_expires_and_cache_is_bounded(ecosystem):
+    rig = ecosystem
+    error = TelegramBadRequest(method=GetChat(chat_id=-101), message="chat not found")
+    rig.bot.get_chat.side_effect = [error, ecosystem_chat(-101)]
+    assert await rig.manager.get_chat(-101) is None
+    rig.clock.now += 599
+    assert await rig.manager.get_chat(-101) is None
+    assert rig.bot.get_chat.await_count == 1
+    rig.clock.now += 1
+    assert (await rig.manager.get_chat(-101)).id == -101
+    assert rig.bot.get_chat.await_count == 2
+    assert rig.manager._chats.maxsize == 1024
+
+
+async def test_forced_pin_refresh_retries_negative_chat_cache(ecosystem):
+    rig = ecosystem
+    rig.bot.get_chat.side_effect = TelegramBadRequest(method=GetChat(chat_id=-101), message="chat not found")
+    await rig.manager.update_pins()
+    rig.bot.edit_message_text.assert_not_awaited()
+    assert rig.bot.get_chat.await_count == 2
+    rig.bot.get_chat.side_effect = ecosystem_chat
+    await rig.manager.update_pins()
+    assert rig.bot.get_chat.await_count == 2
+    await rig.manager.update_pins(forced=True)
+    assert rig.bot.get_chat.await_count == 4
+    assert rig.bot.edit_message_text.await_count == 2
+
+
+@pytest.mark.parametrize("stage", ["lookup", "members", "edit"])
+@pytest.mark.parametrize("error_type", [TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError, asyncio.CancelledError])
+async def test_unrelated_directory_errors_propagate_without_negative_caching(ecosystem, stage, error_type):
+    rig = ecosystem
+    error = (
+        asyncio.CancelledError()
+        if error_type is asyncio.CancelledError
+        else error_type(method=GetChat(chat_id=-101), message="Synthetic unrelated failure")
+    )
+    target = {"lookup": rig.bot.get_chat, "members": rig.bot.get_chat_member_count, "edit": rig.bot.edit_message_text}[stage]
+    target.side_effect = error
+    with pytest.raises(error_type):
+        await rig.manager.update_pins()
+    assert all(chat is not None for chat in rig.manager._chats.values())
+    rig.repository.delete_directory.assert_not_awaited()
+
+
+async def test_directory_storage_failure_remains_visible(ecosystem):
+    rig = ecosystem
+    rig.repository.patch_directory.side_effect = RuntimeError("Synthetic storage outage")
+    with pytest.raises(RuntimeError, match="Synthetic storage outage"):
+        await rig.manager.update_pins()
+    rig.bot.edit_message_text.assert_not_awaited()
+    assert await rig.manager.get_chat(-102) is not None
+
+
+async def test_chat_becoming_inaccessible_during_edit_does_not_block_other_pins(ecosystem):
+    rig = ecosystem
+
+    async def edit(text, chat_id, message_id):
+        if chat_id == -101:
+            raise TelegramForbiddenError(
+                method=EditMessageText(chat_id=chat_id, message_id=message_id, text=text),
+                message="Forbidden: bot was kicked from the supergroup chat",
+            )
+
+    rig.bot.edit_message_text.side_effect = edit
+    await rig.manager.update_pins()
+    assert rig.bot.edit_message_text.await_count == 2
+    assert await rig.manager.get_chat(-101) is None
+    assert await rig.manager.get_chat(-102) is not None
+    assert rig.entries[-101].pinned_message_id == 7
+
+
+async def test_membership_event_with_stale_directory_chat_still_reaches_handler(ecosystem, monkeypatch):
+    rig = ecosystem
+
+    async def lookup(chat_id):
+        if chat_id == -101:
+            raise TelegramBadRequest(method=GetChat(chat_id=chat_id), message="chat not found")
+        return ecosystem_chat(chat_id)
+
+    rig.bot.get_chat.side_effect = lookup
+    monkeypatch.setattr("msu_hub_bot.events.chat_link", AsyncMock(return_value="Synthetic chat"))
+    middleware = EventsMiddleware(rig.bot, rig.repository, 0, em=rig.manager)
+    event = message(
+        chat=Chat(id=-102, type="supergroup", title="Synthetic"), new_chat_members=[User(id=42, is_bot=False, first_name="Test")]
+    )
+    handler = AsyncMock(return_value="handled")
+    assert await middleware(handler, event, {}) == "handled"
+    handler.assert_awaited_once()
+    rig.bot.edit_message_text.assert_awaited_once()
