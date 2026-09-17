@@ -135,6 +135,8 @@ files = [
     "src/msu_hub_bot/commands/geoguess.py",
     "src/msu_hub_bot/commands/geoguess_view.py",
     "src/msu_hub_bot/commands/chess.py",
+    "src/msu_hub_bot/commands/chess_view.py",
+    "src/msu_hub_bot/commands/quiz_view.py",
     "src/msu_hub_bot/providers/chess.py",
     "src/msu_hub_bot/media/chessboard.py",
     "src/msu_hub_bot/commands/help.py",

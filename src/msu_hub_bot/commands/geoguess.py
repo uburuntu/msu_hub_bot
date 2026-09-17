@@ -22,7 +22,8 @@ from msu_hub_bot.telegram.storage import RedisStorage
 
 from msu_hub_bot.providers.exceptions import ExternalServiceError
 from msu_hub_bot.providers.geoguess import COUNTRIES, Photo, random_photo
-from msu_hub_bot.commands.geoguess_view import Player, View, country_label, render, user_label
+from msu_hub_bot.commands.geoguess_view import Player, country_label, render
+from msu_hub_bot.commands.quiz_view import View, user_label
 
 logger = logging.getLogger(__name__)
 SEND_TIMEOUT = 15

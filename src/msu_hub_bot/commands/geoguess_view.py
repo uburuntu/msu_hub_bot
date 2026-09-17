@@ -3,13 +3,15 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from aiogram.types import MessageEntity
 from aiogram.utils.formatting import Bold, Text, TextLink
 
+from msu_hub_bot.commands.quiz_view import CAPTION_LIMIT as CAPTION_LIMIT
+from msu_hub_bot.commands.quiz_view import PAGE_SIZE as PAGE_SIZE
+from msu_hub_bot.commands.quiz_view import View as View
+from msu_hub_bot.commands.quiz_view import compact as compact
+from msu_hub_bot.commands.quiz_view import user_label as user_label
 from msu_hub_bot.providers.geoguess import COUNTRIES, Photo
 
-CAPTION_LIMIT = 1024
-PAGE_SIZE = 4
 COUNTRY_CODES = {name: code for code, name in COUNTRIES.items()}
 
 
@@ -22,44 +24,12 @@ class Player:
     correct: bool = False
 
 
-@dataclass(frozen=True)
-class View:
-    caption: str
-    entities: list[MessageEntity]
-    page: int
-    pages: int
-
-
-def compact(value: str, limit: int) -> str:
-    """Flatten whitespace and shorten without splitting an emoji's UTF-16 pair."""
-    if limit < 0:
-        raise ValueError("Text limit must be non-negative")
-    value = " ".join(value.split())
-    if len(Text(value)) <= limit:
-        return value
-    remaining = max(0, limit - 1)
-    prefix: list[str] = []
-    for char in value:
-        width = 2 if ord(char) > 0xFFFF else 1
-        if width > remaining:
-            break
-        prefix.append(char)
-        remaining -= width
-    return "".join(prefix).rstrip() + ("…" if limit else "")
-
-
 def country_label(country: str) -> str:
     code = COUNTRY_CODES.get(country)
     if code is None:
         return country
     flag = "".join(chr(0x1F1E6 + ord(letter) - ord("a")) for letter in code)
     return f"{flag} {country}"
-
-
-def user_label(user_id: int, name: str, username: str | None) -> Text:
-    label = Text(TextLink(compact(name, 48) or "Игрок", url=f"tg://user?id={user_id}"))
-    handle = compact(username.lstrip("@"), 32) if username else ""
-    return Text(label, f" (@{handle})") if handle else label
 
 
 def _header(photo: Photo, players: Sequence[Player], *, closed: bool, scored: bool | None) -> Text:
