@@ -18,7 +18,7 @@ from msu_hub_bot.telegram.constants import TELEGRAM_CAPTION_MAX_LEN
 from msu_hub_bot.telegram.delivery import AlbumMedia, send_album
 from msu_hub_bot.telegram.utils import send_super_message
 from msu_hub_bot.health import mark_poll_success
-from msu_hub_bot.telemetry import Outcome, Telemetry, failure_outcome
+from msu_hub_bot.telemetry import Boundary, Operation, Outcome, Provider, Telemetry, failure_outcome
 
 
 class TelegramRequestPolicy(BaseRequestMiddleware):
@@ -35,6 +35,18 @@ class TelegramRequestPolicy(BaseRequestMiddleware):
         bot: Bot,
         method: TelegramMethod[TelegramType],
     ) -> Response[TelegramType]:
+        if method.__api_method__ != "getUpdates":
+            target_chat = getattr(method, "chat_id", None)
+            target_message = getattr(method, "message_id", None)
+            with self.telemetry.operation(
+                Boundary.TELEGRAM,
+                "telegram.request",
+                provider=Provider.TELEGRAM,
+                telegram_method=method.__api_method__,
+                target_chat_id=target_chat if type(target_chat) is int else None,
+                target_message_id=target_message if type(target_message) is int else None,
+            ) as observation:
+                return await self._request(make_request, bot, method, observation)
         try:
             return await self._request(make_request, bot, method)
         except BaseException as error:
@@ -47,6 +59,7 @@ class TelegramRequestPolicy(BaseRequestMiddleware):
         make_request: NextRequestMiddlewareType[TelegramType],
         bot: Bot,
         method: TelegramMethod[TelegramType],
+        observation: Operation | None = None,
     ) -> Response[TelegramType]:
         reply = getattr(method, "reply_parameters", None)
         allow_missing = getattr(method, "allow_sending_without_reply", None)
@@ -56,6 +69,8 @@ class TelegramRequestPolicy(BaseRequestMiddleware):
             method = method.model_copy(update={"reply_parameters": reply.model_copy(update={"allow_sending_without_reply": allow_missing})})
         is_read = method.__api_method__.startswith("get")
         for attempt in range(self.attempts):
+            if observation is not None:
+                observation.request_attempt(attempt + 1)
             try:
                 result = await make_request(bot, method)
             except TelegramRetryAfter as error:

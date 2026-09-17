@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from opentelemetry import baggage, context, trace
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
@@ -81,7 +82,12 @@ async def test_every_signal_is_allowlisted_with_exception_baggage_and_environmen
     assert all(not span.status.message for span in spans)
     assert "exception.stacktrace" not in serialized and "exception.message" not in serialized
     for message in sink.messages():
-        resources = message.resource_spans if isinstance(message, ExportTraceServiceRequest) else message.resource_metrics
+        if isinstance(message, ExportTraceServiceRequest):
+            resources = message.resource_spans
+        elif isinstance(message, ExportLogsServiceRequest):
+            resources = message.resource_logs
+        else:
+            resources = message.resource_metrics
         for resource in resources:
             assert {attribute.key for attribute in resource.resource.attributes} == {"service.name", "deployment.environment.name"}
             if isinstance(message, ExportMetricsServiceRequest):
@@ -91,6 +97,7 @@ async def test_every_signal_is_allowlisted_with_exception_baggage_and_environmen
                         "bot.operations",
                         "bot.operation.duration",
                         "bot.telemetry.dropped_spans",
+                        "bot.telemetry.dropped_logs",
                         "bot.poll.requests",
                         *(name.value for name in GaugeName),
                     }
@@ -459,10 +466,11 @@ async def test_skip_handler_is_an_ignored_outcome_not_a_failure():
 async def test_successful_handler_then_storage_unwind_failure_has_one_linked_owner():
     sink = Capture()
     telemetry = Telemetry(config(), {"test.handler"}, transport=sink)
+    telemetry.register_commands({"probe"})
     await telemetry.start()
     with pytest.raises(RuntimeError):
-        with telemetry.dispatch("message"):
-            with telemetry.operation(Boundary.HANDLER, "test.handler"):
+        with telemetry.context(user_id=501, chat_id=-7001), telemetry.dispatch("message"):
+            with telemetry.context(command="probe", command_kind="slash"), telemetry.operation(Boundary.HANDLER, "test.handler"):
                 pass
             raise RuntimeError(CANARY)
     await telemetry.close()
@@ -471,6 +479,13 @@ async def test_successful_handler_then_storage_unwind_failure_has_one_linked_own
     dispatch = next(span for span in spans if span.name == "bot.dispatch")
     assert len(dispatch.events) == 1 and not handler.events
     assert dispatch.links[0].trace_id == handler.trace_id
+    values = {attribute.key: attribute.value for attribute in dispatch.attributes}
+    assert values["telegram.user_id"].int_value == 501 and values["telegram.chat_id"].int_value == -7001
+    assert values["handler"].string_value == "test.handler"
+    assert values["command"].string_value == "probe" and values["command.kind"].string_value == "slash"
+    failure_log = next(record for record in sink.logs() if record.body.string_value == "bot.operation.failed")
+    assert failure_log.span_id == dispatch.span_id
+    assert any(attribute.key == "handler" and attribute.value.string_value == "test.handler" for attribute in failure_log.attributes)
     assert CANARY not in sink.serialized()
 
 
@@ -517,6 +532,7 @@ async def test_passive_job_failure_links_completed_handler_and_reports_once():
 
     sink = Capture()
     telemetry = Telemetry(config(), {"test.handler"}, transport=sink)
+    telemetry.register_commands({"probe"})
     await telemetry.start()
     supervisor = Supervisor(telemetry)
 
@@ -524,8 +540,8 @@ async def test_passive_job_failure_links_completed_handler_and_reports_once():
         with telemetry.operation(Boundary.STORAGE, "archive.write", trace=False):
             raise RuntimeError(CANARY)
 
-    with telemetry.dispatch("message"):
-        with telemetry.operation(Boundary.HANDLER, "test.handler"):
+    with telemetry.context(user_id=501, chat_id=-7001), telemetry.dispatch("message"):
+        with telemetry.context(command="probe", command_kind="hashtag"), telemetry.operation(Boundary.HANDLER, "test.handler"):
             pass
         await asyncio.gather(supervisor.create_job(archive, trace=False), return_exceptions=True)
     await supervisor.drain()
@@ -536,6 +552,11 @@ async def test_passive_job_failure_links_completed_handler_and_reports_once():
     handler = next(span for span in spans if span.name == "bot.handler")
     assert len(job.events) == 1 and job.links[0].trace_id == handler.trace_id
     assert not job.parent_span_id and job.trace_id != handler.trace_id
+    values = {attribute.key: attribute.value for attribute in job.attributes}
+    assert values["telegram.user_id"].int_value == 501 and values["telegram.chat_id"].int_value == -7001
+    assert values["handler"].string_value == "test.handler"
+    assert values["command"].string_value == "probe" and values["command.kind"].string_value == "hashtag"
+    assert values["update.kind"].string_value == "message"
     assert CANARY not in sink.serialized()
 
 

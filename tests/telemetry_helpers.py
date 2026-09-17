@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 
 from google.protobuf.json_format import MessageToDict
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
@@ -28,7 +29,11 @@ class Capture:
 
     def messages(self):
         for signal, payload in self.payloads:
-            message = (ExportTraceServiceRequest if signal == "traces" else ExportMetricsServiceRequest)()
+            message = {
+                "traces": ExportTraceServiceRequest,
+                "metrics": ExportMetricsServiceRequest,
+                "logs": ExportLogsServiceRequest,
+            }[signal]()
             message.ParseFromString(payload)
             yield message
 
@@ -44,6 +49,16 @@ class Capture:
 
     def serialized(self):
         return json.dumps([MessageToDict(message) for message in self.messages()])
+
+    def logs(self):
+        return [
+            record
+            for message in self.messages()
+            if isinstance(message, ExportLogsServiceRequest)
+            for resource in message.resource_logs
+            for scope in resource.scope_logs
+            for record in scope.log_records
+        ]
 
 
 def config(**changes):

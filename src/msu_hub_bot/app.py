@@ -15,6 +15,7 @@ from aiogram import Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+from aiogram.filters import Command
 from aiogram.fsm.storage.base import DefaultKeyBuilder
 from aiogram.fsm.storage.redis import RedisStorage as FSMRedisStorage
 from ccxt.async_support import binance
@@ -26,6 +27,7 @@ from msu_hub_bot.execution.executor import TPExecutor
 from msu_hub_bot.providers.dvach import Api2chAsync
 from msu_hub_bot.uptime import HealthCheck
 from msu_hub_bot.telegram.middlewares.check_gets import CheckGets
+from msu_hub_bot.telegram.filters import MetaCommand
 from msu_hub_bot.telegram.middlewares.logs import LoggingMiddleware
 from msu_hub_bot.telegram.middlewares.settings import SettingsMiddleware
 from msu_hub_bot.telegram.middlewares.skip777000 import Skip777000
@@ -179,6 +181,18 @@ class Application:
                     for observer in router.observers.values()
                     for handler in observer.handlers
                     if "handler_key" in handler.flags
+                }
+            )
+            telemetry.register_commands(
+                {
+                    command
+                    for router in dispatcher.chain_tail
+                    for observer in router.observers.values()
+                    for handler in observer.handlers
+                    for filter_ in handler.filters or ()
+                    if isinstance(filter_.callback, (MetaCommand, Command))
+                    for command in filter_.callback.commands
+                    if isinstance(command, str)
                 }
             )
             return cls(bot, dispatcher, supervisor, database, client, redis, fsm, stack, health, telemetry)

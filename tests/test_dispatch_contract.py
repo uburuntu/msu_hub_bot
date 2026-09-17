@@ -210,9 +210,15 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
         await application.close()
 
     spans = sink.spans()
-    assert len(spans) == 1 and spans[0].name == "bot.handler"
-    assert any(attr.key == "operation" and attr.value.string_value == "process_roll" for attr in spans[0].attributes)
-    assert not spans[0].events
+    assert sorted(span.name for span in spans) == ["bot.handler", "telegram.request"]
+    handler = next(span for span in spans if span.name == "bot.handler")
+    request = next(span for span in spans if span.name == "telegram.request")
+    assert request.parent_span_id == handler.span_id and request.trace_id == handler.trace_id
+    assert any(attr.key == "operation" and attr.value.string_value == "process_roll" for attr in handler.attributes)
+    assert any(attr.key == "command" and attr.value.string_value == "roll" for attr in handler.attributes)
+    assert any(attr.key == "telegram.method" and attr.value.string_value == "sendMessage" for attr in request.attributes)
+    assert not any(span.events for span in spans)
+    assert len(sink.logs()) == 1 and sink.logs()[0].span_id == handler.span_id
     assert [method.__api_method__ for method in session.methods] == ["sendMessage"]
     assert [call.args[0].handled for call in db.archive_update.await_args_list] == [False, False, True]
     db.load_settings.assert_awaited_once()

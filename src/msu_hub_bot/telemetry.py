@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import re
+import sys
 import time
 from collections import deque
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
@@ -13,10 +14,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Context as ExecutionContext
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 import aiohttp
+from opentelemetry._logs import SeverityNumber
 from opentelemetry.context import Context
+from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.common.metrics_encoder import encode_metrics
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.metrics import CallbackOptions, NoOpMeterProvider, Observation
@@ -24,9 +28,10 @@ from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.metrics.view import DropAggregation, ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor, ReadableLogRecord, ReadWriteLogRecord
 from opentelemetry.sdk.trace import ReadableSpan, SpanLimits, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.sampling import Decision, ParentBased, Sampler, SamplingResult, TraceIdRatioBased
-from opentelemetry.trace import Link, Span, SpanContext, SpanKind, StatusCode, TraceState, set_span_in_context
+from opentelemetry.trace import INVALID_SPAN, Link, Span, SpanContext, SpanKind, StatusCode, TraceState, set_span_in_context
 from opentelemetry.util.types import Attributes
 
 logger = logging.getLogger(__name__)
@@ -40,6 +45,7 @@ class Boundary(StrEnum):
     MEDIA = "media.operation"
     STORAGE = "storage.operation"
     JOB = "job.run"
+    TELEGRAM = "telegram.request"
 
 
 class Outcome(StrEnum):
@@ -104,6 +110,7 @@ OPERATIONS = frozenset(
         "deletion.due",
         "deletion.remove",
         "telegram.delete",
+        "telegram.request",
         "background",
         "unknown",
     }
@@ -126,6 +133,140 @@ UPDATE_KINDS = frozenset(
     }
 )
 METRIC_KEYS = {"boundary", "operation", "outcome", "provider", "backend", "update.kind"}
+
+
+@dataclass(frozen=True)
+class _RequestContext:
+    attributes: tuple[tuple[str, str | int], ...] = ()
+
+
+_request: ContextVar[_RequestContext | None] = ContextVar("telemetry_request", default=None)
+
+
+def _request_attributes() -> dict[str, str | int]:
+    context = _request.get()
+    if context is None:
+        return {}
+    return dict(context.attributes)
+
+
+def _identifier(value: object) -> bool:
+    return type(value) is int and -(2**63) <= value < 2**63
+
+
+def _telegram_methods() -> frozenset[str]:
+    from aiogram import methods
+    from aiogram.methods import TelegramMethod
+
+    return frozenset(
+        value.__api_method__
+        for name in methods.__all__
+        if isinstance(value := getattr(methods, name), type) and issubclass(value, TelegramMethod) and hasattr(value, "__api_method__")
+    )
+
+
+TELEGRAM_METHODS = _telegram_methods()
+
+
+def _failure_location(error: BaseException) -> dict[str, str | int]:
+    """Retain one real application code location without serializing a traceback."""
+    root = Path(__file__).resolve().parent
+    location: dict[str, str | int] = {}
+    traceback = error.__traceback__
+    for _ in range(64):
+        if traceback is None:
+            break
+        frame, line = traceback.tb_frame, traceback.tb_lineno
+        traceback = traceback.tb_next
+        module_name = frame.f_globals.get("__name__")
+        if not isinstance(module_name, str) or not module_name.startswith("msu_hub_bot."):
+            continue
+        module = sys.modules.get(module_name)
+        filename = getattr(module, "__file__", None)
+        function = frame.f_code.co_name
+        if not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,79}", function):
+            continue
+        try:
+            source = Path(frame.f_code.co_filename).resolve()
+            relative = source.relative_to(root)
+            if source != Path(filename).resolve() or not source.is_file():
+                continue
+        except OSError, RuntimeError, ValueError:
+            continue
+        location = {"code.file.path": f"msu_hub_bot/{relative.as_posix()}", "code.function.name": function, "code.line.number": line}
+    return location
+
+
+def safe_failure(error: BaseException) -> dict[str, str | int]:
+    """Classify failures using vetted types and fixed descriptions, never their payloads."""
+    from aiogram import exceptions as telegram
+    from msu_hub_bot.providers.exceptions import ExternalServiceError
+    from msu_hub_bot.settings import MissingIntegration
+
+    classes: tuple[tuple[type[BaseException], str, int | None], ...] = (
+        (telegram.TelegramRetryAfter, "rate_limited", 429),
+        (telegram.TelegramBadRequest, "bad_request", 400),
+        (telegram.TelegramForbiddenError, "forbidden", 403),
+        (telegram.TelegramUnauthorizedError, "unauthorized", 401),
+        (telegram.TelegramEntityTooLarge, "entity_too_large", 413),
+        (telegram.TelegramNotFound, "not_found", 404),
+        (telegram.TelegramServerError, "server_error", 500),
+        (telegram.TelegramNetworkError, "network_error", None),
+        (telegram.TelegramAPIError, "telegram_error", None),
+        (asyncio.CancelledError, "cancelled", None),
+        (TimeoutError, "timeout", None),
+        (ExternalServiceError, "provider_unavailable", None),
+        (MissingIntegration, "configuration_missing", None),
+        (aiohttp.ClientError, "network_error", None),
+        (OSError, "io_error", None),
+        (ValueError, "invalid_value", None),
+        (TypeError, "invalid_type", None),
+        (RuntimeError, "unexpected", None),
+    )
+    attributes: dict[str, str | int] = {"error.type": "Exception", "error.reason": "unexpected"}
+    for kind, reason, status in classes:
+        if isinstance(error, kind):
+            attributes.update({"error.type": kind.__name__, "error.reason": reason})
+            if status is not None:
+                attributes["http.response.status_code"] = status
+            break
+    if isinstance(error, telegram.TelegramAPIError):
+        message = error.message.casefold().removeprefix("bad request: ").removeprefix("forbidden: ")
+        reasons = {
+            "chat not found": "chat_not_found",
+            "private chat not found": "chat_not_found",
+            "the group chat was deleted": "chat_deleted",
+            "message to edit not found": "message_not_found",
+            "message to delete not found": "message_not_found",
+            "message can't be edited": "message_not_editable",
+            "message can't be deleted": "message_not_deletable",
+            "bot was blocked by the user": "bot_blocked",
+            "bot was kicked from the supergroup chat": "bot_removed",
+            "bot was kicked from the group chat": "bot_removed",
+            "bot was kicked from the channel chat": "bot_removed",
+            "bot is not a member of the group chat": "bot_removed",
+            "bot is not a member of the supergroup chat": "bot_removed",
+            "bot is not a member of the channel chat": "bot_removed",
+            "user is deactivated": "user_deactivated",
+            "have no rights to send a message": "not_enough_rights",
+            "not enough rights to send text messages to the chat": "not_enough_rights",
+            "not enough rights to send photos to the chat": "not_enough_rights",
+            "query is too old and response timeout expired or query id is invalid": "query_expired",
+            "message caption is too long": "caption_too_long",
+            "message is too long": "text_too_long",
+        }
+        if message in reasons:
+            attributes["error.reason"] = reasons[message]
+        elif message.startswith("message is not modified"):
+            attributes["error.reason"] = "message_not_modified"
+        elif message.startswith("can't parse entities"):
+            attributes["error.reason"] = "invalid_entities"
+    if isinstance(error, telegram.TelegramRetryAfter) and type(error.retry_after) is int:
+        attributes["telegram.retry_after"] = min(86400, max(0, error.retry_after))
+    if isinstance(error, aiohttp.ClientResponseError) and type(error.status) is int and 100 <= error.status <= 599:
+        attributes["http.response.status_code"] = error.status
+    attributes.update(_failure_location(error))
+    return attributes
 
 
 @dataclass(frozen=True)
@@ -197,7 +338,7 @@ class _HTTPTransport:
         )
 
     async def send(self, signal: str, payload: bytes) -> bool:
-        if self.session is None or signal not in {"traces", "metrics"}:
+        if self.session is None or signal not in {"traces", "metrics", "logs"}:
             return False
         async with self.session.post(
             f"{EU_ENDPOINT}/v1/{signal}",
@@ -252,6 +393,7 @@ class _Dispatch:
     reported: bool = False
     outcome: Outcome = Outcome.SUCCESS
     last_span: SpanContext | None = None
+    last_context: tuple[tuple[str, str | int], ...] = ()
 
 
 _dispatch: ContextVar[_Dispatch | None] = ContextVar("telemetry_dispatch", default=None)
@@ -288,14 +430,24 @@ class Operation:
         self.owner, self._span = owner, span
         self.outcome = Outcome.SUCCESS
         self.active = True
+        self.failure: dict[str, str | int] = {}
+        self.details: dict[str, int] = {}
 
     def set_outcome(self, outcome: Outcome) -> None:
         if isinstance(outcome, Outcome):
             self.outcome = outcome
 
     def http_status(self, status: int) -> None:
-        if self._span is not None and 100 <= status <= 599:
-            self._span.set_attribute("http.response.status_code", status)
+        if type(status) is int and 100 <= status <= 599:
+            self.details["http.response.status_code"] = status
+            if self._span is not None:
+                self._span.set_attribute("http.response.status_code", status)
+
+    def request_attempt(self, attempt: int) -> None:
+        if type(attempt) is int:
+            self.details["attempt"] = min(10, max(1, attempt))
+            if self._span is not None:
+                self._span.set_attribute("attempt", self.details["attempt"])
 
 
 class _QueueProcessor(SpanProcessor):
@@ -304,6 +456,23 @@ class _QueueProcessor(SpanProcessor):
 
     def on_end(self, span: ReadableSpan) -> None:
         self.telemetry._enqueue(span)
+
+
+class _LogQueueProcessor(LogRecordProcessor):
+    def __init__(self, telemetry: Telemetry) -> None:
+        self.telemetry = telemetry
+
+    def on_emit(self, log_record: ReadWriteLogRecord) -> None:
+        if log_record.resource is not None:
+            self.telemetry._enqueue_log(
+                ReadableLogRecord(log_record.log_record, log_record.resource, log_record.instrumentation_scope, log_record.limits)
+            )
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
 
 
 class Telemetry:
@@ -316,11 +485,14 @@ class Telemetry:
     ) -> None:
         self.config = config or TelemetryConfig()
         self.handler_keys = frozenset(key for key in handler_keys if re.fullmatch(r"[A-Za-z_][\w.]{0,159}", key))
+        self.command_keys: frozenset[str] = frozenset()
         self._transport = transport
         self._queue: deque[ReadableSpan] = deque()
+        self._log_queue: deque[ReadableLogRecord] = deque()
         self._wake = asyncio.Event()
         self._worker: asyncio.Task[None] | None = None
         self._provider: TracerProvider | None = None
+        self._logger_provider: LoggerProvider | None = None
         self._meter_provider: MeterProvider | None = None
         self._reader: InMemoryMetricReader | None = None
         self._gauge_values: dict[GaugeName, float] = {}
@@ -331,6 +503,7 @@ class Telemetry:
         self._outage = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self.dropped_spans = 0
+        self.dropped_logs = 0
 
     def register_handlers(self, keys: Collection[str]) -> None:
         """Freeze registration-derived names before export starts."""
@@ -338,13 +511,62 @@ class Telemetry:
             raise RuntimeError("Register telemetry handlers before start")
         self.handler_keys = frozenset(key for key in keys if re.fullmatch(r"[A-Za-z_][\w.]{0,159}", key))
 
+    def register_commands(self, keys: Collection[str]) -> None:
+        """Only literal registered command aliases are useful diagnostic dimensions."""
+        if self._worker is not None or self._closed:
+            raise RuntimeError("Register telemetry commands before start")
+        self.command_keys = frozenset(key.casefold() for key in keys if re.fullmatch(r"[\w-]{1,64}", key))
+
+    @contextmanager
+    def context(
+        self,
+        *,
+        user_id: int | None = None,
+        chat_id: int | None = None,
+        message_id: int | None = None,
+        thread_id: int | None = None,
+        update_id: int | None = None,
+        reply_to_message_id: int | None = None,
+        handler: str | None = None,
+        command: str | None = None,
+        command_kind: str | None = None,
+    ) -> Iterator[None]:
+        attributes = _request_attributes()
+        for key, identifier in (
+            ("user_id", user_id),
+            ("chat_id", chat_id),
+            ("message_id", message_id),
+            ("thread_id", thread_id),
+            ("update_id", update_id),
+            ("reply_to_message_id", reply_to_message_id),
+        ):
+            if _identifier(identifier):
+                attributes[f"telegram.{key}"] = cast(int, identifier)
+        if handler in self.handler_keys:
+            attributes["handler"] = handler
+        if isinstance(command, str) and command.casefold() in self.command_keys:
+            attributes["command"] = command.casefold()
+            if command_kind in {"slash", "hashtag"}:
+                attributes["command.kind"] = command_kind
+        token = _request.set(_RequestContext(tuple(attributes.items())))
+        try:
+            yield
+        finally:
+            _request.reset(token)
+
     def job_context(self) -> ExecutionContext:
-        """Carry only a random trace link into an independently owned job."""
+        """Carry only explicit request identifiers and a trace link into a job."""
         clean = ExecutionContext()
+        attributes = _request_attributes()
+        dispatch = _dispatch.get()
+        if dispatch is not None and dispatch.owner is asyncio.current_task():
+            attributes = {**dict(dispatch.last_context), **attributes}
+        if attributes:
+            clean.run(_request.set, _RequestContext(tuple(attributes.items())))
         current = _current.get()
         if current is not None and current._span is not None and current.owner is asyncio.current_task() and current.active:
             clean.run(_job_link.set, current._span.get_span_context())
-        elif (dispatch := _dispatch.get()) is not None and dispatch.owner is asyncio.current_task() and dispatch.last_span is not None:
+        elif dispatch is not None and dispatch.owner is asyncio.current_task() and dispatch.last_span is not None:
             clean.run(_job_link.set, dispatch.last_span)
         return clean
 
@@ -403,6 +625,7 @@ class Telemetry:
                         aggregation=ExplicitBucketHistogramAggregation([0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 30, 180]),
                     ),
                     View(instrument_name="bot.telemetry.dropped_spans", meter_name="msu_hub_bot.telemetry", attribute_keys=set()),
+                    View(instrument_name="bot.telemetry.dropped_logs", meter_name="msu_hub_bot.telemetry", attribute_keys=set()),
                     View(instrument_name="bot.poll.requests", meter_name="msu_hub_bot.telemetry", attribute_keys={"outcome"}),
                     *[View(instrument_name=name.value, meter_name="msu_hub_bot.telemetry", attribute_keys=set()) for name in GaugeName],
                 ],
@@ -411,6 +634,7 @@ class Telemetry:
             self._count = meter.create_counter("bot.operations", unit="1")
             self._duration = meter.create_histogram("bot.operation.duration", unit="s")
             self._drops = meter.create_counter("bot.telemetry.dropped_spans", unit="1")
+            self._log_drops = meter.create_counter("bot.telemetry.dropped_logs", unit="1")
             self._poll_count = meter.create_counter("bot.poll.requests", unit="1")
             for name in GaugeName:
                 meter.create_observable_gauge(
@@ -422,11 +646,11 @@ class Telemetry:
                 shutdown_on_exit=False,
                 meter_provider=NoOpMeterProvider(),
                 span_limits=SpanLimits(
-                    max_attributes=12,
+                    max_attributes=32,
                     max_events=1,
                     max_links=1,
-                    max_span_attributes=12,
-                    max_event_attributes=2,
+                    max_span_attributes=32,
+                    max_event_attributes=8,
                     max_link_attributes=0,
                     max_attribute_length=160,
                     max_span_attribute_length=160,
@@ -434,6 +658,9 @@ class Telemetry:
             )
             self._provider.add_span_processor(_QueueProcessor(self))
             self._tracer = self._provider.get_tracer("msu_hub_bot.telemetry", "1")
+            self._logger_provider = LoggerProvider(resource=resource, shutdown_on_exit=False, meter_provider=NoOpMeterProvider())
+            self._logger_provider.add_log_record_processor(_LogQueueProcessor(self))
+            self._structured_logger = self._logger_provider.get_logger("msu_hub_bot.telemetry", "1")
             self._transport = self._transport or _HTTPTransport(self.config)
             await self._transport.start()
             self._worker = asyncio.create_task(self._export_loop(), name="bot-telemetry-export", context=ExecutionContext())
@@ -457,6 +684,49 @@ class Telemetry:
         self._queue.append(span)
         self._wake.set()
 
+    def _enqueue_log(self, record: ReadableLogRecord) -> None:
+        if not self._available():
+            return
+        if len(self._log_queue) >= self.config.queue_capacity:
+            self.dropped_logs += 1
+            self._log_drops.add(1)
+            return
+        self._log_queue.append(record)
+        self._wake.set()
+
+    def _operation_log(self, boundary: Boundary, handle: Operation, attributes: dict[str, str | int], duration: float) -> None:
+        failed = handle.outcome not in {Outcome.SUCCESS, Outcome.IGNORED, Outcome.CANCELLED}
+        span = handle._span
+        if boundary is Boundary.TELEGRAM:
+            if not failed or handle.failure.get("error.reason") == "message_not_modified":
+                return
+            event = "telegram.request.failed"
+        elif boundary in {Boundary.HANDLER, Boundary.JOB, Boundary.DISPATCH}:
+            if not failed and (span is None or not span.is_recording()):
+                return
+            event = "bot.operation.failed" if failed else "bot.operation.completed"
+        else:
+            return
+        # An explicit empty context prevents ambient baggage or unrelated traces.
+        context = set_span_in_context(span if span is not None else INVALID_SPAN, Context())
+        severity = SeverityNumber.ERROR if handle.outcome is Outcome.UNEXPECTED else SeverityNumber.WARN if failed else SeverityNumber.INFO
+        self._structured_logger.emit(
+            timestamp=time.time_ns(),
+            body=event,
+            event_name=event,
+            context=context,
+            severity_number=severity,
+            severity_text=severity.name,
+            attributes={
+                **attributes,
+                **handle.details,
+                **handle.failure,
+                "boundary": boundary.value,
+                "outcome": handle.outcome.value,
+                "duration_ms": round(max(0, duration) * 1000, 3),
+            },
+        )
+
     def _measure(self, boundary: Boundary, operation: str, outcome: Outcome, duration: float, **labels: str) -> None:
         if self._meter_provider is not None and not self._closed:
             attributes = {"boundary": boundary.value, "operation": operation, "outcome": outcome.value, **labels}
@@ -473,6 +743,9 @@ class Telemetry:
         backend: Backend | None = None,
         attempt: int = 1,
         trace: bool = True,
+        telegram_method: str | None = None,
+        target_chat_id: int | None = None,
+        target_message_id: int | None = None,
     ) -> Iterator[Operation]:
         if not self._available():
             yield Operation(None)
@@ -480,8 +753,14 @@ class Telemetry:
         owner = asyncio.current_task()
         valid_keys = self.handler_keys if boundary is Boundary.HANDLER else OPERATIONS
         key = operation if operation in valid_keys else "unknown"
+        attributes = _request_attributes()
+        if boundary is Boundary.HANDLER:
+            attributes["handler"] = key
         dispatch = _dispatch.get()
         dispatch = dispatch if dispatch is not None and dispatch.owner is owner else None
+        if dispatch is not None and boundary is not Boundary.HANDLER:
+            attributes = {**dict(dispatch.last_context), **attributes}
+        request_token = _request.set(_RequestContext(tuple(attributes.items())))
         labels: dict[str, str] = {}
         if isinstance(provider, Provider):
             labels["provider"] = provider.value
@@ -489,7 +768,12 @@ class Telemetry:
             labels["backend"] = backend.value
         if dispatch is not None:
             labels["update.kind"] = dispatch.kind
-        attributes: dict[str, str | int] = {"operation": key, **labels}
+        attributes.update({"operation": key, **labels})
+        if boundary is Boundary.TELEGRAM:
+            attributes["telegram.method"] = telegram_method if telegram_method in TELEGRAM_METHODS else "unknown"
+            for name, identifier in (("target_chat_id", target_chat_id), ("target_message_id", target_message_id)):
+                if _identifier(identifier):
+                    attributes[f"telegram.{name}"] = cast(int, identifier)
         if boundary is Boundary.PROVIDER and isinstance(attempt, int):
             attributes["attempt"] = min(10, max(1, attempt))
         parent = _current.get()
@@ -500,7 +784,7 @@ class Telemetry:
         if parent is not None and parent._span is not None:
             if boundary is Boundary.JOB:
                 links = [Link(parent._span.get_span_context())]
-            elif parent.owner is owner and parent.active:
+            elif parent.active:
                 context = set_span_in_context(parent._span, Context())
         if boundary is Boundary.DISPATCH and dispatch is not None and dispatch.last_span is not None:
             links = [Link(dispatch.last_span)]
@@ -517,6 +801,9 @@ class Telemetry:
         try:
             yield handle
         except BaseException as error:
+            handle.failure = safe_failure(error)
+            if span is not None:
+                span.set_attributes(handle.failure)
             if handle.outcome is Outcome.SUCCESS:
                 handle.set_outcome(failure_outcome(error))
             if boundary in {Boundary.HANDLER, Boundary.JOB, Boundary.DISPATCH} and handle.outcome not in {
@@ -530,21 +817,26 @@ class Telemetry:
                     if span is None:
                         span = start_span()
                         handle._span = span
-                    span.add_event("bot.failure", {"failure.category": handle.outcome.value})
+                        span.set_attributes(handle.failure)
+                    span.add_event("bot.failure", {"failure.category": handle.outcome.value, **handle.failure})
                     if dispatch is not None and boundary is not Boundary.JOB:
                         dispatch.reported = True
             raise
         finally:
+            duration = time.monotonic() - start
             if span is not None:
                 span.set_attribute("outcome", handle.outcome.value)
                 if handle.outcome is Outcome.UNEXPECTED:
                     span.set_status(StatusCode.ERROR)
             if boundary is not Boundary.DISPATCH:
-                self._measure(boundary, key, handle.outcome, time.monotonic() - start, **labels)
+                self._measure(boundary, key, handle.outcome, duration, **labels)
+            self._operation_log(boundary, handle, attributes, duration)
             if dispatch is not None and boundary is Boundary.HANDLER and span is not None:
                 dispatch.last_span = span.get_span_context()
+                dispatch.last_context = tuple(_request_attributes().items())
             handle.active = False
             _current.reset(token)
+            _request.reset(request_token)
             if span is not None:
                 span.end()
 
@@ -552,6 +844,8 @@ class Telemetry:
     def dispatch(self, kind: str) -> Iterator[_Dispatch]:
         state = _Dispatch(asyncio.current_task(), kind if kind in UPDATE_KINDS else "unknown")
         token = _dispatch.set(state)
+        attributes = {**_request_attributes(), "update.kind": state.kind}
+        request_token = _request.set(_RequestContext(tuple(attributes.items())))
         start = time.monotonic()
         try:
             yield state
@@ -565,6 +859,7 @@ class Telemetry:
         finally:
             self._measure(Boundary.DISPATCH, "dispatch", state.outcome, time.monotonic() - start, **{"update.kind": state.kind})
             _dispatch.reset(token)
+            _request.reset(request_token)
 
     async def _send(self, signal: str, payload: bytes) -> None:
         if self._transport is None:
@@ -592,13 +887,16 @@ class Telemetry:
             if self._queue:
                 batch = [self._queue.popleft() for _ in range(min(self.config.batch_size, len(self._queue)))]
                 await self._send("traces", cast(bytes, encode_spans(batch).SerializeToString()))
+            if self._log_queue:
+                records = [self._log_queue.popleft() for _ in range(min(self.config.batch_size, len(self._log_queue)))]
+                await self._send("logs", cast(bytes, encode_logs(records).SerializeToString()))
             if time.monotonic() >= next_metrics:
                 await self._metrics()
                 next_metrics = time.monotonic() + self.config.interval
-            if self._closing and not self._queue:
+            if self._closing and not self._queue and not self._log_queue:
                 await self._metrics()
                 return
-            if not self._queue:
+            if not self._queue and not self._log_queue:
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), max(0.001, next_metrics - time.monotonic()))
@@ -627,6 +925,7 @@ class Telemetry:
         finally:
             self._closed = True
             self._queue.clear()
+            self._log_queue.clear()
             if self._transport is not None:
                 try:
                     async with asyncio.timeout(max(0.001, deadline - time.monotonic())):
@@ -635,5 +934,7 @@ class Telemetry:
                     logger.warning("Telemetry transport cleanup failed")
             if self._provider is not None:
                 self._provider.shutdown()
+            if self._logger_provider is not None:
+                self._logger_provider.shutdown()
             if self._meter_provider is not None:
                 self._meter_provider.shutdown()
