@@ -8,11 +8,9 @@ from typing import List, Optional, cast
 from typing_extensions import Buffer
 
 import aiohttp
-import pydub
 from aiogram.types import Audio, Message, Video, VideoNote, Voice
 from aiogram.utils.markdown import hitalic
 from aiogram import html
-from pydub.effects import normalize
 from throttler import Throttler
 
 from msu_hub_bot.telemetry import Boundary, Provider, Telemetry
@@ -122,42 +120,6 @@ class Wit(ManyWitAPI):
     def __init__(self, tokens: List[str], executor: TPExecutor | None = None, *, telemetry: Telemetry | None = None) -> None:
         super().__init__(tokens, telemetry=telemetry)
         self.executor = executor
-
-    @staticmethod
-    def to_mp3_chunks(file: io.BytesIO, max_size: int = 20_000, overlap: int = 400, threshold: int = 100) -> List[io.BytesIO]:
-        audio = pydub.AudioSegment.from_file(file)
-        audio = normalize(audio, headroom=0.5)
-
-        step = max_size - 2 * overlap - threshold
-        duration = int(audio.duration_seconds * 1000)
-
-        result = []
-        for offset in range(0, duration, step):
-            start, end = max(offset - overlap, 0), min(offset + step + overlap, duration)
-            voice = audio[start:end].export(FakeBytesIO(), "mp3")
-            result.append(voice)
-
-        return result
-
-    @staticmethod
-    def to_mp3_chunks_2(file: io.BytesIO, duration: int, step: int = 19) -> List[io.BytesIO]:
-        parameters = [
-            "-f",
-            "mp3",
-            "-codec:a",
-            "libmp3lame",
-            "-vn",
-        ]
-
-        chunks = []
-        for start in range(0, duration, step):
-            file.seek(0)
-            chunk = ffmpeg(file, out_suffix=".mp3", parameters=parameters + ["-ss", f"{start}", "-t", f"{step}"])
-            if chunk is None:
-                return []
-            chunks.append(chunk)
-
-        return chunks
 
     @staticmethod
     def to_raw_chunks(file: io.BytesIO, duration: int, max_size: int = 20_000, overlap: int = 100) -> List[io.BytesIO]:

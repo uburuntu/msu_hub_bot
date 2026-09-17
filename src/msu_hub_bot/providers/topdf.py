@@ -1,24 +1,30 @@
 import asyncio
 import io
 import random
+import time
 from typing import Tuple
 from urllib.parse import unquote
 
 import aiohttp
-import js2py
 
 from msu_hub_bot.providers.exceptions import BadRequestError
 
 JOB_TIMEOUT_SECONDS = 180
 
-js_rand = js2py.eval_js(
-    "function () {\n"
-    "    var e = 0;\n"
-    "    n = (new Date).getTime().toString(32);\n"
-    "    for (i = 0; 5 > i; i++) n += Math.floor(65535 * Math.random()).toString(32);\n"
-    "    return 'o_' + n + (e++).toString(32)\n"
-    "};"
-)
+
+def _conversion_id() -> str:
+    """Match the uploader's base-32 timestamp, five random chunks and counter."""
+    alphabet = "0123456789abcdefghijklmnopqrstuv"
+    values = [int(time.time() * 1000), *(int(65535 * random.random()) for _ in range(5))]
+    chunks = []
+    for value in values:
+        digits = ""
+        while value:
+            value, remainder = divmod(value, 32)
+            digits = alphabet[remainder] + digits
+        chunks.append(digits or "0")
+    # The uploader initializes its counter inside each call, so it is always zero.
+    return "o_" + "".join(chunks) + "0"
 
 
 async def _response_json(response) -> dict:
@@ -35,7 +41,7 @@ async def _response_json(response) -> dict:
 
 async def convert_to_pdf(file: io.BytesIO, filename: str, content_type: str) -> Tuple[str, str, str]:
     sid = "".join(random.choices("0123456789abcdefghiklmnopqrstuvwxyz", k=16))
-    fid = js_rand()
+    fid = _conversion_id()
 
     data = aiohttp.formdata.FormData()
     data.add_field("name", filename)
