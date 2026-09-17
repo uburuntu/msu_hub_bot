@@ -106,6 +106,7 @@ class Source:
     def __init__(self, records=None):
         self.records = records or source_records()
         self.queries = []
+        self.requests = []
 
     def query_single(self, query):
         self.queries.append(query)
@@ -120,12 +121,16 @@ class Source:
 
     def query_json(self, query, **parameters):
         self.queries.append(query)
+        self.requests.append((query, parameters))
         if query == migration.SCHEMA_QUERY:
             return migration.canonical([source_schema(table) for table in migration.TABLES])
         for table, type_name in migration.TABLES.items():
             if f"SELECT {type_name} " in query:
+                if "ids" in parameters:
+                    identifiers = {str(identifier) for identifier in parameters["ids"]}
+                    return migration.canonical([row for row in self.records[table] if row["id"] in identifiers])
                 after = str(parameters.get("after", ""))
-                return migration.canonical([row for row in self.records[table] if row["id"] > after][: parameters["limit"]])
+                return migration.canonical([{"id": row["id"]} for row in self.records[table] if row["id"] > after][: parameters["limit"]])
         raise AssertionError(query)
 
 
@@ -163,6 +168,85 @@ def test_snapshot_uses_all_introspected_fields_and_uuid_keyset(tmp_path, capsys)
     )
     assert all(path.stat().st_mode & 0o077 == 0 for path in directory.iterdir())
     assert "private-marker" not in capsys.readouterr().out
+
+
+def test_export_bounds_full_shapes_by_selected_uuids_and_reports_counts_first(tmp_path, capsys):
+    class ObservedSource(Source):
+        def query_json(self, query, **parameters):
+            if "SELECT telegram::BotUpdate " in query and "limit" in parameters:
+                progress = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+                if "after" not in parameters:
+                    assert {"exporting_table": "updates", "rows": 0, "expected_rows": 2} in progress
+                assert "{ id }" in query
+                assert "data" not in query
+            return super().query_json(query, **parameters)
+
+    source = ObservedSource()
+    directory = tmp_path / "export"
+    directory.mkdir()
+    manifest = migration.export_snapshot(source, directory, 999, 1)
+    requests = [(query, values) for query, values in source.requests if "SELECT telegram::BotUpdate " in query]
+    assert len(requests) == 5  # Two identity/record pairs, then one empty identity page.
+    assert [values["ids"] for _query, values in requests if "ids" in values] == [[UUID(int=5)], [UUID(int=6)]]
+    assert [values["after"] for _query, values in requests if "after" in values] == [UUID(int=5), UUID(int=6)]
+    assert manifest["tables"]["updates"]["count"] == 2
+    assert list(migration.rows(directory, "updates", source_schema("updates"))) == source.records["updates"]
+
+
+@pytest.mark.parametrize("change", ["missing", "duplicate", "unrequested", "reordered"])
+def test_export_rejects_mismatched_record_identities_before_writing_page(tmp_path, change):
+    class InconsistentSource(Source):
+        def query_json(self, query, **parameters):
+            raw = super().query_json(query, **parameters)
+            if "SELECT telegram::BotUpdate " not in query or "ids" not in parameters:
+                return raw
+            records = migration.decode(raw)
+            if change == "missing":
+                records.pop()
+            elif change == "duplicate":
+                records[1] = records[0]
+            elif change == "unrequested":
+                records[1]["id"] = str(UUID(int=99))
+            else:
+                records.reverse()
+            return migration.canonical(records)
+
+    directory = tmp_path / "export"
+    directory.mkdir()
+    with pytest.raises(migration.MigrationError, match="source_page_record_mismatch"):
+        migration.export_snapshot(InconsistentSource(), directory, 999, 2)
+    assert (directory / "updates.jsonl").read_bytes() == b""
+
+
+@pytest.mark.parametrize("change", ["duplicate", "reordered", "invalid", "extra_field", "oversized", "repeated_cursor"])
+def test_export_rejects_invalid_identity_pages_before_fetching_full_records(tmp_path, change):
+    class InconsistentSource(Source):
+        def query_json(self, query, **parameters):
+            raw = super().query_json(query, **parameters)
+            if "SELECT telegram::BotUpdate " not in query or "limit" not in parameters:
+                return raw
+            page = migration.decode(raw)
+            if change == "repeated_cursor":
+                return migration.canonical([{"id": str(parameters["after"])}]) if "after" in parameters else raw
+            if change == "duplicate":
+                page[1] = page[0]
+            elif change == "reordered":
+                page.reverse()
+            elif change == "invalid":
+                page[0]["id"] = "not-a-uuid"
+            elif change == "extra_field":
+                page[0]["data"] = "unexpected"
+            else:
+                page.append({"id": str(UUID(int=99))})
+            return migration.canonical(page)
+
+    source = InconsistentSource()
+    directory = tmp_path / "export"
+    directory.mkdir()
+    with pytest.raises(migration.MigrationError, match="source_page_|nonmonotonic_identity"):
+        migration.export_snapshot(source, directory, 999, 1 if change == "repeated_cursor" else 2)
+    record_requests = [values for query, values in source.requests if "SELECT telegram::BotUpdate " in query and "ids" in values]
+    assert len(record_requests) == (1 if change == "repeated_cursor" else 0)
 
 
 def test_export_wraps_every_read_in_one_nonretrying_readonly_transaction(monkeypatch, tmp_path):

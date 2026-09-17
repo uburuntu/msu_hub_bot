@@ -19,7 +19,7 @@ The administrative identity needs access to cluster identity, application tables
 
 ## Snapshot and exact import
 
-An export uses one serializable, read-only, deferrable transaction for schema introspection, counts and every UUID-keyset page. Automatic retries are disabled. The manifest appears only after the entire snapshot commits; an interrupted export must start in a new directory. Baseline exports can use a restored native backup to reduce load on production.
+An export uses one serializable, read-only, deferrable transaction for schema introspection, counts and every UUID-keyset page. It selects a bounded page of UUIDs before fetching the full records and verifies that the returned identities match exactly in order. Automatic retries are disabled. The manifest appears only after the entire snapshot commits; an interrupted export must start in a new directory. Baseline exports can use a restored native backup to reduce load on production.
 
 ```sh
 uv run python -m tools.migrate_storage export \

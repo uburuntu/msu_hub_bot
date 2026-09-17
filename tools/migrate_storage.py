@@ -202,6 +202,7 @@ def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int) 
         schema = by_type[type_name]
         names = fields(schema)
         count = source.query_single(f"SELECT count({type_name});")
+        print(canonical({"exporting_table": table, "rows": 0, "expected_rows": count}), flush=True)
         digest = Digests(names)
         last_progress = time.monotonic()
         with (directory / (table + ".jsonl")).open("x", encoding="utf-8") as output:
@@ -210,19 +211,45 @@ def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int) 
                 condition = " FILTER .id > <uuid>$after" if digest.count else ""
                 values = {"after": UUID(digest.last_id)} if digest.count else {}
                 raw = source.query_json(
-                    f"SELECT {type_name} {{ {', '.join(names)} }}{condition} ORDER BY .id LIMIT <int64>$limit;",
+                    f"SELECT {type_name} {{ id }}{condition} ORDER BY .id LIMIT <int64>$limit;",
                     limit=batch_size,
                     **values,
                 )
-                rows = decode(raw)
-                if not isinstance(rows, list) or len(rows) > batch_size:
+                page = decode(raw)
+                if not isinstance(page, list) or len(page) > batch_size:
                     raise MigrationError("source_page_shape")
-                for row in rows:
-                    output.write(digest.add(normalized_row(row, schema)))
+                identifiers = []
+                previous = digest.last_id
+                for item in page:
+                    if not isinstance(item, dict) or set(item) != {"id"} or not isinstance(item["id"], str):
+                        raise MigrationError("source_page_identity")
+                    try:
+                        identifier = UUID(item["id"])
+                    except ValueError:
+                        raise MigrationError("source_page_identity") from None
+                    if str(identifier) <= previous:
+                        raise MigrationError("nonmonotonic_identity")
+                    identifiers.append(identifier)
+                    previous = str(identifier)
+                if not identifiers:
+                    break
+                # Bound the identity set before asking the source to construct wide JSON shapes.
+                raw = source.query_json(
+                    f"SELECT {type_name} {{ {', '.join(names)} }} FILTER .id IN array_unpack(<array<uuid>>$ids) ORDER BY .id;",
+                    ids=identifiers,
+                )
+                rows = decode(raw)
+                if not isinstance(rows, list) or len(rows) != len(identifiers):
+                    raise MigrationError("source_page_record_mismatch")
+                normalized = [normalized_row(row, schema) for row in rows]
+                if [row["id"] for row in normalized] != [str(identifier) for identifier in identifiers]:
+                    raise MigrationError("source_page_record_mismatch")
+                for row in normalized:
+                    output.write(digest.add(row))
                 if time.monotonic() - last_progress >= 30:
                     print(canonical({"exporting_table": table, "rows": digest.count, "expected_rows": count}), flush=True)
                     last_progress = time.monotonic()
-                if len(rows) < batch_size:
+                if len(identifiers) < batch_size:
                     break
             output.flush()
             os.fsync(output.fileno())
