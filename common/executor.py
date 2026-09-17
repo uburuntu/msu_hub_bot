@@ -1,3 +1,10 @@
+"""Bound submitted thread work while keeping caller deadlines independent.
+
+Running threads retain their admission slots after cancellation or timeout.
+Waiting callers have no separate queue limit; jobs must bound their own I/O,
+subprocesses and decoded media. Shutdown cannot terminate running threads.
+"""
+
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
@@ -13,7 +20,7 @@ from msu_hub_bot.telemetry import Backend, Boundary, GaugeName, Outcome, Telemet
 ResultT = TypeVar("ResultT")
 
 
-class _BaseExecutor:
+class TPExecutor:
     ExecutorClass: Callable[..., Executor] = ThreadPoolExecutor
     ExecutorException: type[RuntimeError] = BrokenThreadPool
 
@@ -108,27 +115,8 @@ class _BaseExecutor:
             raise
         raise RuntimeError("Worker recovery exhausted")
 
-    async def run_here(self, func: Callable[..., Any], *args: Any, timeout: float | None = None) -> tuple[Any, bool]:
-        """Run synchronously for debugging, without a worker deadline."""
-        return func(*args), False
-
     def shutdown(self, wait: bool) -> None:
         """Reject new jobs and cancel queued futures; running threads are not killed."""
         self._closed = True
         if self._executor is not None:
             self._executor.shutdown(wait=wait, cancel_futures=True)
-
-
-class TPExecutor(_BaseExecutor):
-    pass
-
-
-PPExecutor = TPExecutor  # Preserve the deployed thread executor.
-
-
-class FakePPExecutor(TPExecutor):
-    def __init__(self, max_workers: int = 1, telemetry: Telemetry | None = None) -> None:
-        super().__init__(max_workers, telemetry)
-
-    async def run(self, func: Callable[..., Any], *args: Any, timeout: float | None = None) -> tuple[Any, bool]:
-        return await self.run_here(func, *args, timeout=timeout)

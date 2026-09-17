@@ -9,7 +9,7 @@ import pydantic
 import pydantic.v1
 import pytest
 
-from common.db.edb import UserDB
+from common.db.models import UserRecord
 from common.externals import dvach
 from common.externals._api2ch.models.file import Image, Sticker, Video
 from common.externals._api2ch.models.response import ResponseThreadPostsHelper
@@ -106,7 +106,7 @@ def test_legacy_models_are_isolated_from_pydantic_two_application_models():
     assert issubclass(dvach.Post, pydantic.v1.BaseModel)
     assert not issubclass(dvach.Post, pydantic.BaseModel)
     assert issubclass(Settings, pydantic.BaseModel)
-    assert issubclass(UserDB, pydantic.BaseModel)
+    assert issubclass(UserRecord, pydantic.BaseModel)
     assert "api2ch" not in sys.modules
     post = dvach.Post.parse_obj(post_payload())
     assert post.api is None

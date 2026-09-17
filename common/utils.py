@@ -1,5 +1,3 @@
-import asyncio
-import base64
 import heapq
 import io
 import itertools
@@ -7,22 +5,16 @@ import random
 import re
 import string
 import time
-import urllib.request
 from datetime import datetime, timedelta
-from functools import wraps, lru_cache
+from functools import wraps
 from itertools import chain, islice, tee
 from operator import itemgetter
-from typing import Generic, Iterator, Callable, Hashable, Iterable, List, Optional, TypeVar, AnyStr, Tuple
+from typing import Generic, Iterator, Callable, Hashable, Iterable, List, Optional, TypeVar, AnyStr
 
-import aiohttp
 import pendulum
-from PIL import Image, ImageOps
+from PIL import Image
 
 T = TypeVar('T')
-
-
-def do_nothing(*_args, **_kwargs):
-    pass
 
 
 def attributes(it: Iterable, name: str):
@@ -31,12 +23,6 @@ def attributes(it: Iterable, name: str):
 
 def call(it: Iterable[Callable], *args, **kwargs) -> list:
     return [f(*args, **kwargs) for f in it]
-
-
-def list_get(a: list, index: int, default=None):
-    if len(a) <= index:
-        return default
-    return a[index]
 
 
 class FakeBytesIO(io.BytesIO):
@@ -61,64 +47,6 @@ def image_bytes_io(image: Image.Image, filename: str = 'image', ext: str = 'jpeg
     return file
 
 
-def bytes_io_to_base64(file: io.BytesIO, mime_type: str = 'image/jpeg') -> str:
-    return f'data:{mime_type};base64,' + base64.b64encode(file.read()).decode(encoding='utf-8')
-
-
-def base64_to_bytes_io(data: str, filename: str = None) -> io.BytesIO:
-    parts = data.partition(',')
-    return bytes_io(base64.b64decode(parts[2] or parts[0]), filename)
-
-
-def grid_images(images: List[io.BytesIO],
-                size: Tuple[int, int] = (300, 300),
-                grid: Tuple[int, int] = (2, 2),
-                border: int = 3) -> io.BytesIO:
-    # Open images and resize them
-    width, height = size
-    cols, rows = grid
-    images = [ImageOps.fit(Image.open(image), size) for image in images]
-
-    # Create canvas for the final image with total size
-    image_size = (width * cols + border * (cols - 1), height * rows + border * (rows - 1))
-    result_image = Image.new('RGB', image_size)
-
-    def yield_images():
-        for image in images:
-            yield image
-        while True:
-            yield Image.new('RGB', size, 'white')
-
-    # Paste images into final image
-    curr_image = yield_images()
-    for row in range(rows):
-        for col in range(cols):
-            offset = width * col + border * col, height * row + border * row
-            result_image.paste(next(curr_image), offset)
-
-    return image_bytes_io(result_image)
-
-
-async def download_content(url: str, timeout: float = 30.) -> Optional[bytes]:
-    for _ in range(2):
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        return
-                    return await response.read()
-
-        except asyncio.TimeoutError:
-            pass
-
-
-async def download_image(url: str) -> Optional[Image.Image]:
-    content = await download_content(url)
-    if content is None:
-        return
-    return Image.open(bytes_io(content))
-
-
 def prettify_number(n: int, sep: str = '’') -> str:
     s = str(n)[::-1]
     return sep.join(s[i:i + 3] for i in range(0, len(s), 3))[::-1]
@@ -135,16 +63,6 @@ def prettify_bytes(size: float) -> str:
             break
         size /= 1024.0
     return f'{size:.0f} {unit}' if unit in ('Б', 'Кб') else f'{size:.1f} {unit}'
-
-
-def prettify_dict(d: dict) -> str:
-    width = len(str(max(d, key=lambda x: len(str(x)))))
-
-    text = ''
-    for k, v in d.items():
-        text += f'{k.title():>{width}} | {v}\n'
-
-    return text
 
 
 def megabytes(size: float) -> float:
@@ -218,19 +136,6 @@ def is_en(text: str) -> bool:
     return sum(c in en for c in text) / len(text) > 0.8
 
 
-def is_ru(text: str) -> bool:
-    ru = 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'
-    return sum(c in ru for c in text) / len(text) > 0.8
-
-
-def is_finished(it) -> bool:
-    try:
-        next(it)
-    except StopIteration:
-        return True
-    return False
-
-
 class PriorityQueue(Generic[T]):
     def __init__(self) -> None:
         self._data: list[tuple[int, T]] = []
@@ -263,42 +168,6 @@ def retry(exception=Exception, retries_count=5, sleep_for=0.):
                     if retry == retries_count:
                         raise
                     time.sleep(sleep_for)
-
-        return wrapper
-
-    return decorator
-
-
-def retry_async(exception=Exception, retries_count=5, sleep_for=0.):
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(self, *args, **kwargs):
-            for retry in range(1, retries_count + 1):
-                try:
-                    return await func(self, *args, **kwargs)
-                except exception as e:
-                    if retry == retries_count:
-                        self.logger.error(f'[retry] Error `{func.__name__}`, exception: {e}')
-                        raise
-                    self.logger.warning(f'[retry] Retrying `{func.__name__}` # {retry} / {retries_count}, exception: {e}')
-                    await asyncio.sleep(sleep_for)
-
-        return wrapper
-
-    return decorator
-
-
-def retry_async_(exception=Exception, retries_count=5, sleep_for=0.):
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            for retry in range(1, retries_count + 1):
-                try:
-                    return await func(*args, **kwargs)
-                except exception:
-                    if retry == retries_count:
-                        raise
-                    await asyncio.sleep(sleep_for)
 
         return wrapper
 
@@ -412,15 +281,3 @@ class RandomizerForDay:
         if curr_ts > cls.until_ts:
             cls.until_ts = pendulum.tomorrow(tz=cls.tz).int_timestamp
         return random.Random(cls.until_ts + user_id)
-
-
-@lru_cache()
-def external_ip() -> str:
-    result = urllib.request.urlopen('https://checkip.amazonaws.com').read()
-    return result.strip().decode('utf-8')
-
-
-def cut_left_half(f: io.BytesIO) -> io.BytesIO:
-    image = Image.open(f)
-    image = image.crop((image.width // 2, 0, image.width, image.height))
-    return image_bytes_io(image)

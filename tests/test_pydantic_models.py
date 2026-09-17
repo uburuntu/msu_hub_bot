@@ -1,16 +1,15 @@
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
-from common.db.edb import ChatDB, EdgeDB, UpdateDB, UserDB
-from hub_bot.db import EcosystemChat, VkWallPosting
+from common.db.models import ChatRecord, DirectoryRecord, UserRecord, VkSubscription
 from msu_hub_bot.settings import Settings
 
 IDENTIFIER = UUID(int=1)
+CREATED = datetime(2026, 9, 17, tzinfo=UTC)
 
 
 def test_settings_preserve_json_collections_case_and_init_precedence(monkeypatch):
@@ -47,59 +46,47 @@ def test_settings_preserve_five_entry_access_list(count):
         Settings(dvach_chat_ids=[0] * count)
 
 
-def test_database_models_preserve_omitted_optional_fields_and_schema_names():
-    user = UserDB(id=IDENTIFIER, user_id=101, is_bot=False, first_name="Тест")
-    directory = EcosystemChat(id=IDENTIFIER, chat_id=-101, name="Synthetic", section="group", is_hidden=False)
-    subscription = VkWallPosting(
-        id=IDENTIFIER, owner_id=-202, chat_id=-101, last_post_id=303, with_reposts=True, with_header=False, is_suspended=False
+def test_database_models_preserve_omitted_optional_fields():
+    user = UserRecord(id=IDENTIFIER, created=CREATED, user_id=101, is_bot=False, first_name="Тест", metadata={})
+    directory = DirectoryRecord(id=IDENTIFIER, created=CREATED, chat_id=-101, name="Synthetic", section="group", is_hidden=False)
+    subscription = VkSubscription(
+        id=IDENTIFIER,
+        created=CREATED,
+        owner_id=-202,
+        chat_id=-101,
+        last_post_id=303,
+        with_reposts=True,
+        with_header=False,
+        is_suspended=False,
     )
     assert (user.last_name, user.username, user.language_code) == (None, None, None)
     assert (directory.username_alias, directory.members, directory.pinned_message_id) == (None, None, None)
     assert subscription.description is None
-    assert UserDB.type_name() == "telegram::User"
-    assert ChatDB.type_name() == "telegram::Chat"
-    assert UpdateDB.type_name() == "telegram::BotUpdate"
-    assert EcosystemChat.type_name() == "msu_hub::EcosystemChat"
-    assert VkWallPosting.type_name() == "vk_tg::VkWallPosting"
-    assert UserDB.fields() == "id, user_id, is_bot, first_name, last_name, username, language_code"
-    assert ChatDB.fields() == "id, chat_id, type, title, username, first_name, last_name, metadata"
 
 
 @pytest.mark.parametrize("value", [{"settings": {"feature": True}, "unknown": None}, {}, [], None, "text", 7])
 def test_database_json_keeps_legacy_objects_scalars_and_null(value):
-    chat = ChatDB(id=IDENTIFIER, chat_id=-101, type="group", metadata=json.dumps(value))
-    update = UpdateDB(id=IDENTIFIER, handled=True, data=json.dumps(value))
+    chat = ChatRecord.model_validate_json(
+        json.dumps(
+            {
+                "id": str(IDENTIFIER),
+                "created": CREATED.isoformat(),
+                "chat_id": -101,
+                "type": "group",
+                "metadata": value,
+            }
+        )
+    )
     assert chat.metadata == value
-    assert update.data == value
     assert chat.model_dump()["metadata"] == value
     assert chat.title is None
 
 
 def test_database_json_object_does_not_discard_unknown_fields():
     metadata = {"unknown": {"preserved": [None, "Тест"]}, "settings": {}}
-    chat = ChatDB(id=IDENTIFIER, chat_id=-101, type="group", metadata=metadata)
+    chat = ChatRecord(id=IDENTIFIER, created=CREATED, chat_id=-101, type="group", metadata=metadata)
     assert chat.metadata == metadata
     with pytest.raises(ValidationError):
-        ChatDB(id=IDENTIFIER, chat_id=-101, type="group")
+        ChatRecord(id=IDENTIFIER, created=CREATED, chat_id=-101, type="group")
     with pytest.raises(ValidationError):
-        ChatDB(id=IDENTIFIER, chat_id=-101, type="group", metadata="{invalid json")
-
-
-@pytest.mark.asyncio
-async def test_query_builder_parses_records_without_changing_query_shape():
-    record = SimpleNamespace(id=IDENTIFIER, user_id=101, is_bot=False, first_name="Synthetic")
-    database = EdgeDB.__new__(EdgeDB)
-    database.client = SimpleNamespace(query=AsyncMock(return_value=[record]), query_single=AsyncMock(return_value=record))
-    query = UserDB.query(database)
-    rows = await query.get_all()
-    single = await query.get(101)
-    assert rows == [single]
-    assert single.last_name is None
-    database.client.query.assert_awaited_once_with(
-        "select telegram::User {id, user_id, is_bot, first_name, last_name, username, language_code};"
-    )
-    database.client.query_single.assert_awaited_once_with(
-        "select telegram::User {id, user_id, is_bot, first_name, last_name, username, language_code} "
-        "filter {.user_id = <int64>$user_id} limit 1;",
-        user_id=101,
-    )
+        ChatRecord.model_validate_json("{invalid json")

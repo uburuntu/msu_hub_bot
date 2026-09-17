@@ -8,7 +8,6 @@ from itertools import cycle
 import aiohttp
 from pydantic import BaseModel, ConfigDict
 
-from common.mixins import LoggerMixin
 from msu_hub_bot.telemetry import Boundary, Outcome, Provider, Telemetry
 
 LANGUAGES: dict[str, tuple[str, list[tuple[str, str]]]] = {
@@ -106,7 +105,7 @@ class JDoodleError(Exception):
         return f"[{self.code}] {str(self.reason)}"
 
 
-class JDoodle(LoggerMixin):
+class JDoodle:
     api_base = "https://api.jdoodle.com/v1/"
 
     def __init__(self, client_id: str, client_secret: str, telemetry: Telemetry | None = None) -> None:

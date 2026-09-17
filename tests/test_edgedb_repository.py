@@ -4,14 +4,28 @@ from collections import deque
 from copy import deepcopy
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from common.db.edgedb import EdgeDBRepository
 from common.db.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, VkPatch
+from msu_hub_bot.settings import Settings
 
 NOW = datetime(2026, 9, 17, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("tls_ca", ["", "synthetic-certificate"])
+async def test_configured_client_preserves_dsn_tls_options_and_cleanup(monkeypatch, tls_ca):
+    client = SimpleNamespace(aclose=AsyncMock())
+    factory = Mock(return_value=client)
+    monkeypatch.setattr("edgedb.create_async_client", factory)
+    config = Settings(edgedb_dsn="edgedb://localhost/synthetic", edgedb_tls_ca=tls_ca, edgedb_tls_security="strict")
+    repository = EdgeDBRepository(config=config)
+    factory.assert_called_once_with(dsn=config.edgedb_dsn, tls_ca=tls_ca or None, tls_security="strict")
+    assert repository.client is client
+    await repository.close()
+    client.aclose.assert_awaited_once()
 
 
 def chat_row(metadata):

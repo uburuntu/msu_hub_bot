@@ -1,6 +1,6 @@
 """Compatibility adapter for the retained EdgeDB schema.
 
-JSON response decoding fixes the old query helper's collection/singleton ambiguity.
+JSON responses distinguish record collections from optional single records.
 Settings use serializable read/modify/write transactions. If historical metadata
 is not an object, its exact JSON value is retained in an ``_legacy_metadata``
 envelope when the first preference is written; imports never apply this envelope.
@@ -14,9 +14,9 @@ from datetime import datetime
 from types import TracebackType
 from typing import Protocol, Self, TypeVar, cast
 
+import edgedb
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
-from common.db.edb import EdgeDB
 from common.db.models import (
     ArchivedUpdate, ChatObservation, ChatRecord, DirectoryCreate, DirectoryPatch,
     DirectoryRecord, UsageStats, VkPatch, VkSubscription,
@@ -108,7 +108,12 @@ def _settings(metadata: JsonValue) -> dict[str, JsonValue]:
 
 class EdgeDBRepository:
     def __init__(self, *, config: Settings = settings, client: _Client | None = None) -> None:
-        self.client = client if client is not None else cast(_Client, EdgeDB(config=config).client)
+        self.client = client if client is not None else cast(_Client, edgedb.create_async_client(
+            dsn=config.edgedb_dsn,
+            # The driver's default is None, although its annotation excludes it.
+            tls_ca=config.edgedb_tls_ca or None,  # type: ignore[arg-type]
+            tls_security=config.edgedb_tls_security,
+        ))
 
     async def check(self) -> None:
         if _decode(await self.client.query_single_json("select 1;")) != 1:
