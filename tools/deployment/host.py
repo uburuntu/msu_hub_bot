@@ -377,8 +377,11 @@ for path in Path('/proc').iterdir():
             previous, current = self.read_state("previous.json"), self.read_state("current.json")
             if not previous or previous.get("empty") or not current:
                 raise DeploymentError("No prior release recorded")
-            if self.storage_identity(previous) != self.storage_identity(current):
+            previous_identity, current_identity = self.storage_identity(previous), self.storage_identity(current)
+            if previous_identity != current_identity:
                 raise DeploymentError("Rollback changes the storage backend or Supabase schema; reconcile data before restoring a release")
+            if previous_identity[0] != "supabase":
+                raise DeploymentError("Rollback cannot resume a retired database writer; recover with a compatible Supabase release")
             try:
                 self.restore(previous)
             except Exception:

@@ -281,7 +281,7 @@ def test_first_deployment_on_a_fresh_host_and_unavailable_rollback(tmp_path):
 
 
 def test_failed_manual_rollback_restores_current_release(tmp_path):
-    previous, current = {"release": "old"}, {"release": "current"}
+    previous, current = stored_supabase(tmp_path), stored_supabase(tmp_path, number=2)
     deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
     deployment.write_private(tmp_path / "current.json", json.dumps(current))
     deployer = deployment.Deployer(tmp_path)
@@ -295,8 +295,25 @@ def test_failed_manual_rollback_restores_current_release(tmp_path):
     deployer.restore = restore
     with pytest.raises(deployment.DeploymentError, match="current release restored"):
         deployer.deploy({"action": "rollback"})
-    assert events == ["old", "current"]
+    assert events == [previous["release"], current["release"]]
     assert deployer.read_state("current.json") == current
+
+
+@pytest.mark.parametrize("metadata", [{}, {"storage_backend": "edgedb"}, {"legacy": True, "restart_policy": "unless-stopped"}])
+def test_manual_rollback_cannot_resume_matching_retired_backends(tmp_path, monkeypatch, metadata):
+    previous, current = {"release": "old", **metadata}, {"release": "current", **metadata}
+    deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
+    deployment.write_private(tmp_path / "current.json", json.dumps(current))
+    deployer = deployment.Deployer(tmp_path)
+    events = []
+    deployer.run = lambda *args, **kwargs: events.append("docker")
+    deployer.restore = lambda state: events.append("restore")
+    monkeypatch.setattr(deployment, "write_private", lambda *args: events.append("write"))
+    with pytest.raises(deployment.DeploymentError, match="cannot resume a retired database writer"):
+        deployer.deploy({"action": "rollback"})
+    assert events == []
+    assert deployer.read_state("current.json") == current
+    assert deployer.read_state("previous.json") == previous
 
 
 @pytest.mark.parametrize("previous_backend,current_backend", [(None, "supabase"), ("supabase", "edgedb")])
