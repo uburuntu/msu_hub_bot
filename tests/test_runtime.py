@@ -10,9 +10,18 @@ from msu_hub_bot.settings import Settings
 from telegram_helpers import RecordingSession
 
 
-@pytest.fixture
-def app_settings():
-    return Settings(bot_token="123456789:" + "a" * 35, redis_host="localhost", edgedb_dsn="edgedb://localhost/msu_hub")
+@pytest.fixture(params=["edgedb", "supabase"])
+def app_settings(request):
+    return Settings(
+        bot_token="123456789:" + "a" * 35,
+        redis_host="localhost",
+        edgedb_dsn="edgedb://localhost/msu_hub",
+        storage_backend=request.param,
+        supabase_url="http://supabase.invalid",
+        supabase_key="synthetic-publishable-key",
+        supabase_email="bot@example.invalid",
+        supabase_password="synthetic-password",
+    )
 
 
 @pytest.fixture
@@ -24,7 +33,7 @@ def boundaries(monkeypatch):
     db = AsyncMock()
     monkeypatch.setattr(app, "AiohttpSession", lambda **kwargs: session)
     monkeypatch.setattr(app, "Redis", lambda **kwargs: client)
-    monkeypatch.setattr(app, "EdgeDB", lambda **kwargs: db)
+    monkeypatch.setattr(app, "create_repository", lambda *args, **kwargs: db)
     return session, client, db
 
 
@@ -38,6 +47,7 @@ async def test_composition_startup_and_idempotent_shutdown(app_settings, boundar
     assert application.fsm.storage.state_ttl is None
     assert application.fsm.storage.data_ttl is None
     await application.start()
+    db.check.assert_awaited_once_with()
     assert [type(method) for method in session.methods] == [GetMe, DeleteWebhook]
     assert session.methods[-1].drop_pending_updates is False
     assert application._producer is not None
@@ -68,7 +78,7 @@ async def test_startup_failure_runs_owned_cleanup(app_settings, boundaries):
     from hub_bot.app import Application
 
     session, client, db = boundaries
-    db.client.query_single.side_effect = RuntimeError("Synthetic DB outage")
+    db.check.side_effect = RuntimeError("Synthetic DB outage")
     application = await Application.create(app_settings)
     with pytest.raises(RuntimeError, match="outage"):
         await application.run()

@@ -4,18 +4,14 @@ import asyncio
 import shutil
 from collections.abc import Awaitable
 from contextlib import AsyncExitStack
-from typing import TypedDict, cast
+from typing import cast
 
-import edgedb
 from aiogram import Bot
 from aiogram.client.session.aiohttp import AiohttpSession
 from redis.asyncio import Redis
 
+from common.db.factory import create_repository
 from msu_hub_bot.settings import settings
-
-
-class _TLSOptions(TypedDict, total=False):
-    tls_ca: str
 
 
 async def check() -> None:
@@ -23,11 +19,10 @@ async def check() -> None:
     async with AsyncExitStack() as stack:
         redis = Redis(host=settings.redis_host, port=settings.redis_port, password=settings.redis_password or None, db=settings.redis_db)
         stack.push_async_callback(redis.aclose)
-        tls: _TLSOptions = {"tls_ca": settings.edgedb_tls_ca} if settings.edgedb_tls_ca else {}
-        database = edgedb.create_async_client(dsn=settings.edgedb_dsn, tls_security=settings.edgedb_tls_security, **tls)
-        stack.push_async_callback(database.aclose)
+        database = create_repository(settings)
+        stack.push_async_callback(database.close)
         await asyncio.wait_for(cast(Awaitable[bool], redis.ping()), 15)
-        assert await asyncio.wait_for(database.query_single("SELECT 1"), 15) == 1
+        await asyncio.wait_for(database.check(), 15)
         # Match the runtime's HTTP/SOCKS connector and TLS configuration.
         session = AiohttpSession(proxy=settings.proxy or None, timeout=15)
         stack.push_async_callback(session.close)

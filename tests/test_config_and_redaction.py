@@ -24,6 +24,74 @@ def test_required_configuration_and_optional_providers(monkeypatch):
     assert "values='<redacted>'" in repr(config)
 
 
+def supabase_settings(**changes):
+    values = {
+        "storage_backend": "supabase",
+        "bot_token": "123456789:synthetic-token",
+        "redis_host": "redis.invalid",
+        "supabase_url": "http://supabase.invalid:8000",
+        "supabase_key": "synthetic-publishable-key",
+        "supabase_email": "bot@example.invalid",
+        "supabase_password": "synthetic-password",
+        **changes,
+    }
+    return Settings(**values)
+
+
+def test_selected_backend_requires_only_its_own_credentials():
+    supabase_settings(edgedb_dsn="").validate_core()
+    Settings(bot_token="synthetic", redis_host="redis.invalid", edgedb_dsn="edgedb://database.invalid").validate_core()
+    with pytest.raises(ValueError, match="HUB_SUPABASE_PASSWORD"):
+        supabase_settings(supabase_password="").validate_core()
+    with pytest.raises(ValueError, match="HUB_REDIS_HOST"):
+        supabase_settings(redis_host="").validate_core()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"supabase_url": "file:///private"},
+        {"supabase_url": "https://user:synthetic-private@database.invalid"},
+        {"supabase_url": "https://database.invalid?key=synthetic-private"},
+        {"supabase_url": "https://database.invalid/private"},
+        {"supabase_schema": "schema,other"},
+    ],
+)
+def test_supabase_configuration_rejects_unsafe_endpoints_without_values(changes):
+    with pytest.raises(ValueError) as caught:
+        supabase_settings(**changes).validate_core()
+    assert "synthetic-private" not in str(caught.value)
+
+
+def test_supabase_credentials_are_redacted(monkeypatch):
+    for field in ("supabase_key", "supabase_password", "supabase_email"):
+        value = "supabase-private-" + field
+        monkeypatch.setattr(settings, field, value)
+        assert value not in redact(value)
+
+
+@pytest.mark.parametrize("backend", ["edgedb", "supabase"])
+def test_repository_factory_allocates_only_selected_backend(monkeypatch, backend):
+    from unittest.mock import Mock
+
+    from common.db import factory
+
+    legacy, modern = Mock(), Mock()
+    monkeypatch.setattr(factory, "EdgeDBRepository", legacy)
+    monkeypatch.setattr(factory, "SupabaseRepository", modern)
+    config = supabase_settings(storage_backend=backend)
+    sentinel = object()
+    chosen = factory.create_repository(config, telemetry=sentinel)
+    if backend == "supabase":
+        modern.assert_called_once_with(config, telemetry=sentinel)
+        legacy.assert_not_called()
+        assert chosen is modern.return_value
+    else:
+        legacy.assert_called_once_with(config=config)
+        modern.assert_not_called()
+        assert chosen is legacy.return_value
+
+
 def test_json_collections_and_deployment_roundtrip(monkeypatch):
     secret = 'test-value-with-$quotes"-and\\slashes\nsecond-line'
     payload = {

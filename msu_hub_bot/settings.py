@@ -7,7 +7,8 @@ checked when used; importing modules never requires production credentials.
 import json
 import os
 import re
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,9 +53,15 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_password: str = ""
     redis_db: int = 0
+    storage_backend: Literal["edgedb", "supabase"] = "edgedb"
     edgedb_dsn: str = ""
     edgedb_tls_ca: str = ""
     edgedb_tls_security: str = "strict"
+    supabase_url: str = ""
+    supabase_key: str = ""
+    supabase_email: str = ""
+    supabase_password: str = ""
+    supabase_schema: str = "hub_api"
     proxy: str = ""
     cert: str = ""
     pkey: str = ""
@@ -100,13 +107,30 @@ class Settings(BaseSettings):
         return [("values", "<redacted>")]
 
     def validate_core(self) -> None:
-        missing = [name for name in ("bot_token", "redis_host", "edgedb_dsn") if not getattr(self, name)]
+        database_fields = (
+            ("edgedb_dsn",) if self.storage_backend == "edgedb" else ("supabase_url", "supabase_key", "supabase_email", "supabase_password")
+        )
+        missing = [name for name in ("bot_token", "redis_host", *database_fields) if not getattr(self, name)]
         if missing:
             raise ValueError("Missing required settings: " + ", ".join("HUB_" + name.upper() for name in missing))
         if self.redis_db < 0 or not 1 <= self.redis_port <= 65535:
             raise ValueError("Invalid Redis database or port")
         if self.edgedb_tls_security not in {"strict", "no_host_verification", "insecure", "default"}:
             raise ValueError("Invalid HUB_EDGEDB_TLS_SECURITY")
+        if self.storage_backend == "supabase":
+            endpoint = urlsplit(self.supabase_url)
+            if (
+                endpoint.scheme not in {"http", "https"}
+                or not endpoint.hostname
+                or endpoint.username is not None
+                or endpoint.password is not None
+                or endpoint.query
+                or endpoint.fragment
+                or endpoint.path not in {"", "/"}
+            ):
+                raise ValueError("Invalid HUB_SUPABASE_URL")
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.supabase_schema):
+                raise ValueError("Invalid HUB_SUPABASE_SCHEMA")
 
     def require(self, *names: str) -> Any:
         missing = [name for name in names if not getattr(self, name)]

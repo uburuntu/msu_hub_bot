@@ -4,7 +4,6 @@ import asyncio
 import json
 from collections import Counter
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -164,24 +163,33 @@ async def test_inline_tyan_callback_is_acknowledged_without_chat_preferences():
         await bot.session.close()
 
 
-async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(monkeypatch):
+@pytest.mark.parametrize("backend", ["edgedb", "supabase"])
+async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(monkeypatch, backend):
     from hub_bot import app
 
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     private_text = "SYNTHETIC_PRIVATE_ROUTER_CANARY"
     session, client, db = RecordingSession(), AsyncMock(), AsyncMock()
     client.get.return_value = None
-    row_query = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(metadata={})))
+    db.load_settings.return_value = {}
+    db.list_directory.return_value = []
     monkeypatch.setattr(app, "AiohttpSession", lambda **kwargs: session)
     monkeypatch.setattr(app, "Redis", lambda **kwargs: client)
-    monkeypatch.setattr(app, "EdgeDB", lambda **kwargs: db)
-    monkeypatch.setattr("common.tg.middlewares.settings.ChatDB.query", lambda db: row_query)
-    monkeypatch.setattr("hub_bot.events.EcosystemChat.query", lambda db: SimpleNamespace(exist_cached=AsyncMock(return_value=False)))
+    monkeypatch.setattr(app, "create_repository", lambda *args, **kwargs: db)
     sink = Capture()
     telemetry = Telemetry(config(traces_per_minute=1), transport=sink)
     monkeypatch.setattr(app, "Telemetry", lambda config: telemetry)
     application = await app.Application.create(
-        Settings(bot_token="123456789:" + "a" * 35, redis_host="localhost", edgedb_dsn="edgedb://localhost/msu_hub")
+        Settings(
+            bot_token="123456789:" + "a" * 35,
+            redis_host="localhost",
+            edgedb_dsn="edgedb://localhost/msu_hub",
+            storage_backend=backend,
+            supabase_url="http://supabase.invalid",
+            supabase_key="synthetic-publishable-key",
+            supabase_email="bot@example.invalid",
+            supabase_password="synthetic-password",
+        )
     )
     try:
         await telemetry.start()
@@ -204,8 +212,9 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
     assert any(attr.key == "operation" and attr.value.string_value == "process_roll" for attr in spans[0].attributes)
     assert not spans[0].events
     assert [method.__api_method__ for method in session.methods] == ["sendMessage"]
-    assert [call.kwargs["handled"] for call in db.insert.await_args_list] == [False, False, True]
-    row_query.get.assert_awaited_once()
+    assert [call.args[0].handled for call in db.archive_update.await_args_list] == [False, False, True]
+    db.load_settings.assert_awaited_once()
     payload = sink.serialized()
     assert "settings.load" in payload and "archive.write" in payload and "ignored" in payload
+    assert backend in payload
     assert private_text not in payload

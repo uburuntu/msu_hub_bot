@@ -70,6 +70,7 @@ class Provider(StrEnum):
 class Backend(StrEnum):
     REDIS = "redis"
     EDGEDB = "edgedb"
+    SUPABASE = "supabase"
     NATIVE = "native"
 
 
@@ -96,6 +97,10 @@ OPERATIONS = frozenset(
         "settings.save",
         "archive.insert",
         "archive.write",
+        "database.check",
+        "database.read",
+        "database.write",
+        "database.auth",
         "deletion.enqueue",
         "deletion.due",
         "deletion.remove",

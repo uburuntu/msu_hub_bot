@@ -90,6 +90,12 @@ warn_unused_configs = true
 warn_unused_ignores = true
 files = [
     "common/caching.py",
+    "common/db/base.py",
+    "common/db/edgedb.py",
+    "common/db/factory.py",
+    "common/db/models.py",
+    "common/db/observations.py",
+    "common/db/supabase.py",
     "common/executor.py",
     "common/externals/dvach.py",
     "common/hc.py",

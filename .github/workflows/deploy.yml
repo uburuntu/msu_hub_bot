@@ -61,9 +61,15 @@ jobs:
           HUB_REDIS_PORT: ${{ secrets.HUB_REDIS_PORT }}
           HUB_REDIS_PASSWORD: ${{ secrets.HUB_REDIS_PASSWORD }}
           HUB_REDIS_DB: ${{ secrets.HUB_REDIS_DB }}
+          HUB_STORAGE_BACKEND: ${{ secrets.HUB_STORAGE_BACKEND || 'edgedb' }}
           HUB_EDGEDB_DSN: ${{ secrets.HUB_EDGEDB_DSN }}
           HUB_EDGEDB_TLS_CA: ${{ secrets.HUB_EDGEDB_TLS_CA }}
           HUB_EDGEDB_TLS_SECURITY: ${{ secrets.HUB_EDGEDB_TLS_SECURITY }}
+          HUB_SUPABASE_URL: ${{ secrets.HUB_SUPABASE_URL }}
+          HUB_SUPABASE_KEY: ${{ secrets.HUB_SUPABASE_KEY }}
+          HUB_SUPABASE_EMAIL: ${{ secrets.HUB_SUPABASE_EMAIL }}
+          HUB_SUPABASE_PASSWORD: ${{ secrets.HUB_SUPABASE_PASSWORD }}
+          HUB_SUPABASE_SCHEMA: ${{ secrets.HUB_SUPABASE_SCHEMA || 'hub_api' }}
           HUB_PROXY: ${{ secrets.HUB_PROXY }}
           HUB_CERT: ${{ secrets.HUB_CERT }}
           HUB_PKEY: ${{ secrets.HUB_PKEY }}

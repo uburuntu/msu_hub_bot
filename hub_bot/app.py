@@ -20,7 +20,8 @@ from aiogram.fsm.storage.redis import RedisStorage as FSMRedisStorage
 from ccxt.async_support import binance
 from redis.asyncio import Redis
 
-from common.db.edb import EdgeDB
+from common.db.base import BotRepository
+from common.db.factory import create_repository
 from common.executor import TPExecutor
 from common.externals.dvach import Api2chAsync
 from common.hc import HealthCheck
@@ -37,13 +38,13 @@ from common.tg.storage import RedisStorage
 from common.tg.wrapper import BotWrapper
 from common.vk.api import VkApi
 from hub_bot.commands.geoguess import Geoguess
-from hub_bot.events import EventsMiddleware
+from hub_bot.events import EcosystemManager, EventsMiddleware
 from hub_bot.routing import build_router
 from hub_bot.utils.jdoodle import ManyJDoodle
 from hub_bot.utils.wit import Wit
 from hub_bot.utils.wolfram import WolframAPI
 from msu_hub_bot.settings import Settings
-from msu_hub_bot.telemetry import Telemetry, TelemetryConfig
+from msu_hub_bot.telemetry import Backend, Telemetry, TelemetryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class Application:
     bot: BotWrapper
     dispatcher: Dispatcher
     supervisor: Supervisor
-    database: EdgeDB
+    database: BotRepository
     redis_client: Redis
     redis: RedisStorage
     fsm: TopicFSMContextMiddleware
@@ -104,7 +105,7 @@ class Application:
             fsm = TopicFSMContextMiddleware(storage, isolation)
             stack.push_async_callback(fsm.close)
             redis = RedisStorage(client, prefix=settings.name, supervisor=supervisor, telemetry=telemetry)
-            database = EdgeDB(config=settings)
+            database = create_repository(settings, telemetry=telemetry)
             stack.push_async_callback(database.close)
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
@@ -122,17 +123,19 @@ class Application:
             stack.push_async_callback(crypto_exchange.close)
             health = HealthCheck(settings.health_check_url)
             stack.push_async_callback(health.stop)
-            preferences = SettingsMiddleware(database, telemetry=telemetry)
+            backend = Backend(settings.storage_backend)
+            preferences = SettingsMiddleware(database, telemetry=telemetry, backend=backend)
             stack.push_async_callback(preferences.close)
             stack.push_async_callback(Geoguess.shutdown)
-            events = EventsMiddleware(bot, database, settings.events_chat_id)
+            ecosystem = EcosystemManager(bot, database)
+            events = EventsMiddleware(bot, database, settings.events_chat_id, em=ecosystem)
 
             dispatcher = Dispatcher(disable_fsm=True)
             dispatcher.update.outer_middleware(AdmissionMiddleware(supervisor))
             dispatcher.update.outer_middleware(StateContextMiddleware())
             dispatcher.update.outer_middleware(LoggingMiddleware())
             dispatcher.update.outer_middleware(DispatchTelemetryMiddleware(telemetry))
-            dispatcher.update.outer_middleware(UpdatesMiddleware(database, supervisor, telemetry=telemetry))
+            dispatcher.update.outer_middleware(UpdatesMiddleware(database, supervisor, telemetry=telemetry, backend=backend))
             dispatcher.update.outer_middleware(fsm)
             for kind, observer in dispatcher.observers.items():
                 if kind not in ("update", "error"):
@@ -158,7 +161,7 @@ class Application:
                 jdoodle=jdoodle,
                 cpu_executor=executor,
                 crypto_exchange=crypto_exchange,
-                em=events.em,
+                em=ecosystem,
                 events_chat_id=settings.events_chat_id,
                 posting_main_chat_id=settings.posting_main_chat_id,
                 posting_tb_chat_id=settings.posting_tb_chat_id,
@@ -188,7 +191,7 @@ class Application:
 
     async def start(self) -> None:
         await self.telemetry.start()
-        await self.database.client.query_single("SELECT 1")
+        await self.database.check()
         await cast(Awaitable[bool], self.redis_client.ping())
         await self.bot.me()
         await self.bot.delete_webhook(drop_pending_updates=False)
