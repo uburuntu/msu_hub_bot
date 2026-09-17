@@ -214,6 +214,24 @@ def test_observations_preserve_sparse_fields_and_reject_stale_profiles(db):
     assert db.rpc("get_chat", "-101")["username"] is None
 
 
+def test_preference_lookup_does_not_refresh_a_stale_callback_chat_snapshot(db):
+    chat = {
+        "chat_id": -101,
+        "type": "group",
+        "title": "Current title",
+        "observed_at": "2026-01-02T00:00:00Z",
+        "profile": {"title": "Current title"},
+    }
+    before = db.rpc("ensure_chat", literal(chat))
+    db.rpc(
+        "load_settings",
+        literal(
+            {**chat, "title": "Stale callback title", "observed_at": "2026-02-01T00:00:00Z", "profile": {"title": "Stale callback title"}}
+        ),
+    )
+    assert db.rpc("get_chat", "-101") == before
+
+
 def test_normalized_entities_and_message_versions(db):
     now = datetime.now(UTC)
     message = {

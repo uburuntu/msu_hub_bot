@@ -234,7 +234,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION hub_private.observe_chat(value jsonb) RETURNS hub_private.chats
+CREATE FUNCTION hub_private.observe_chat(value jsonb, refresh_profile boolean DEFAULT true) RETURNS hub_private.chats
 LANGUAGE plpgsql SET search_path = '' AS $$
 DECLARE stamp timestamptz := COALESCE((value->>'observed_at')::timestamptz, now()); result hub_private.chats;
 BEGIN
@@ -242,14 +242,14 @@ BEGIN
     INSERT INTO hub_private.chats AS existing(chat_id,type,title,username,first_name,last_name,profile,first_seen_at,last_seen_at)
     VALUES ((value->>'chat_id')::bigint,value->>'type',value->>'title',value->>'username',value->>'first_name',value->>'last_name',COALESCE(value->'profile','{}'::jsonb),stamp,stamp)
     ON CONFLICT(chat_id) DO UPDATE SET
-        first_seen_at = least(existing.first_seen_at, stamp),
-        last_seen_at = greatest(existing.last_seen_at, stamp),
-        type = CASE WHEN stamp >= existing.last_seen_at THEN EXCLUDED.type ELSE existing.type END,
-        title = CASE WHEN stamp >= existing.last_seen_at AND value ? 'title' THEN EXCLUDED.title ELSE existing.title END,
-        username = CASE WHEN stamp >= existing.last_seen_at AND value ? 'username' THEN EXCLUDED.username ELSE existing.username END,
-        first_name = CASE WHEN stamp >= existing.last_seen_at AND value ? 'first_name' THEN EXCLUDED.first_name ELSE existing.first_name END,
-        last_name = CASE WHEN stamp >= existing.last_seen_at AND value ? 'last_name' THEN EXCLUDED.last_name ELSE existing.last_name END,
-        profile = CASE WHEN stamp >= existing.last_seen_at THEN existing.profile || EXCLUDED.profile ELSE existing.profile END
+        first_seen_at = CASE WHEN refresh_profile THEN least(existing.first_seen_at, stamp) ELSE existing.first_seen_at END,
+        last_seen_at = CASE WHEN refresh_profile THEN greatest(existing.last_seen_at, stamp) ELSE existing.last_seen_at END,
+        type = CASE WHEN refresh_profile AND stamp >= existing.last_seen_at THEN EXCLUDED.type ELSE existing.type END,
+        title = CASE WHEN refresh_profile AND stamp >= existing.last_seen_at AND value ? 'title' THEN EXCLUDED.title ELSE existing.title END,
+        username = CASE WHEN refresh_profile AND stamp >= existing.last_seen_at AND value ? 'username' THEN EXCLUDED.username ELSE existing.username END,
+        first_name = CASE WHEN refresh_profile AND stamp >= existing.last_seen_at AND value ? 'first_name' THEN EXCLUDED.first_name ELSE existing.first_name END,
+        last_name = CASE WHEN refresh_profile AND stamp >= existing.last_seen_at AND value ? 'last_name' THEN EXCLUDED.last_name ELSE existing.last_name END,
+        profile = CASE WHEN refresh_profile AND stamp >= existing.last_seen_at THEN existing.profile || EXCLUDED.profile ELSE existing.profile END
     RETURNING * INTO result;
     RETURN result;
 END;
@@ -284,7 +284,8 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE observed hub_private.chats;
 BEGIN
     PERFORM hub_private.require_principal();
-    observed := hub_private.observe_chat(p_chat);
+    -- Preference lookup may come from an old callback's embedded chat snapshot.
+    observed := hub_private.observe_chat(p_chat, false);
     INSERT INTO hub_private.chat_settings(chat_id,settings)
     VALUES (observed.chat_id, CASE WHEN jsonb_typeof(observed.metadata->'settings') = 'object' THEN observed.metadata->'settings' ELSE '{}'::jsonb END)
     ON CONFLICT(chat_id) DO NOTHING;
