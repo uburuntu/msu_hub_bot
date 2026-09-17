@@ -1,15 +1,25 @@
 from aiogram import html
 import random
 from textwrap import shorten
-from typing import NotRequired, TypedDict, cast
+from typing import Any, NotRequired, TypedDict
 
 import arxiv
+import requests
 from aiogram.types import Message
 from aiogram.filters import CommandObject
 from aiogram.utils.markdown import hbold, hcode, hitalic, hlink
 
 from msu_hub_bot.execution.executor import TPExecutor
 from msu_hub_bot.utils import one_liner
+
+PAPER_LIMIT = 5
+REQUEST_TIMEOUT = (5.0, 20.0)
+
+
+class _ArxivSession(requests.Session):
+    def get(self, url: str | bytes, **kwargs: Any) -> requests.Response:
+        kwargs["timeout"] = REQUEST_TIMEOUT
+        return super().get(url, **kwargs)
 
 
 class Paper(TypedDict):
@@ -20,12 +30,40 @@ class Paper(TypedDict):
     pdf_url: NotRequired[str]
 
 
+def _papers(query: str, *, offset: int = 0, sort_by: arxiv.SortCriterion = arxiv.SortCriterion.Relevance) -> list[Paper]:
+    search = arxiv.Search(
+        query=query,
+        # Client.results subtracts the offset from this limit, not just from the feed.
+        max_results=offset + PAPER_LIMIT,
+        sort_by=sort_by,
+        sort_order=arxiv.SortOrder.Descending,
+    )
+    client = arxiv.Client(page_size=PAPER_LIMIT, num_retries=1)
+    # The SDK exposes neither session injection nor a timeout/close API.
+    # Replace only this client's unused session; the context owns every request.
+    client._session.close()
+    with _ArxivSession() as session:
+        client._session = session
+        papers = []
+        for result in client.results(search, offset=offset):
+            paper: Paper = {
+                "arxiv_url": result.entry_id,
+                "title": result.title,
+                "authors": [author.name for author in result.authors],
+                "summary": result.summary,
+            }
+            if result.pdf_url:
+                paper["pdf_url"] = result.pdf_url
+            papers.append(paper)
+        return papers
+
+
 def arxiv_random() -> list[Paper]:
-    return cast(list[Paper], arxiv.query(query="all:a", start=random.randint(0, 10_000), sort_by="lastUpdatedDate", max_results=5))
+    return _papers("all:a", offset=random.randint(0, 10_000), sort_by=arxiv.SortCriterion.LastUpdatedDate)
 
 
 def arxiv_search(query: str) -> list[Paper]:
-    return cast(list[Paper], arxiv.query(query=query, max_results=5))
+    return _papers(query)
 
 
 async def process_arxiv(message: Message, command: CommandObject, cpu_executor: TPExecutor) -> Message:

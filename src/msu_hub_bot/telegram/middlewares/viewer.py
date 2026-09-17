@@ -10,7 +10,6 @@ from yarl import URL
 
 from msu_hub_bot.providers.exceptions import ExternalServiceError
 from msu_hub_bot.providers.instagram import InstagramViewer
-from msu_hub_bot.providers.tiktok import tiktok_text_with_preview
 from msu_hub_bot.providers.topdf import convert_to_pdf
 from msu_hub_bot.providers.ydl import YDL
 from msu_hub_bot.telegram.context import bot_for
@@ -74,16 +73,6 @@ class ViewerMiddleware(BaseMiddleware):
         else:
             await message.reply(text, disable_web_page_preview=True)
 
-    @staticmethod
-    async def handle_tiktok(message: Message, url: URL) -> None:
-        result = await tiktok_text_with_preview(str(url))
-        if result:
-            text, preview = result
-            if preview:
-                await message.reply_video(URLInputFile(preview, filename="video.mp4"), caption=text)
-            else:
-                await message.reply(text)
-
     async def view(self, message: Message, preferences: Settings) -> None:
         for url, entity_type in extract_urls(message)[:2]:
             if entity_type == MessageEntityType.URL:
@@ -91,9 +80,6 @@ class ViewerMiddleware(BaseMiddleware):
             if url.host:
                 if url.host.endswith("instagram.com"):
                     await self.handle_instagram(message, url)
-                elif url.host.endswith("tiktok.com"):
-                    if preferences.auto_video_links:
-                        await self.handle_tiktok(message, url)
                 elif preferences.auto_video_links:
                     await self.handle_video(message, url)
 

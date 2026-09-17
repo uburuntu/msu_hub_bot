@@ -78,9 +78,9 @@ class MinecraftStatus(CallbackCommandBase):
     @cached_async(ttl=30, noself=True)
     async def mc_status(cls, url: str) -> str:
         try:
-            mc = JavaServer.lookup(url)
+            mc = await JavaServer.async_lookup(url)
             status = await mc.async_status()
-        except (asyncio.TimeoutError, ConnectionError, socket.gaierror):
+        except asyncio.TimeoutError, ConnectionError, socket.gaierror:
             status = None
 
         text = ""
