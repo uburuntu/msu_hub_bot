@@ -128,6 +128,14 @@ without a backend field mean EdgeDB. Reconcile post-cutover writes before an
 administrator deliberately restores either backend; image rollback cannot copy
 those writes. Ordinary same-backend deployment rollback remains automatic.
 
+Before starting a release that changes backends, the wrapper records a private
+`storage-transition.json` recovery marker. It removes the marker only after the
+healthy release's current and previous records are safely published. An interrupted
+or failed transition blocks every later deploy and rollback request, including
+requests for the old backend. An administrator must reconcile the data, establish
+the authoritative release records, and archive the marker under the deployment
+lock before resuming releases. The restricted Actions key cannot clear this guard.
+
 ## Conversation resets across FSM generations
 
 Ordinary restarts preserve pending conversations. When upgrading from the
