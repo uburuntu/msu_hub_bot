@@ -12,6 +12,9 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from aiogram.types import Message, Update
+
+from common.db.observations import archive_observation
 
 SCHEMA = Path(__file__).parents[1] / "dbschema/postgres/001_bot_storage.sql"
 PRINCIPAL = "00000000-0000-0000-0000-000000000001"
@@ -329,6 +332,37 @@ def test_retention_is_bounded_and_never_deletes_durable_entities(db):
     )
     assert before == after
     assert db.value("SELECT count(*) FROM hub_private.mutation_journal WHERE relation_name IN ('updates','messages');") == 0
+
+
+def test_reply_does_not_extend_near_expiry_body_through_receipt_or_parent(db):
+    now = datetime.now(UTC)
+    older = Message.model_validate(
+        {
+            "message_id": 2,
+            "date": now - timedelta(days=29),
+            "chat": {"id": -101, "type": "supergroup"},
+            "text": "EXPIRING_BODY_CANARY",
+        }
+    )
+    parent = Message.model_validate(
+        {
+            "message_id": 3,
+            "date": now,
+            "chat": {"id": -101, "type": "supergroup"},
+            "text": "CURRENT_BODY_CANARY",
+            "reply_to_message": older,
+        }
+    )
+    row = archive_observation(Update(update_id=1, message=parent), False, received_at=now)
+    db.rpc("archive_update", literal(row.model_dump(mode="json")))
+    assert db.value("SELECT count(*) FROM hub_private.messages;") == 2
+    assert db.value("SELECT count(*) FROM hub_private.updates WHERE data::text LIKE '%EXPIRING_BODY_CANARY%';") == 0
+    assert db.value("SELECT count(*) FROM hub_private.messages WHERE message_id=3 AND data::text LIKE '%EXPIRING_BODY_CANARY%';") == 0
+    later = (now + timedelta(days=1)).isoformat()
+    result = db.value(f"SELECT hub_private.retain_messages(100,'{later}');")
+    assert result["messages"] == 1 and result["updates"] == 0
+    assert db.value("SELECT count(*) FROM hub_private.messages WHERE data::text LIKE '%EXPIRING_BODY_CANARY%';") == 0
+    assert db.value("SELECT count(*) FROM hub_private.messages WHERE data::text LIKE '%CURRENT_BODY_CANARY%';") == 1
 
 
 @pytest.mark.parametrize("batch", ["NULL", "0", "10001"])
