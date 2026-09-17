@@ -21,20 +21,22 @@ def is_application(path: str) -> bool:
     )
 
 
-def renamed_files(diff: str) -> dict[str, str]:
+def changed_paths(diff: str) -> dict[str, str | None]:
     """Read Git's NUL-delimited name-status format without guessing file identity."""
     fields = iter(diff.rstrip("\0").split("\0") if diff else [])
-    renames = {}
+    changes: dict[str, str | None] = {}
     for status in fields:
         try:
             source = next(fields)
             if status.startswith(("R", "C")):
                 destination = next(fields)
                 if status.startswith("R"):
-                    renames[source] = destination
+                    changes[source] = destination
+            elif status == "D":
+                changes[source] = None
         except StopIteration as error:
             raise ValueError("Incomplete Git name-status output") from error
-    return renames
+    return changes
 
 
 def table(value: object) -> Mapping[str, object]:
@@ -105,10 +107,10 @@ def coverage_errors(
     previous: frozenset[str],
     existing: set[str],
     added: set[str],
-    renames: Mapping[str, str] | None = None,
+    renames: Mapping[str, str | None] | None = None,
 ) -> list[str]:
     identities = renames or {}
-    retained = {identities.get(path, path) for path in previous}
+    retained = {destination for path in previous if (destination := identities.get(path, path)) is not None}
     errors = [f"Checked module left the scope: {path}" for path in sorted((retained & existing) - scope)]
     errors.extend(f"New application module is outside the scope: {path}" for path in sorted(added - scope))
     errors.extend(f"Checked module does not exist: {path}" for path in sorted(scope - existing))
@@ -117,6 +119,28 @@ def coverage_errors(
 
 def git(*arguments: str) -> str:
     return subprocess.run(["git", *arguments], cwd=ROOT, check=True, capture_output=True, text=True).stdout
+
+
+def file_identities(base: str, paths: set[str]) -> dict[str, str | None]:
+    """Follow actual commit edges so formatting before a move cannot erase its identity."""
+    # Prefer the longest ancestry path through merges, including CI's synthetic PR
+    # merge; a direct base-to-merge diff can hide the intervening rename commit.
+    ancestry: dict[str, list[str]] = {base: []}
+    for line in git("rev-list", "--ancestry-path", "--reverse", "--topo-order", "--parents", f"{base}..HEAD").splitlines():
+        revision, *parents = line.split()
+        candidates = [ancestry[parent] for parent in parents if parent in ancestry]
+        if candidates:
+            ancestry[revision] = [*max(candidates, key=len), revision]
+    head = git("rev-parse", "HEAD").strip()
+    revisions = ancestry.get(head, [head])
+    identities: dict[str, str | None] = {path: path for path in paths}
+    previous = base
+    for revision in [*revisions, ""]:
+        target = [revision] if revision else []
+        changes = changed_paths(git("diff", "--name-status", "-z", "--find-renames", previous, *target, "--", "*.py"))
+        identities = {original: changes.get(current, current) if current is not None else None for original, current in identities.items()}
+        previous = revision
+    return identities
 
 
 def main() -> int:
@@ -133,11 +157,11 @@ def main() -> int:
         baseline = {
             path for path in git("ls-tree", "-r", "--name-only", "-z", base, "--", *APPLICATION_ROOTS).split("\0") if is_application(path)
         }
-        renames = renamed_files(git("diff", "--name-status", "-z", "--find-renames", base, "--", "*.py"))
+        identities = file_identities(base, baseline | previous)
         application = {path for path in existing if is_application(path)}
-        relocated = {destination for source, destination in renames.items() if source in baseline}
-        added = application - baseline - relocated
-        errors = policy_errors(options, scope) + coverage_errors(scope, previous, existing, added, renames)
+        retained = {destination for source, destination in identities.items() if source in baseline and destination is not None}
+        added = application - retained
+        errors = policy_errors(options, scope) + coverage_errors(scope, previous, existing, added, identities)
         if added - scope and baseline - existing:
             untracked = set(git("ls-files", "--others", "--exclude-standard", "-z").split("\0"))
             if (added - scope) & untracked:

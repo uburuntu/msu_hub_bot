@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from tools import check_types
-from tools.check_types import checked_files, coverage_errors, is_application, mypy_options, policy_errors, renamed_files
+from tools.check_types import changed_paths, checked_files, coverage_errors, is_application, mypy_options, policy_errors
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,11 +40,12 @@ def test_scope_keeps_a_renamed_checked_module_strict():
 
 
 def test_git_rename_format_preserves_spaces_and_does_not_treat_copies_as_moves():
-    assert renamed_files("M\0same.py\0R090\0old file.py\0new file.py\0C100\0source.py\0copy.py\0D\0removed.py\0") == {
-        "old file.py": "new file.py"
+    assert changed_paths("M\0same.py\0R090\0old file.py\0new file.py\0C100\0source.py\0copy.py\0D\0removed.py\0") == {
+        "old file.py": "new file.py",
+        "removed.py": None,
     }
     with pytest.raises(ValueError, match="Incomplete"):
-        renamed_files("R100\0old.py\0")
+        changed_paths("R100\0old.py\0")
 
 
 @pytest.mark.parametrize(
@@ -190,3 +191,35 @@ def test_git_scope_requires_new_application_modules_to_be_checked(type_repo, cap
         run_git(type_repo, "add", "common/new.py")
     assert check_types.main() == 1
     assert "New application module is outside the scope: common/new.py" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("merge", [False, True])
+def test_separate_edits_and_renames_retain_identity_through_commit_history(type_repo, monkeypatch, capsys, merge):
+    baseline = run_git(type_repo, "rev-parse", "HEAD").strip()
+    run_git(type_repo, "checkout", "-qb", "relocate")
+    legacy = type_repo / "common/legacy.py"
+    legacy.write_text("def rewritten():\n    return 'different lines before relocation'\n")
+    run_git(type_repo, "add", "-A")
+    run_git(type_repo, "commit", "-qm", "Edit before moving")
+    relocate_modules(type_repo)
+    run_git(type_repo, "add", "-A")
+    run_git(type_repo, "commit", "-qm", "Move")
+    if merge:
+        run_git(type_repo, "checkout", "-qb", "integration", baseline)
+        run_git(type_repo, "merge", "--no-ff", "-m", "PR merge", "relocate")
+    monkeypatch.setattr(sys, "argv", ["check_types.py", "--base-ref", baseline])
+    assert check_types.main() == 0
+    assert "Strict mypy scope checked: 2 files" in capsys.readouterr().out
+
+
+def test_deleted_and_recreated_unchecked_path_is_new_code(type_repo, monkeypatch, capsys):
+    baseline = run_git(type_repo, "rev-parse", "HEAD").strip()
+    legacy = type_repo / "common/legacy.py"
+    legacy.unlink()
+    run_git(type_repo, "add", "-A")
+    run_git(type_repo, "commit", "-qm", "Remove unused module")
+    legacy.write_text("def replacement():\n    return 'new implementation'\n")
+    run_git(type_repo, "add", "-A")
+    monkeypatch.setattr(sys, "argv", ["check_types.py", "--base-ref", baseline])
+    assert check_types.main() == 1
+    assert "New application module is outside the scope: common/legacy.py" in capsys.readouterr().out
