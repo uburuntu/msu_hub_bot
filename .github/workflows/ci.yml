@@ -23,7 +23,7 @@ jobs:
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           version: 0.12.15
-          python-version: '3.11'
+          python-version: '3.14'
           enable-cache: true
       - run: uv sync --locked
       - run: uv run --no-sync ruff check .
@@ -59,7 +59,7 @@ jobs:
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           version: 0.12.15
-          python-version: '3.11'
+          python-version: '3.14'
           enable-cache: true
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client

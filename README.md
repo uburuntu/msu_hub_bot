@@ -10,9 +10,10 @@ and configuration; see the bot's `/help` for commands.
 
 ## Development
 
-Use Python 3.11 and uv 0.12.15 or newer. Native development works on macOS; the
+Use Python 3.14 and uv 0.12.15 or newer. Native development works on macOS; the
 ACRCloud native SDK is installed only on Linux x86-64. FFmpeg and Tesseract are
-needed for media and OCR commands.
+needed for media and OCR commands. yt-dlp, its JavaScript solver and Deno are
+installed by uv; video extraction does not download runtime components.
 
 ```sh
 uv sync --locked
@@ -24,8 +25,8 @@ uv run pytest -q
 cp .env.example .env
 ```
 
-Fill in `HUB_BOT_TOKEN` and `HUB_REDIS_HOST`. Set `HUB_STORAGE_BACKEND=supabase`
-and configure the Supabase API URL, publishable key and dedicated Auth account
+Fill in `HUB_BOT_TOKEN` and `HUB_REDIS_HOST`, then configure the Supabase API URL,
+publishable key and dedicated Auth account
 described in [database configuration](docs/deployment.md#database-configuration), then run:
 
 ```sh
@@ -56,8 +57,9 @@ Main-branch changes run the same checks, build and test the release image,
 and transfer it directly to the VPS over SSH. The host verifies the archive
 and runs its immutable image ID. Images are kept on the runner and VPS.
 The bot connects to separately managed Supabase APIs and Redis. Deployment does
-not run migrations or recreate shared infrastructure. The EdgeDB adapter and
-schema history remain available for recovery of installations using that backend.
+not run migrations or recreate shared infrastructure. Supabase is the sole
+application database backend; immutable schema history and recovery artifact
+verification remain available.
 
 The repository variable `DEPLOY_ENABLED=true` enables automatic deployment
 from main. Pull requests run checks without deploying.
