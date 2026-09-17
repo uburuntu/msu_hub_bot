@@ -1,6 +1,7 @@
 """Measured captions for image overlays and framed image/video demotivators."""
 
 import re
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from io import BytesIO
@@ -95,7 +96,8 @@ def fit_caption(text: str, font_path: Path, width: int, height: int, preferred_s
         spacing = max(3, size // 5)
         wrapped = _wrap(text, font, width, stroke)
         bounds = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=spacing, align="center", stroke_width=stroke)
-        return Caption(wrapped, font, bounds, spacing, stroke)
+        pixel_bounds = (math.floor(bounds[0]), math.floor(bounds[1]), math.ceil(bounds[2]), math.ceil(bounds[3]))
+        return Caption(wrapped, font, pixel_bounds, spacing, stroke)
 
     # Wide images are downscaled in chat; keep their smallest text proportional.
     minimum_size = max(MIN_FONT_SIZE, round(width / 32))

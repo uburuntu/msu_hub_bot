@@ -14,7 +14,7 @@ def test_extractor_is_owned_and_failures_stay_quiet(monkeypatch):
     client.__enter__.return_value = client
     client.extract_info.side_effect = DownloadError("provider response with a private URL")
     factory = MagicMock(return_value=client)
-    monkeypatch.setattr("msu_hub_bot.providers.ydl.YoutubeDL", factory)
+    monkeypatch.setattr("msu_hub_bot.providers.ydl._SingleVideoYoutubeDL", factory)
     assert YDL.extract_data("https://example.test/video") is None
     client.__exit__.assert_called_once()
     options = factory.call_args.args[0]
@@ -31,6 +31,46 @@ def test_injected_extractor_remains_caller_owned():
     assert YDL.extract_data("https://example.test/video", client) == {"title": "video"}
     client.__enter__.assert_not_called()
     client.__exit__.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["playlist", "multi_video", "compat_list"])
+def test_collection_entries_are_rejected_before_they_are_enumerated(kind):
+    def entries():
+        pytest.fail("Unsupported collection entries must not be fetched")
+        yield
+
+    result = {
+        "_type": kind,
+        "id": "synthetic",
+        "title": "Synthetic collection",
+        "extractor": "synthetic",
+        "extractor_key": "Synthetic",
+        "webpage_url": "https://example.test/collection",
+        "entries": entries(),
+    }
+    with YDL.create_ydl() as client:
+        assert client.process_ie_result(result, download=False) is None
+
+
+@pytest.mark.parametrize("collection", [False, True])
+def test_transparent_extractor_redirects_preserve_videos_and_reject_collections(monkeypatch, collection):
+    embedded = (
+        {"_type": "playlist", "entries": iter(())}
+        if collection
+        else {"id": "synthetic", "title": "Embedded title", "url": "https://example.test/video.mp4", "ext": "mp4"}
+    )
+    with YDL.create_ydl() as client:
+        extract_info = MagicMock(return_value=embedded)
+        monkeypatch.setattr(client, "extract_info", extract_info)
+        result = client.process_ie_result(
+            {"_type": "url_transparent", "url": "https://example.test/embedded", "title": "Page title"}, download=False
+        )
+        extract_info.assert_called_once_with("https://example.test/embedded", ie_key=None, extra_info={}, download=False, process=False)
+    if collection:
+        assert result is None
+    else:
+        assert result["title"] == "Page title"
+        assert result["url"] == embedded["url"]
 
 
 def extract(monkeypatch, info):

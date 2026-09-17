@@ -29,6 +29,17 @@ class _QuietLogger:
         pass
 
 
+class _SingleVideoYoutubeDL(YoutubeDL):  # type: ignore[misc]  # yt-dlp does not publish typing metadata.
+    """Reject collections before yt-dlp resolves their potentially unbounded entries."""
+
+    def process_ie_result(
+        self, ie_result: dict[str, Any], download: bool = True, extra_info: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        if ie_result.get("_type") in ("playlist", "multi_video", "compat_list"):
+            return None
+        return cast(dict[str, Any] | None, super().process_ie_result(ie_result, download=download, extra_info=extra_info))
+
+
 def _number(value: object) -> int:
     return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
 
@@ -46,7 +57,7 @@ def _media_link(data: dict[str, Any]) -> MediaLink | None:
 class YDL:
     @classmethod
     def create_ydl(cls) -> YoutubeDL:
-        return YoutubeDL(
+        return _SingleVideoYoutubeDL(
             {
                 "quiet": True,
                 "logger": _QuietLogger(),

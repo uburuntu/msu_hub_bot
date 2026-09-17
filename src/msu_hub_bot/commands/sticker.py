@@ -80,7 +80,7 @@ class Stickers:
 
     @staticmethod
     def png_cut(f: io.BytesIO, squared: bool = False) -> io.BytesIO:
-        image = Image.open(f)
+        image: Image.Image = Image.open(f)
         if squared:
             box = (512, 512)
         else:
