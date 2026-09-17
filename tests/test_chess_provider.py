@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import random
 
 import aiohttp
 import chess
@@ -17,6 +18,7 @@ PGN = (
     "Nxc5 Rxa2 Nb3 Nxe2+ Qxe2 Qb6 Rd5 Bd7 Rfd1 Bc6 Rxe5 Ra4 Qh5 Qxf2+ Kh1 Bxe4 Rd8+ Kh7"
 )
 SOLUTION = ["d8h8", "h7h8", "h5h6", "e4h7", "e5e8", "f7f8", "e8f8", "f2f8", "h6f8"]
+TACTICAL_FEN = "1r3r2/3p1p1k/1q1PpQpp/3p4/8/Pp3R1R/2P3PP/2K5 w - - 1 2"
 
 
 def payload(puzzle_id="iSz4O"):
@@ -107,6 +109,96 @@ def test_api_ply_is_opponents_setup_and_solution_starts_with_players_move():
         assert move in board.legal_moves
         board.push(move)
     assert board.is_check() and not board.pieces(chess.QUEEN, chess.BLACK)
+
+
+def test_capture_solution_keeps_other_captures_in_the_displayed_answers():
+    data = payload()
+    data["game"]["pgn"] = '[SetUp "1"]\n[FEN "1r3r1k/3p1p2/1q1PpQpp/3p4/8/Pp3R1R/2P3PP/2K5 b - - 0 1"]\n\nKh7'
+    data["puzzle"].update(initialPly=1, solution=["h3h6", "h7g8"])
+    puzzle = source.parse_puzzle(data)
+    assert puzzle.fen == TACTICAL_FEN
+    assert sum(" × " in option.label for option in puzzle.options) == 3
+    assert sum(" → " in option.label for option in puzzle.options) == 3
+    assert sum(option.uci == "h3h6" for option in puzzle.options) == 1
+
+
+@pytest.mark.parametrize(
+    ("fen", "uci", "capture_count"),
+    [
+        (TACTICAL_FEN, "h3h6", 3),
+        (TACTICAL_FEN, "f3f2", 3),
+        ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "a1a8", 2),
+        ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "e1g1", 2),
+        ("5Q2/8/8/1k6/8/3NB1pN/R4n2/7K w - - 0 1", "f8f2", 4),
+        ("5Q2/8/8/1k6/8/3NB1pN/R4n2/7K w - - 0 1", "h1g2", 4),
+        (chess.STARTING_FEN, "e2e4", 0),
+        ("8/8/8/3pP3/8/8/7k/R4K2 w - d6 0 1", "e5e6", 0),
+        ("5Q2/8/8/1k6/8/3NB1pN/R4n2/3N2BK w - - 0 1", "f8f2", 6),
+        ("5Q2/8/8/1k6/8/3NBppN/R4n2/3N2BK w - - 0 1", "h3f2", 6),
+    ],
+)
+def test_answer_mix_depends_on_the_position_not_the_correct_move(fen, uci, capture_count):
+    board = chess.Board(fen)
+    assert board.is_valid()
+    legal = list(board.legal_moves)
+    correct = chess.Move.from_uci(uci)
+    choices = source.select_moves(board, correct, legal)
+    assert len(choices) == len(set(choices)) == 6
+    assert choices.count(correct) == 1
+    assert all(move in board.legal_moves for move in choices)
+    assert sum(board.is_capture(move) for move in choices) == capture_count
+    assert list(board.legal_moves) == legal
+    assert board.fen() == fen
+
+
+@pytest.mark.parametrize(
+    ("fen", "uci"),
+    [
+        ("8/8/8/3pP3/8/8/7k/R4K2 w - d6 0 1", "e5d6"),
+        ("5Q2/8/8/1k6/8/3NB1pN/R4n2/3N2BK w - - 0 1", "h1g2"),
+        ("8/8/8/3pP3/P7/8/7k/5K2 w - d6 0 1", "e5d6"),
+        ("8/8/8/3pP3/P7/8/7k/5K2 w - d6 0 1", "e5e6"),
+        ("5Q2/8/8/1k6/8/3NB1pN/R3nn2/5R1K w - - 0 1", "f1f2"),
+        ("5Q2/8/8/1k6/8/3NB1pN/R3nn2/5R1K w - - 0 1", "h1g2"),
+    ],
+)
+def test_sparse_positions_cannot_make_a_singleton_move_type_a_clue(fen, uci):
+    board = chess.Board(fen)
+    assert board.is_valid()
+    correct = chess.Move.from_uci(uci)
+    assert correct in board.legal_moves
+    with pytest.raises(source.UnsuitablePuzzle):
+        source.select_moves(board, correct, list(board.legal_moves))
+
+
+@pytest.mark.parametrize("uci", ["h3h6", "f3f2"])
+def test_correct_position_and_distractors_vary_for_capture_and_quiet_answers(monkeypatch, uci):
+    board = chess.Board(TACTICAL_FEN)
+    correct = chess.Move.from_uci(uci)
+    positions = set()
+    alternatives = set()
+    for seed in range(60):
+        rng = random.Random(seed)
+        monkeypatch.setattr(source.random, "sample", rng.sample)
+        monkeypatch.setattr(source.random, "shuffle", rng.shuffle)
+        choices = source.select_moves(board, correct, list(board.legal_moves))
+        assert sum(board.is_capture(move) for move in choices) == 3
+        positions.add(choices.index(correct))
+        alternatives.add(frozenset(move for move in choices if move != correct))
+    assert positions == set(range(6))
+    assert len(alternatives) > 1
+
+
+def test_en_passant_counts_as_a_capture_when_balancing_answers():
+    board = chess.Board()
+    for uci in ("e2e4", "a7a6", "f1c4", "h7h6", "e4e5", "d7d5"):
+        board.push_uci(uci)
+    correct = chess.Move.from_uci("e5d6")
+    assert board.is_en_passant(correct)
+    choices = source.select_moves(board, correct, list(board.legal_moves))
+    assert correct in choices
+    assert sum(board.is_capture(move) for move in choices) == 3
+    assert source.move_label(board, correct) == "Пешка e5 × d6"
 
 
 def test_full_game_pgn_is_stopped_at_puzzle_position():
@@ -204,8 +296,8 @@ def test_optional_fen_accepts_equivalent_non_capturable_en_passant(en_passant):
 @pytest.mark.parametrize("change", ["en_passant", "castling", "invalid"])
 def test_optional_fen_rejects_changed_legal_move_state(change):
     data = payload()
-    data["game"]["pgn"] = "e4 a6 e5 d5"
-    data["puzzle"]["initialPly"] = 3
+    data["game"]["pgn"] = "e4 a6 Bc4 h6 e5 d5"
+    data["puzzle"]["initialPly"] = 5
     data["puzzle"]["solution"] = ["e5d6", "e7d6"]
     board = chess.Board(source.parse_puzzle(data).fen)
     if change == "en_passant":
@@ -250,7 +342,7 @@ async def test_fresh_puzzle_fetch_uses_public_endpoint_and_cleans_up(monkeypatch
     session = install_session(monkeypatch, [response])
     result = await source.random_puzzle()
     assert result.id == "iSz4O"
-    assert session.calls == [(source.PUZZLE_URL, {"params": {"angle": "sacrifice"}, "allow_redirects": False})]
+    assert session.calls == [(source.PUZZLE_URL, {"params": {"angle": "mix"}, "allow_redirects": False})]
     assert session.closed and response.closed
 
 

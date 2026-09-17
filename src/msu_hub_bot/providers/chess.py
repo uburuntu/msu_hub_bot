@@ -79,6 +79,28 @@ def move_label(board: chess.Board, move: chess.Move) -> str:
     return label
 
 
+def select_moves(board: chess.Board, correct: chess.Move, legal: list[chess.Move]) -> list[chess.Move]:
+    """Balance capture/quiet choices so neither move type singles out an answer."""
+    captures = [move for move in legal if board.is_capture(move)]
+    quiet = [move for move in legal if not board.is_capture(move)]
+    # Choose the mix from the position alone, independently of the solution.
+    # Prefer three of each; sparse positions may use two/four or one type only.
+    capture_count = next((count for count in (3, 2, 4, 0, 6) if count <= len(captures) and 6 - count <= len(quiet)), None)
+    if capture_count is None or correct not in legal:
+        raise UnsuitablePuzzle("Not enough balanced legal answers")
+    choices: list[chess.Move] = []
+    for group, count in ((captures, capture_count), (quiet, 6 - capture_count)):
+        if correct in group:
+            if count == 0:
+                raise UnsuitablePuzzle("The solution would be the only move of its type")
+            choices.append(correct)
+            group = [move for move in group if move != correct]
+            count -= 1
+        choices.extend(random.sample(group, count))
+    random.shuffle(choices)
+    return choices
+
+
 def parse_puzzle(data: object) -> Puzzle:
     response = _object(data)
     game_data, puzzle_data = _object(response.get("game")), _object(response.get("puzzle"))
@@ -144,7 +166,6 @@ def parse_puzzle(data: object) -> Puzzle:
             if len(line) == 1 and continuation.is_checkmate():
                 raise UnsuitablePuzzle("Mate-in-one is unsuitable for this quiz")
         correct = chess.Move.from_uci(solution[0])
-        alternatives = []
         for move in legal:
             if move == correct:
                 continue
@@ -152,11 +173,7 @@ def parse_puzzle(data: object) -> Puzzle:
             after.push(move)
             if after.is_checkmate():
                 raise UnsuitablePuzzle("An immediate mate contradicts the proposed best move")
-            alternatives.append(move)
-        if len(alternatives) < 5:
-            raise UnsuitablePuzzle("Not enough legal distractors")
-        choices = [correct, *random.sample(alternatives, 5)]
-        random.shuffle(choices)
+        choices = select_moves(board, correct, legal)
         options = tuple(MoveOption(move.uci(), move_label(board, move)) for move in choices)
         return Puzzle(puzzle_id, board.fen(), tuple(solution), options, tuple(line))
     except ValueError as exc:
@@ -173,7 +190,7 @@ async def _request_json(session: aiohttp.ClientSession) -> object:
         # Another chat may have received a rate limit while this call was queued.
         if _cooldown_until > time.monotonic():
             raise ExternalServiceError("Источник шахматных задач временно ограничил запросы.")
-        async with session.get(PUZZLE_URL, params={"angle": "sacrifice"}, allow_redirects=False) as response:
+        async with session.get(PUZZLE_URL, params={"angle": "mix"}, allow_redirects=False) as response:
             if response.status == 429:
                 _cooldown_until = time.monotonic() + RATE_LIMIT_COOLDOWN
                 raise ExternalServiceError("Источник шахматных задач временно ограничил запросы.")
