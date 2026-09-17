@@ -26,7 +26,7 @@ def app_settings(request):
 
 @pytest.fixture
 def boundaries(monkeypatch):
-    from hub_bot import app
+    from msu_hub_bot import app
 
     session = RecordingSession()
     client = AsyncMock()
@@ -38,7 +38,7 @@ def boundaries(monkeypatch):
 
 
 async def test_composition_startup_and_idempotent_shutdown(app_settings, boundaries, monkeypatch):
-    from hub_bot.app import Application
+    from msu_hub_bot.app import Application
 
     session, client, db = boundaries
     application = await Application.create(app_settings)
@@ -59,7 +59,7 @@ async def test_composition_startup_and_idempotent_shutdown(app_settings, boundar
 
 
 async def test_partial_allocation_failure_closes_opened_clients(app_settings, boundaries, monkeypatch):
-    from hub_bot import app
+    from msu_hub_bot import app
 
     session, client, db = boundaries
 
@@ -75,7 +75,7 @@ async def test_partial_allocation_failure_closes_opened_clients(app_settings, bo
 
 
 async def test_startup_failure_runs_owned_cleanup(app_settings, boundaries):
-    from hub_bot.app import Application
+    from msu_hub_bot.app import Application
 
     session, client, db = boundaries
     db.check.side_effect = RuntimeError("Synthetic DB outage")
@@ -88,7 +88,7 @@ async def test_startup_failure_runs_owned_cleanup(app_settings, boundaries):
 
 
 async def test_polling_keeps_subscription_backlog_and_session_ownership(app_settings, boundaries, monkeypatch):
-    from hub_bot.app import Application
+    from msu_hub_bot.app import Application
 
     session, _, _ = boundaries
     application = await Application.create(app_settings)
@@ -102,7 +102,7 @@ async def test_polling_keeps_subscription_backlog_and_session_ownership(app_sett
 
 
 async def test_shutdown_drains_admitted_jobs_before_closing_dependencies(app_settings, boundaries):
-    from hub_bot.app import Application
+    from msu_hub_bot.app import Application
 
     session, client, _ = boundaries
     application = await Application.create(app_settings)

@@ -13,7 +13,7 @@ import aiohttp
 import pytest
 from PIL import Image
 
-from common.externals import owm
+from msu_hub_bot.providers import owm
 from msu_hub_bot.settings import MissingIntegration
 
 
@@ -210,7 +210,7 @@ async def test_geocoding_no_matches_is_distinct_from_service_failure(configure):
 def weather_commands(monkeypatch):
     monkeypatch.setitem(sys.modules, "app", SimpleNamespace(bot=SimpleNamespace(get_chat=AsyncMock())))
     spec = importlib.util.spec_from_file_location(
-        "weather_output_test", Path(__file__).resolve().parents[1] / "hub_bot/commands/weather.py"
+        "weather_output_test", Path(__file__).resolve().parents[1] / "src/msu_hub_bot/commands/weather.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

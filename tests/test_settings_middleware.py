@@ -7,7 +7,7 @@ import pytest
 from aiogram.types import CallbackQuery, Chat, InlineQuery, Message, User
 from pydantic import ValidationError
 
-from common.tg.middlewares.settings import Settings, SettingsMiddleware
+from msu_hub_bot.telegram.middlewares.settings import Settings, SettingsMiddleware
 
 
 def message(chat_id=100):

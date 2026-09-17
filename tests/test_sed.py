@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from common.executor import TPExecutor
-from hub_bot.utils import sed
+from msu_hub_bot.execution.executor import TPExecutor
+from msu_hub_bot.execution import sed
 
 
 @pytest.mark.parametrize(

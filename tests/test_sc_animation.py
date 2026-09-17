@@ -16,8 +16,8 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.methods import GetStickerSet
 from aiogram.fsm.storage.base import StorageKey
 
-from common.tg.state import ReleasableEventIsolation, UpdateStateContext
-from hub_bot.utils import sticker_media as media
+from msu_hub_bot.telegram.state import ReleasableEventIsolation, UpdateStateContext
+from msu_hub_bot.media import sticker_media as media
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def handlers():
     # Each test owns its provider and worker stubs; application state is never imported.
-    source = (ROOT / "hub_bot/commands/sticker.py").read_text()
+    source = (ROOT / "src/msu_hub_bot/commands/sticker.py").read_text()
     ns = {"__name__": "synthetic_sticker"}
     exec(compile(source, "<sticker>", "exec"), ns)
 

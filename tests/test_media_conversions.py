@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from hub_bot.utils import ffmpeg as media
+from msu_hub_bot.media import ffmpeg as media
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is not installed")

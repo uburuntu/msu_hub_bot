@@ -9,11 +9,11 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import AnswerCallbackQuery, EditMessageCaption, EditMessageText, SendMessage, SendPhoto
 from aiogram.types import CallbackQuery
 
-from common.externals.exceptions import ExternalServiceError
-from common.externals.geoguess import Photo
-from common.tg.runtime import Supervisor
-from common.tg.wrapper import BotWrapper
-from hub_bot.commands import geoguess as game
+from msu_hub_bot.providers.exceptions import ExternalServiceError
+from msu_hub_bot.providers.geoguess import Photo
+from msu_hub_bot.telegram.runtime import Supervisor
+from msu_hub_bot.telegram.wrapper import BotWrapper
+from msu_hub_bot.commands import geoguess as game
 from telegram_helpers import RecordingSession, make_message
 
 

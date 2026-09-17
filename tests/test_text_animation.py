@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hub_bot.commands import animate
+from msu_hub_bot.commands import animate
 
 
 @pytest.fixture

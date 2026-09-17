@@ -10,8 +10,8 @@ from aiogram.filters import CommandObject
 from aiogram.methods import EditMessageText, SendAudio, SendDocument, SendMessage, SendPhoto, SendSticker
 from aiogram.types import BufferedInputFile, CallbackQuery
 
-from common.tg.filters import MetaInfo
-from hub_bot.commands import animate, arxiv, camera, latex, sed, song, tesseract, tts
+from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.commands import animate, arxiv, camera, latex, sed, song, tesseract, tts
 from telegram_helpers import make_bot, make_message
 
 

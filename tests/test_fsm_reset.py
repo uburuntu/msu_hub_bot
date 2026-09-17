@@ -149,7 +149,7 @@ def forbidden(*args, **kwargs):
 
 Redis.__init__ = forbidden
 from msu_hub_bot import fsm_reset
-assert "hub_bot.app" not in sys.modules
+assert "msu_hub_bot.app" not in sys.modules
 assert "msu_hub_bot.settings" not in sys.modules
 assert "edgedb" not in sys.modules
 try:

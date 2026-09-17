@@ -12,8 +12,8 @@ from aiogram.types import File
 
 from telegram_helpers import make_bot
 
-from hub_bot.utils import sticker_sets
-from hub_bot.utils.sticker_sets import StickerSetClient, UploadedSticker
+from msu_hub_bot.telegram import sticker_sets
+from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadedSticker
 
 
 @pytest.fixture(autouse=True)

@@ -4,7 +4,7 @@ A friends' Swiss-army Telegram bot, born in Moscow State University chats:
 media tools, OCR, speech and song recognition, translation, code execution
 through JDoodle, games, polls, chat administration, and a few inside jokes.
 
-The runtime uses aiogram 3, Pydantic 2, EdgeDB, and Redis. Dependencies are locked for
+The runtime uses aiogram 3, Pydantic 2, Supabase, and Redis. Dependencies are locked for
 reproducible builds. External tools depend on their providers' availability
 and configuration; see the bot's `/help` for commands.
 
@@ -17,13 +17,16 @@ needed for media and OCR commands.
 ```sh
 uv sync --locked
 uv run ruff check .
+uv run ruff format --check src tests tools
 uv run python tools/check_types.py
 uv run mypy
 uv run pytest -q
 cp .env.example .env
 ```
 
-Fill in `HUB_BOT_TOKEN`, `HUB_REDIS_HOST`, and `HUB_EDGEDB_DSN`, then run:
+Fill in `HUB_BOT_TOKEN` and `HUB_REDIS_HOST`. Set `HUB_STORAGE_BACKEND=supabase`
+and configure the Supabase API URL, publishable key and dedicated Auth account
+described in [database configuration](docs/deployment.md#database-configuration), then run:
 
 ```sh
 uv run --env-file .env msu-hub-bot
@@ -33,7 +36,7 @@ Only one poller may use a Telegram token at a time. Local tests block network
 access and use synthetic data; they require no live bot or database.
 
 Configuration is documented by `.env.example` and the typed settings in
-`msu_hub_bot/settings.py`. Lists, tuples, and mappings use JSON. Optional services
+`src/msu_hub_bot/settings.py`. Lists, tuples, and mappings use JSON. Optional services
 stay registered when unconfigured and return an unavailable response when used.
 Administrator IDs default to no access. The Redis namespace defaults to `hub`;
 changing it disconnects the bot from its existing state.
@@ -52,8 +55,9 @@ to the deployment job on the `production` environment.
 Main-branch changes run the same checks, build and test the release image,
 and transfer it directly to the VPS over SSH. The host verifies the archive
 and runs its immutable image ID. Images are kept on the runner and VPS.
-The bot reuses the existing Redis and EdgeDB services on the external `msu_db`
-network. Deployment does not run migrations or recreate shared infrastructure.
+The bot connects to separately managed Supabase APIs and Redis. Deployment does
+not run migrations or recreate shared infrastructure. The EdgeDB adapter and
+schema history remain available for recovery of installations using that backend.
 
 The repository variable `DEPLOY_ENABLED=true` enables automatic deployment
 from main. Pull requests run checks without deploying.
@@ -63,12 +67,17 @@ rollback, and moving to another VPS.
 
 ## Maintenance and licensing
 
-Application imports are side-effect free: `hub_bot/app.py` owns service lifetimes,
-`hub_bot/routing.py` registers ordered feature routers, and handlers receive their
+Application imports are side-effect free: `src/msu_hub_bot/app.py` owns service lifetimes,
+`src/msu_hub_bot/routing.py` registers ordered feature routers, and handlers receive their
 services through dependency injection. Conversation state is scoped to one user
 within a chat and forum topic. `/cancel` clears the draft; work already started
 continues. The imageboard SDK is isolated in a licensed compatibility package
-until its independent upgrade.
+using `pydantic.v1`; application models use Pydantic 2.
+
+Within `src/msu_hub_bot/`, commands own user-facing behavior, Telegram helpers
+own routing support and delivery, and providers, storage, media and execution
+have separate service boundaries. Release tooling lives in `tools/deployment/`;
+database history and operational contracts live in `dbschema/` and `docs/`.
 
 Ruff exceptions are limited to specific files. Strict mypy coverage expands
 monotonically as modules are typed; new application modules must be included.

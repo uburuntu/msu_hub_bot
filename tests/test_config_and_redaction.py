@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import pytest
 
-from common.logger import LoggerBuilder
+from msu_hub_bot.logger import LoggerBuilder
 from msu_hub_bot.redaction import RedactingFormatter, RedactingStream, redact
 from msu_hub_bot.settings import MissingIntegration, Settings, load_runtime_environment, settings
 
@@ -74,7 +74,7 @@ def test_supabase_credentials_are_redacted(monkeypatch):
 def test_repository_factory_allocates_only_selected_backend(monkeypatch, backend):
     from unittest.mock import Mock
 
-    from common.db import factory
+    from msu_hub_bot.storage import factory
 
     legacy, modern = Mock(), Mock()
     monkeypatch.setattr(factory, "EdgeDBRepository", legacy)

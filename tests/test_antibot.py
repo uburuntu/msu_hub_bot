@@ -17,7 +17,7 @@ from aiogram.types import (
 )
 from pydantic import ValidationError
 
-from hub_bot.commands.antibot import AntiBot, AntiBotCallback
+from msu_hub_bot.commands.antibot import AntiBot, AntiBotCallback
 
 
 @pytest.fixture(autouse=True)

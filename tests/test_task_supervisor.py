@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from common.tg.runtime import AdmissionClosed, AdmissionMiddleware, DrainTimeout, Supervisor
+from msu_hub_bot.telegram.runtime import AdmissionClosed, AdmissionMiddleware, DrainTimeout, Supervisor
 
 
 async def test_worker_remains_owned_after_middleware_returns():
@@ -231,7 +231,7 @@ async def test_invalid_deadlines_are_rejected(timeout, cancel_timeout):
 
 
 async def test_batch_failure_waits_for_every_child_before_owner_finishes():
-    from common.tg.runtime import gather_complete
+    from msu_hub_bot.telegram.runtime import gather_complete
 
     entered, finish = asyncio.Event(), asyncio.Event()
     failure = ValueError("synthetic failure")
@@ -255,7 +255,7 @@ async def test_batch_failure_waits_for_every_child_before_owner_finishes():
 
 
 async def test_cancelled_batch_waits_for_child_cleanup():
-    from common.tg.runtime import gather_complete
+    from msu_hub_bot.telegram.runtime import gather_complete
 
     entered, cleanup = asyncio.Event(), asyncio.Event()
 

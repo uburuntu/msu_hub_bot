@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from common.db.edgedb import EdgeDBRepository
-from common.db.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, VkPatch
+from msu_hub_bot.storage.edgedb import EdgeDBRepository
+from msu_hub_bot.storage.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, VkPatch
 from msu_hub_bot.settings import Settings
 
 NOW = datetime(2026, 9, 17, tzinfo=UTC)

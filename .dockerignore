@@ -1,12 +1,9 @@
 **
 !pyproject.toml
 !uv.lock
-!msu_hub_bot/
-!msu_hub_bot/**
-!hub_bot/
-!hub_bot/**
-!common/
-!common/**
+!src/
+!src/msu_hub_bot/
+!src/msu_hub_bot/**
 !LICENSE
 !THIRD_PARTY_NOTICES.md
 !licenses/

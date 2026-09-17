@@ -7,8 +7,8 @@ import pytest
 from aiogram.methods import SendDocument, SendMediaGroup, SendMessage, SendVideo
 from aiogram.types import URLInputFile
 
-from common.tg.filters import MetaInfo
-from hub_bot.commands import externals
+from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.commands import externals
 from telegram_helpers import make_bot, make_message
 
 

@@ -21,7 +21,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Restore preceding release and configuration
-        run: python3 tools/deploy_client.py
+        run: python3 tools/deployment/client.py
         env:
           DEPLOY_OPERATION: rollback
           DEPLOY_HOST: ${{ secrets.SSH_HOST }}

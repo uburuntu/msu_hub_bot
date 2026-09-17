@@ -6,9 +6,7 @@ WORKDIR /opt/msu_hub_bot
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PYTHON_DOWNLOADS=never
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
-COPY msu_hub_bot/ msu_hub_bot/
-COPY hub_bot/ hub_bot/
-COPY common/ common/
+COPY src/ src/
 COPY LICENSE THIRD_PARTY_NOTICES.md ./
 COPY licenses/ licenses/
 RUN uv sync --locked --no-dev --no-editable

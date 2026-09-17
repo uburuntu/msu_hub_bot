@@ -9,7 +9,7 @@ from PIL import Image
 from aiogram.methods import AddStickerToSet, DeleteStickerFromSet, SendDocument, SendPoll, SendSticker, SendVoice
 from aiogram.types import BufferedInputFile, Sticker, StickerSet
 
-from hub_bot.commands import tenet
+from msu_hub_bot.commands import tenet
 from telegram_helpers import make_bot, make_message
 
 

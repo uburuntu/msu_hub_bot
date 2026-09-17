@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from aiogram.types import UserProfilePhotos
 
-from common.tg.utils import extract_image
+from msu_hub_bot.telegram.utils import extract_image
 from telegram_helpers import make_bot, make_message
 
 PHOTO = {"file_id": "selected-photo", "file_unique_id": "unique", "width": 100, "height": 100}

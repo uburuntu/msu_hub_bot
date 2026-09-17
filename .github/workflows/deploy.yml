@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
       - name: Build and validate private image archive
         id: image
-        run: python3 tools/build_release.py
+        run: python3 tools/deployment/build_release.py
       - name: Skip superseded revisions
         id: current
         env:
@@ -42,7 +42,7 @@ jobs:
           fi
       - name: Deploy with automatic rollback
         if: steps.current.outputs.deploy == 'true'
-        run: python3 tools/deploy_client.py
+        run: python3 tools/deployment/client.py
         env:
           DEPLOY_ARCHIVE: ${{ steps.image.outputs.archive }}
           DEPLOY_HOST: ${{ secrets.SSH_HOST }}

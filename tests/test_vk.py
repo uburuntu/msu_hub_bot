@@ -1,6 +1,6 @@
 import pytest
 
-from common.vk.posts import VkPost
+from msu_hub_bot.providers.vk.posts import VkPost
 
 
 @pytest.mark.parametrize("with_header", [True, False])

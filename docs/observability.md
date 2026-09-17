@@ -4,7 +4,7 @@ These requirements govern Logfire and OpenTelemetry implementations through the 
 
 ## Runtime adapter
 
-[`msu_hub_bot.telemetry`](../msu_hub_bot/telemetry.py) uses an isolated OpenTelemetry provider and sends OTLP protobuf directly to Logfire's EU endpoint. It does not configure a global provider or the Logfire SDK, discover credentials, detect host resources, instrument clients automatically, or forward logging records. Existing logs remain local. Manual spans disable exception capture; exported failure events contain a fixed category and the registered operation key, without exception text or stack contents.
+[`msu_hub_bot.telemetry`](../src/msu_hub_bot/telemetry.py) uses an isolated OpenTelemetry provider and sends OTLP protobuf directly to Logfire's EU endpoint. It does not configure a global provider or the Logfire SDK, discover credentials, detect host resources, instrument clients automatically, or forward logging records. Existing logs remain local. Manual spans disable exception capture; exported failure events contain a fixed category and the registered operation key, without exception text or stack contents.
 
 The composition root constructs `TelemetryConfig()` with export disabled by default. Only the CLI explicitly reads the environment through `TelemetryConfig.from_env(env)`. Enabling export requires `HUB_TELEMETRY_ENABLED=true` and a project write token in `LOGFIRE_TOKEN`; `LOGFIRE_API_KEY` is never consulted. `HUB_ENVIRONMENT` accepts `local`, `test`, `staging` or `production`. `HUB_RELEASE` accepts a public hexadecimal release identifier or semantic version; other values are omitted. The SDK's additional `OTEL_SDK_DISABLED=true` kill switch is respected.
 

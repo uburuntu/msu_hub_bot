@@ -2,7 +2,7 @@
 
 import pytest
 
-from common.tg.command import CommandParser, ParsedCommand
+from msu_hub_bot.telegram.command import CommandParser, ParsedCommand
 
 
 @pytest.mark.parametrize("text", [None, "", "  \n\t", "hello", "/another hi", "#another"])

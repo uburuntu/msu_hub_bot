@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from common.tg.runtime import Supervisor
+from msu_hub_bot.telegram.runtime import Supervisor
 from msu_hub_bot.settings import MissingIntegration
 
-from hub_bot.utils import wit
+from msu_hub_bot.providers import wit
 
 
 def audio_message(*, size=3, payload=b"pcm", reply=None, kind="voice"):

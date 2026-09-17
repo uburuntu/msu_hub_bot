@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from aiogram import Bot, types
 
-from common.tg.filters import MetaCommand, SimpleExtractor
+from msu_hub_bot.telegram.filters import MetaCommand, SimpleExtractor
 from telegram_helpers import make_message
 
 

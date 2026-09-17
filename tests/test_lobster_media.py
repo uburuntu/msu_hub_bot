@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image
 
-from hub_bot.commands import lobster as lobster_module
-from hub_bot.utils import caption_layout
+from msu_hub_bot.commands import lobster as lobster_module
+from msu_hub_bot.media import caption_layout
 
 
 @pytest.fixture

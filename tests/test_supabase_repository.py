@@ -14,11 +14,11 @@ from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram.types import Chat, Message, Update, User
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 
-from common.db import supabase as module
-from common.db.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, UserObservation, VkPatch
-from common.tg.middlewares.settings import SettingsMiddleware
-from common.tg.middlewares.updates import UpdatesMiddleware
-from common.tg.runtime import AdmissionMiddleware, Supervisor
+from msu_hub_bot.storage import supabase as module
+from msu_hub_bot.storage.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, UserObservation, VkPatch
+from msu_hub_bot.telegram.middlewares.settings import SettingsMiddleware
+from msu_hub_bot.telegram.middlewares.updates import UpdatesMiddleware
+from msu_hub_bot.telegram.runtime import AdmissionMiddleware, Supervisor
 from msu_hub_bot.telemetry import Backend, Telemetry
 from telemetry_helpers import Capture, config
 

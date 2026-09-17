@@ -6,7 +6,7 @@ from subprocess import CompletedProcess
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("build_release", ROOT / "tools/build_release.py")
+SPEC = importlib.util.spec_from_file_location("build_release", ROOT / "tools/deployment/build_release.py")
 builder = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(builder)
 

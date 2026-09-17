@@ -10,8 +10,8 @@ import pytest
 from aiogram import Bot
 from aiogram.types import BufferedInputFile, CallbackQuery
 
-from common.tg.runtime import Supervisor
-from hub_bot.commands import crypto, geoguess, stats, weather
+from msu_hub_bot.telegram.runtime import Supervisor
+from msu_hub_bot.commands import crypto, geoguess, stats, weather
 from telegram_helpers import RecordingSession, make_message
 
 
@@ -33,7 +33,7 @@ from telegram_helpers import RecordingSession, make_message
 )
 def test_callback_wires_remain_compatible(family, wire, fields):
     module, cls = family.split(".")
-    callback = getattr(importlib.import_module(f"hub_bot.commands.{module}"), cls).callback_data
+    callback = getattr(importlib.import_module(f"msu_hub_bot.commands.{module}"), cls).callback_data
     assert callback(**fields).pack() == wire
     assert callback.unpack(wire).model_dump() == fields
 
@@ -63,7 +63,7 @@ async def test_unavailable_message_does_not_touch_injected_services(family, fiel
         values["message"] = {"date": 0, "chat": {"id": -100, "type": "supergroup"}, "message_id": 7}
     query = CallbackQuery.model_validate(values, context={"bot": bot})
     module, cls = family.split(".")
-    command = getattr(importlib.import_module(f"hub_bot.commands.{module}"), cls)
+    command = getattr(importlib.import_module(f"msu_hub_bot.commands.{module}"), cls)
     kwargs = dict(services)
     if fields:
         kwargs["callback_data"] = command.callback_data(**fields)
@@ -107,7 +107,7 @@ async def test_crypto_failure_waits_for_other_price_requests(ticker):
 
 async def test_stats_uses_one_repository_snapshot_and_propagates_failure():
     from datetime import UTC, datetime
-    from common.db.models import UsageStats
+    from msu_hub_bot.storage.models import UsageStats
 
     counts = UsageStats(users=8, chats=3, updates=21, handled_updates=5)
     repository = SimpleNamespace(statistics=AsyncMock(return_value=counts))

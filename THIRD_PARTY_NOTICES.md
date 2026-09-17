@@ -20,6 +20,6 @@ retain their respective upstream licenses.
 
 ## Imageboard SDK
 
-The imageboard integration includes [api2ch 1.2.1](https://github.com/uburuntu/api2ch), copyright 2020 Ramzan Bekbulatov, under the [MIT license](common/externals/_api2ch/LICENSE).
+The imageboard integration includes [api2ch 1.2.1](https://github.com/uburuntu/api2ch), copyright 2020 Ramzan Bekbulatov, under the [MIT license](src/msu_hub_bot/providers/_api2ch/LICENSE).
 
-Its source is isolated in `common/externals/_api2ch`. Imports use the local package namespace and `pydantic.v1`; the SDK implementation is otherwise unchanged. The adjacent partial type stub describes the operations used by this bot. Application code imports the boundary in `common/externals/dvach.py` and uses Pydantic 2 for its own models.
+Its source is isolated in `src/msu_hub_bot/providers/_api2ch`. Imports use the local package namespace and `pydantic.v1`; the SDK implementation is otherwise unchanged. The adjacent partial type stub describes the operations used by this bot. Application code imports the boundary in `src/msu_hub_bot/providers/dvach.py` and uses Pydantic 2 for its own models.

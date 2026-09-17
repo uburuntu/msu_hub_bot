@@ -4,7 +4,7 @@ from subprocess import CompletedProcess
 
 import pytest
 
-SPEC = importlib.util.spec_from_file_location("deploy_client", Path(__file__).resolve().parents[1] / "tools/deploy_client.py")
+SPEC = importlib.util.spec_from_file_location("deploy_client", Path(__file__).resolve().parents[1] / "tools/deployment/client.py")
 client = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(client)
 

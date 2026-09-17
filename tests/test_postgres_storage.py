@@ -14,7 +14,7 @@ from uuid import UUID
 import pytest
 from aiogram.types import Message, Update
 
-from common.db.observations import archive_observation
+from msu_hub_bot.storage.observations import archive_observation
 
 SCHEMAS = sorted((Path(__file__).parents[1] / "dbschema/postgres").glob("*.sql"))
 PRINCIPAL = "00000000-0000-0000-0000-000000000001"

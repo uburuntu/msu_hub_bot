@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from common.db.models import ChatRecord, DirectoryRecord, UserRecord, VkSubscription
+from msu_hub_bot.storage.models import ChatRecord, DirectoryRecord, UserRecord, VkSubscription
 from msu_hub_bot.settings import Settings
 
 IDENTIFIER = UUID(int=1)

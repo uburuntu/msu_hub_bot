@@ -57,7 +57,7 @@ requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["msu_hub_bot", "hub_bot", "common"]
+packages = ["src/msu_hub_bot"]
 
 [dependency-groups]
 dev = [
@@ -78,7 +78,7 @@ pyacrcloud = { git = "https://github.com/acrcloud/acrcloud_sdk_python", rev = "9
 [tool.ruff]
 target-version = "py311"
 line-length = 140
-extend-exclude = ["common/externals/_api2ch"]
+extend-exclude = ["src/msu_hub_bot/providers/_api2ch"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -87,100 +87,101 @@ show_error_codes = true
 warn_unused_configs = true
 warn_unused_ignores = true
 files = [
-    "common/caching.py",
-    "common/db/base.py",
-    "common/db/edgedb.py",
-    "common/db/factory.py",
-    "common/db/models.py",
-    "common/db/observations.py",
-    "common/db/supabase.py",
-    "common/executor.py",
-    "common/externals/dvach.py",
-    "common/hc.py",
-    "common/tg/callbacks.py",
-    "common/tg/chat_actioner.py",
-    "common/tg/command.py",
-    "common/tg/context.py",
-    "common/tg/delivery.py",
-    "common/tg/extraction.py",
-    "common/tg/files.py",
-    "common/tg/filters.py",
-    "common/tg/keyboards.py",
-    "common/tg/middlewares/check_gets.py",
-    "common/tg/middlewares/logs.py",
-    "common/tg/middlewares/settings.py",
-    "common/tg/middlewares/skip777000.py",
-    "common/tg/middlewares/telemetry.py",
-    "common/tg/middlewares/updates.py",
-    "common/tg/middlewares/viewer.py",
-    "common/tg/runtime.py",
-    "common/tg/state.py",
-    "common/tg/storage.py",
-    "common/tg/utils.py",
-    "common/tg/wrapper.py",
-    "common/vk/publish.py",
-    "hub_bot/app.py",
-    "hub_bot/commands/admin.py",
-    "hub_bot/commands/animate.py",
-    "hub_bot/commands/antibot.py",
-    "hub_bot/commands/arxiv.py",
-    "hub_bot/commands/camera.py",
-    "hub_bot/commands/control.py",
-    "hub_bot/commands/crypto.py",
-    "hub_bot/commands/debate.py",
-    "hub_bot/commands/debug.py",
-    "hub_bot/commands/dvach.py",
-    "hub_bot/commands/errors.py",
-    "hub_bot/commands/excuses.py",
-    "hub_bot/commands/externals.py",
-    "hub_bot/commands/figlet.py",
-    "hub_bot/commands/fun.py",
-    "hub_bot/commands/genders.py",
-    "hub_bot/commands/geoguess.py",
-    "hub_bot/commands/help.py",
-    "hub_bot/commands/infra.py",
-    "hub_bot/commands/latex.py",
-    "hub_bot/commands/likes.py",
-    "hub_bot/commands/lingvanex.py",
-    "hub_bot/commands/lobster.py",
-    "hub_bot/commands/location.py",
-    "hub_bot/commands/minecraft.py",
-    "hub_bot/commands/other.py",
-    "hub_bot/commands/personal.py",
-    "hub_bot/commands/posting.py",
-    "hub_bot/commands/prog.py",
-    "hub_bot/commands/raffle.py",
-    "hub_bot/commands/rate.py",
-    "hub_bot/commands/rolls.py",
-    "hub_bot/commands/sed.py",
-    "hub_bot/commands/settings.py",
-    "hub_bot/commands/song.py",
-    "hub_bot/commands/stats.py",
-    "hub_bot/commands/sticker.py",
-    "hub_bot/commands/tenet.py",
-    "hub_bot/commands/tesseract.py",
-    "hub_bot/commands/tts.py",
-    "hub_bot/commands/tyan.py",
-    "hub_bot/commands/vk.py",
-    "hub_bot/commands/votes.py",
-    "hub_bot/commands/weather.py",
-    "hub_bot/commands/zalgo.py",
-    "hub_bot/events.py",
-    "hub_bot/routing.py",
-    "hub_bot/utils/caption_layout.py",
-    "hub_bot/utils/ffmpeg.py",
-    "hub_bot/utils/jdoodle.py",
-    "hub_bot/utils/sed.py",
-    "hub_bot/utils/sticker_media.py",
-    "hub_bot/utils/sticker_sets.py",
-    "hub_bot/utils/wit.py",
-    "hub_bot/utils/wolfram.py",
-    "msu_hub_bot/cli.py",
-    "msu_hub_bot/fsm_reset.py",
-    "msu_hub_bot/health.py",
-    "msu_hub_bot/preflight.py",
-    "msu_hub_bot/settings.py",
-    "msu_hub_bot/telemetry.py",
+    "src/msu_hub_bot/execution/__init__.py",
+    "src/msu_hub_bot/caching.py",
+    "src/msu_hub_bot/storage/base.py",
+    "src/msu_hub_bot/storage/edgedb.py",
+    "src/msu_hub_bot/storage/factory.py",
+    "src/msu_hub_bot/storage/models.py",
+    "src/msu_hub_bot/storage/observations.py",
+    "src/msu_hub_bot/storage/supabase.py",
+    "src/msu_hub_bot/execution/executor.py",
+    "src/msu_hub_bot/providers/dvach.py",
+    "src/msu_hub_bot/uptime.py",
+    "src/msu_hub_bot/telegram/callbacks.py",
+    "src/msu_hub_bot/telegram/chat_actioner.py",
+    "src/msu_hub_bot/telegram/command.py",
+    "src/msu_hub_bot/telegram/context.py",
+    "src/msu_hub_bot/telegram/delivery.py",
+    "src/msu_hub_bot/telegram/extraction.py",
+    "src/msu_hub_bot/telegram/files.py",
+    "src/msu_hub_bot/telegram/filters.py",
+    "src/msu_hub_bot/telegram/keyboards.py",
+    "src/msu_hub_bot/telegram/middlewares/check_gets.py",
+    "src/msu_hub_bot/telegram/middlewares/logs.py",
+    "src/msu_hub_bot/telegram/middlewares/settings.py",
+    "src/msu_hub_bot/telegram/middlewares/skip777000.py",
+    "src/msu_hub_bot/telegram/middlewares/telemetry.py",
+    "src/msu_hub_bot/telegram/middlewares/updates.py",
+    "src/msu_hub_bot/telegram/middlewares/viewer.py",
+    "src/msu_hub_bot/telegram/runtime.py",
+    "src/msu_hub_bot/telegram/state.py",
+    "src/msu_hub_bot/telegram/storage.py",
+    "src/msu_hub_bot/telegram/utils.py",
+    "src/msu_hub_bot/telegram/wrapper.py",
+    "src/msu_hub_bot/providers/vk/publish.py",
+    "src/msu_hub_bot/app.py",
+    "src/msu_hub_bot/commands/admin.py",
+    "src/msu_hub_bot/commands/animate.py",
+    "src/msu_hub_bot/commands/antibot.py",
+    "src/msu_hub_bot/commands/arxiv.py",
+    "src/msu_hub_bot/commands/camera.py",
+    "src/msu_hub_bot/commands/control.py",
+    "src/msu_hub_bot/commands/crypto.py",
+    "src/msu_hub_bot/commands/debate.py",
+    "src/msu_hub_bot/commands/debug.py",
+    "src/msu_hub_bot/commands/dvach.py",
+    "src/msu_hub_bot/commands/errors.py",
+    "src/msu_hub_bot/commands/excuses.py",
+    "src/msu_hub_bot/commands/externals.py",
+    "src/msu_hub_bot/commands/figlet.py",
+    "src/msu_hub_bot/commands/fun.py",
+    "src/msu_hub_bot/commands/genders.py",
+    "src/msu_hub_bot/commands/geoguess.py",
+    "src/msu_hub_bot/commands/help.py",
+    "src/msu_hub_bot/commands/infra.py",
+    "src/msu_hub_bot/commands/latex.py",
+    "src/msu_hub_bot/commands/likes.py",
+    "src/msu_hub_bot/commands/lingvanex.py",
+    "src/msu_hub_bot/commands/lobster.py",
+    "src/msu_hub_bot/commands/location.py",
+    "src/msu_hub_bot/commands/minecraft.py",
+    "src/msu_hub_bot/commands/other.py",
+    "src/msu_hub_bot/commands/personal.py",
+    "src/msu_hub_bot/commands/posting.py",
+    "src/msu_hub_bot/commands/prog.py",
+    "src/msu_hub_bot/commands/raffle.py",
+    "src/msu_hub_bot/commands/rate.py",
+    "src/msu_hub_bot/commands/rolls.py",
+    "src/msu_hub_bot/commands/sed.py",
+    "src/msu_hub_bot/commands/settings.py",
+    "src/msu_hub_bot/commands/song.py",
+    "src/msu_hub_bot/commands/stats.py",
+    "src/msu_hub_bot/commands/sticker.py",
+    "src/msu_hub_bot/commands/tenet.py",
+    "src/msu_hub_bot/commands/tesseract.py",
+    "src/msu_hub_bot/commands/tts.py",
+    "src/msu_hub_bot/commands/tyan.py",
+    "src/msu_hub_bot/commands/vk.py",
+    "src/msu_hub_bot/commands/votes.py",
+    "src/msu_hub_bot/commands/weather.py",
+    "src/msu_hub_bot/commands/zalgo.py",
+    "src/msu_hub_bot/events.py",
+    "src/msu_hub_bot/routing.py",
+    "src/msu_hub_bot/media/caption_layout.py",
+    "src/msu_hub_bot/media/ffmpeg.py",
+    "src/msu_hub_bot/providers/jdoodle.py",
+    "src/msu_hub_bot/execution/sed.py",
+    "src/msu_hub_bot/media/sticker_media.py",
+    "src/msu_hub_bot/telegram/sticker_sets.py",
+    "src/msu_hub_bot/providers/wit.py",
+    "src/msu_hub_bot/providers/wolfram.py",
+    "src/msu_hub_bot/cli.py",
+    "src/msu_hub_bot/fsm_reset.py",
+    "src/msu_hub_bot/health.py",
+    "src/msu_hub_bot/preflight.py",
+    "src/msu_hub_bot/settings.py",
+    "src/msu_hub_bot/telemetry.py",
     "tools/check_types.py",
     "tools/migrate_storage.py",
 ]
@@ -191,6 +192,8 @@ module = ["aiocache", "arxiv", "gtts", "pytesseract", "acrcloud.recognizer", "lo
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
+# Tests also exercise repository-local maintenance tools; application imports use the installed package.
+pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "--disable-socket --allow-unix-socket"
 asyncio_mode = "auto"
@@ -244,13 +247,13 @@ constraint-dependencies = [
 
 [tool.ruff.lint.per-file-ignores]
 # Existing non-functional warnings are isolated to their legacy files.
-"common/externals/other.py" = ["F541"]
-"hub_bot/app.py" = ["F401"]
-"hub_bot/commands/externals.py" = ["F401", "F541", "F841"]
-"hub_bot/commands/minecraft.py" = ["F401", "F541"]
-"hub_bot/commands/posting.py" = ["F541"]
-"hub_bot/commands/prog.py" = ["F541"]
-"hub_bot/commands/settings.py" = ["F541"]
-"hub_bot/commands/sticker.py" = ["F541"]
-"hub_bot/commands/vk.py" = ["F401", "F541"]
-"hub_bot/events.py" = ["F541"]
+"src/msu_hub_bot/providers/other.py" = ["F541"]
+"src/msu_hub_bot/app.py" = ["F401"]
+"src/msu_hub_bot/commands/externals.py" = ["F401", "F541", "F841"]
+"src/msu_hub_bot/commands/minecraft.py" = ["F401", "F541"]
+"src/msu_hub_bot/commands/posting.py" = ["F541"]
+"src/msu_hub_bot/commands/prog.py" = ["F541"]
+"src/msu_hub_bot/commands/settings.py" = ["F541"]
+"src/msu_hub_bot/commands/sticker.py" = ["F541"]
+"src/msu_hub_bot/commands/vk.py" = ["F401", "F541"]
+"src/msu_hub_bot/events.py" = ["F541"]

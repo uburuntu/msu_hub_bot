@@ -9,7 +9,7 @@ from opentelemetry import baggage, context, trace
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
-from common.tg.middlewares.telemetry import DispatchTelemetryMiddleware, HandlerTelemetryMiddleware
+from msu_hub_bot.telegram.middlewares.telemetry import DispatchTelemetryMiddleware, HandlerTelemetryMiddleware
 from msu_hub_bot.telemetry import Boundary, GaugeName, Outcome, Provider, Telemetry, TelemetryConfig
 from telegram_helpers import make_message
 from telemetry_helpers import Capture, config
@@ -240,7 +240,7 @@ def test_explicit_environment_loader_does_not_fall_back_to_management_token():
 
 async def test_supervised_jobs_propagate_only_a_trace_link_and_report_failure_once():
     from contextvars import ContextVar
-    from common.tg.runtime import Supervisor
+    from msu_hub_bot.telegram.runtime import Supervisor
 
     private_context = ContextVar("synthetic_private_context", default="empty")
     sink = Capture()
@@ -272,7 +272,7 @@ async def test_supervised_jobs_propagate_only_a_trace_link_and_report_failure_on
 async def test_worker_cancellation_and_late_failure_have_separate_safe_measurements():
     import threading
     from contextvars import ContextVar
-    from common.executor import TPExecutor
+    from msu_hub_bot.execution.executor import TPExecutor
 
     private_context = ContextVar("synthetic_worker_context", default="empty")
     sink = Capture()
@@ -318,7 +318,7 @@ async def test_worker_cancellation_and_late_failure_have_separate_safe_measureme
 
 
 async def test_shared_provider_span_never_exports_request_or_response(monkeypatch):
-    from hub_bot.utils.jdoodle import JDoodle, JDoodleError
+    from msu_hub_bot.providers.jdoodle import JDoodle, JDoodleError
 
     class Response:
         status = 503
@@ -490,7 +490,7 @@ async def test_failed_startup_closes_allocated_resources_without_raw_error(caplo
 
 
 async def test_passive_job_and_storage_emit_metrics_without_normal_traces():
-    from common.tg.runtime import Supervisor
+    from msu_hub_bot.telegram.runtime import Supervisor
 
     sink = Capture()
     telemetry = Telemetry(config(), transport=sink)
@@ -513,7 +513,7 @@ async def test_passive_job_and_storage_emit_metrics_without_normal_traces():
 
 
 async def test_passive_job_failure_links_completed_handler_and_reports_once():
-    from common.tg.runtime import Supervisor
+    from msu_hub_bot.telegram.runtime import Supervisor
 
     sink = Capture()
     telemetry = Telemetry(config(), {"test.handler"}, transport=sink)

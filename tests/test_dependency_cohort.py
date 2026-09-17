@@ -18,7 +18,9 @@ from python_socks.async_.asyncio.v2 import Proxy
 from redis.asyncio import Redis
 
 
-@pytest.mark.parametrize("name", ["aiogram", "pydantic_settings", "aiohttp_socks", "redis.asyncio", "bs4", "dns", "common.externals.dvach"])
+@pytest.mark.parametrize(
+    "name", ["aiogram", "pydantic_settings", "aiohttp_socks", "redis.asyncio", "bs4", "dns", "msu_hub_bot.providers.dvach"]
+)
 def test_required_dependency_integrations_import(name):
     importlib.import_module(name)
 

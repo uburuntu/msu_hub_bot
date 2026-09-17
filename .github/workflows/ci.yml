@@ -27,7 +27,7 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync ruff format --check msu_hub_bot tests tools deploy
+      - run: uv run --no-sync ruff format --check src tests tools
       - run: uv run --no-sync python tools/check_types.py
         env:
           TYPECHECK_BASE_REF: ${{ github.event.pull_request.base.sha }}
@@ -92,7 +92,7 @@ jobs:
           persist-credentials: false
       - name: Check native libraries, startup, and image archive
         id: image
-        run: python3 tools/build_release.py
+        run: python3 tools/deployment/build_release.py
       - name: Remove private image archive
         if: always()
         env:

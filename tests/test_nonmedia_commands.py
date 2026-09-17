@@ -7,9 +7,9 @@ from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import ChatMemberMember
 
-from common.tg.filters import MetaInfo
-from common.tg.middlewares.settings import Settings
-from hub_bot.commands import location, other, settings, votes
+from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.telegram.middlewares.settings import Settings
+from msu_hub_bot.commands import location, other, settings, votes
 from telegram_helpers import RecordingSession, make_message
 
 
@@ -84,7 +84,7 @@ def test_legacy_callback_wires_remain_compatible(family, wire, fields):
     import importlib
 
     module, cls = family.split(".")
-    callback = getattr(importlib.import_module(f"hub_bot.commands.{module}"), cls).callback_data
+    callback = getattr(importlib.import_module(f"msu_hub_bot.commands.{module}"), cls).callback_data
     assert callback(**fields).pack() == wire
     assert callback.unpack(wire).model_dump() == fields
 
@@ -107,7 +107,7 @@ async def test_callback_without_accessible_message_is_acknowledged(transport, fa
         values["message"] = {"date": 0, "chat": {"id": -1001, "type": "supergroup"}, "message_id": 7}
     query = CallbackQuery.model_validate(values, context={"bot": bot})
     module, cls = family.split(".")
-    command = getattr(importlib.import_module(f"hub_bot.commands.{module}"), cls)
+    command = getattr(importlib.import_module(f"msu_hub_bot.commands.{module}"), cls)
     kwargs = {}
     if module == "rate":
         kwargs["callback_data"] = command.callback_data(is_up="+")

@@ -5,7 +5,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter, TelegramServerError
 from aiogram.methods import GetMe, GetUpdates, SendMessage
 
-from common.tg.wrapper import BotWrapper
+from msu_hub_bot.telegram.wrapper import BotWrapper
 from telegram_helpers import RecordingSession, make_message
 
 
@@ -34,7 +34,7 @@ async def test_ambiguous_mutations_are_never_replayed(error):
 
 
 async def test_reads_retry_with_a_bound(monkeypatch):
-    monkeypatch.setattr("common.tg.wrapper.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("msu_hub_bot.telegram.wrapper.asyncio.sleep", AsyncMock())
     session = FailingSession(lambda method: TelegramNetworkError(method=method, message="offline"), times=10)
     bot = BotWrapper("123456789:" + "a" * 35, session=session)
     with pytest.raises(TelegramNetworkError):
@@ -44,7 +44,7 @@ async def test_reads_retry_with_a_bound(monkeypatch):
 
 async def test_explicit_rejection_can_retry_a_write(monkeypatch):
     sleep = AsyncMock()
-    monkeypatch.setattr("common.tg.wrapper.asyncio.sleep", sleep)
+    monkeypatch.setattr("msu_hub_bot.telegram.wrapper.asyncio.sleep", sleep)
     session = FailingSession(lambda method: TelegramRetryAfter(method=method, message="wait", retry_after=2))
     bot = BotWrapper("123456789:" + "a" * 35, session=session)
     await bot.send_message(42, "one accepted write")
@@ -72,7 +72,7 @@ async def test_reply_fallback_is_nested_before_transport():
 
 async def test_heartbeat_records_only_successful_getupdates(monkeypatch):
     marked = []
-    monkeypatch.setattr("common.tg.wrapper.mark_poll_success", lambda: marked.append(True))
+    monkeypatch.setattr("msu_hub_bot.telegram.wrapper.mark_poll_success", lambda: marked.append(True))
     session = RecordingSession()
     bot = BotWrapper("123456789:" + "a" * 35, session=session)
     await bot(GetMe())

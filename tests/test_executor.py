@@ -7,7 +7,7 @@ from concurrent.futures.thread import BrokenThreadPool
 
 import pytest
 
-from common.executor import TPExecutor
+from msu_hub_bot.execution.executor import TPExecutor
 
 
 class CountingPool(ThreadPoolExecutor):

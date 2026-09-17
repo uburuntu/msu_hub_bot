@@ -10,8 +10,8 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
-from common.tg.state import IsolationScope, UpdateStateContext
-from hub_bot.commands.prog import (
+from msu_hub_bot.telegram.state import IsolationScope, UpdateStateContext
+from msu_hub_bot.commands.prog import (
     ProgCallback,
     ProgCompiler,
     ProgStates,
@@ -19,7 +19,7 @@ from hub_bot.commands.prog import (
     register_code_submitters,
     register_code_submitters_with_stdin,
 )
-from hub_bot.utils.jdoodle import JDoodle, JDoodleResponse
+from msu_hub_bot.providers.jdoodle import JDoodle, JDoodleResponse
 from telegram_helpers import make_bot, make_message
 
 

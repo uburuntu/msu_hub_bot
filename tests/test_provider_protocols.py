@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import aiohttp
 import pytest
 
-from common.externals import other, topdf, urbandictionary
-from common.externals.exceptions import BadRequestError, ExternalServiceError
+from msu_hub_bot.providers import other, topdf, urbandictionary
+from msu_hub_bot.providers.exceptions import BadRequestError, ExternalServiceError
 
-from hub_bot.utils import wit
+from msu_hub_bot.providers import wit
 
 
 class Response:

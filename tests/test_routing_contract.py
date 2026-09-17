@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from common.tg.command import CommandParser, ParsedCommand
+from msu_hub_bot.telegram.command import CommandParser, ParsedCommand
 
 CONTRACT = json.loads((Path(__file__).parent / "fixtures/routing_contract.json").read_text())
 MESSAGE_ROUTES = [route for route in CONTRACT["routes"] if route["event"] == "message"]

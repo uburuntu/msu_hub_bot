@@ -7,8 +7,8 @@ import pytest
 from aiogram.types import Chat, Message, User
 from pendulum import from_timestamp
 
-from hub_bot.commands import vk
-from common.db.models import VkSubscription
+from msu_hub_bot.commands import vk
+from msu_hub_bot.storage.models import VkSubscription
 
 
 def message(text):

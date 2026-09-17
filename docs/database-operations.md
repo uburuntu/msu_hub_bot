@@ -12,7 +12,7 @@ operator guide. Application CD never applies SQL or upgrades Supabase.
 For example, an optional user-selected timezone needs a database change and an
 application change, released in that order:
 
-1. Trace the field through `common/db/models.py`, observations, repository
+1. Trace the field through `src/msu_hub_bot/storage/models.py`, observations, repository
    methods, SQL input allowlists, returned JSON, tests and recovery mappings.
    Define who writes it, how it is validated, and whether omission preserves
    it or explicit null clears it. A user preference must not be overwritten by
@@ -111,7 +111,7 @@ application/Auth schemas. An illustrative local connection is shown below:
 ```sh
 uv sync --locked
 uv run --no-sync ruff check .
-uv run --no-sync ruff format --check msu_hub_bot tests tools deploy
+uv run --no-sync ruff format --check src tests tools
 uv run --no-sync mypy
 uv run --no-sync pytest -q
 HUB_TEST_POSTGRES_DSN=postgresql:///hub_test_schema_change \

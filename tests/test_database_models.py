@@ -4,7 +4,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from common.db.models import ArchivedUpdate, ChatObservation, ChatRecord, DirectoryPatch, UserRecord, VkPatch
+from msu_hub_bot.storage.models import ArchivedUpdate, ChatObservation, ChatRecord, DirectoryPatch, UserRecord, VkPatch
 
 
 @pytest.mark.parametrize("metadata", [{"future": [None, "Тест"]}, "{}", [], None, 7])

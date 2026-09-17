@@ -14,7 +14,7 @@ import pytest
 def weather_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "app", SimpleNamespace(bot=SimpleNamespace(get_chat=AsyncMock())))
     spec = importlib.util.spec_from_file_location(
-        "weather_refresh_test", Path(__file__).resolve().parents[1] / "hub_bot/commands/weather.py"
+        "weather_refresh_test", Path(__file__).resolve().parents[1] / "src/msu_hub_bot/commands/weather.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

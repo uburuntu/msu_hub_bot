@@ -12,7 +12,8 @@ from aiogram.methods import DeleteMessage
 
 from msu_hub_bot.settings import MissingIntegration
 
-from hub_bot.utils import wit, wolfram
+from msu_hub_bot.providers import wit
+from msu_hub_bot.providers import wolfram
 
 METHOD = DeleteMessage(chat_id=42, message_id=1)
 

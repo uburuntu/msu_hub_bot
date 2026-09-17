@@ -9,14 +9,14 @@ import pydantic
 import pydantic.v1
 import pytest
 
-from common.db.models import UserRecord
-from common.externals import dvach
-from common.externals._api2ch.models.file import Image, Sticker, Video
-from common.externals._api2ch.models.response import ResponseThreadPostsHelper
+from msu_hub_bot.storage.models import UserRecord
+from msu_hub_bot.providers import dvach
+from msu_hub_bot.providers._api2ch.models.file import Image, Sticker, Video
+from msu_hub_bot.providers._api2ch.models.response import ResponseThreadPostsHelper
 from msu_hub_bot.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[1]
-SDK = ROOT / "common/externals/_api2ch"
+SDK = ROOT / "src/msu_hub_bot/providers/_api2ch"
 
 
 def post_payload(files=None):
@@ -99,7 +99,7 @@ def test_vendored_source_only_changes_imports_and_keeps_license():
     assert "Copyright (c) 2020 Ramzan Bekbulatov" in license_text
     assert "Permission is hereby granted, free of charge" in license_text
     assert 'THE SOFTWARE IS PROVIDED "AS IS"' in license_text
-    assert "common/externals/_api2ch/LICENSE" in (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
+    assert "src/msu_hub_bot/providers/_api2ch/LICENSE" in (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
 
 
 def test_legacy_models_are_isolated_from_pydantic_two_application_models():

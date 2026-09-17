@@ -3,8 +3,9 @@
 ## Host contract
 
 The application uses `~/msu_hub_bot` on the deployment host. The SSH deployment
-key is separate from personal SSH keys and is restricted to `deploy/deploy.py`
-as a forced command. The wrapper accepts only deploy/rollback requests and
+key is separate from personal SSH keys and restricted to the installed host
+wrapper as a forced command. Its source is [tools/deployment/host.py](../tools/deployment/host.py).
+The wrapper accepts only deploy/rollback requests and
 uses a host lock. A deployment sends one JSON header followed by a compressed
 image archive over the same encrypted SSH connection.
 
@@ -59,8 +60,8 @@ dollar signs, and multiline values without interpolation.
 Optional telemetry uses the same private envelope and remains disabled unless
 `HUB_TELEMETRY_ENABLED` explicitly enables it. Disabled deployments omit
 `LOGFIRE_TOKEN`; a saved token alone cannot enable export. Before the first
-enabled deployment, install the reviewed `deploy/deploy.py` host wrapper that
-accepts this exact additional variable. Older wrappers reject it. Keep
+enabled deployment, verify that the installed host wrapper accepts this exact
+additional variable. Keep
 management API keys, read tokens and CLI credentials out of runtime settings;
 `LOGFIRE_API_KEY` and arbitrary `LOGFIRE_*`/`OTEL_*` variables are not accepted.
 Build and image-validation steps receive no project token. See the

@@ -13,9 +13,9 @@ from aiogram.methods import CreateNewStickerSet, SendSticker
 from aiogram.types import InputSticker, Sticker, StickerSet, Update
 from PIL import Image
 
-from common.tg.state import ReleasableEventIsolation, StateContextMiddleware
-from hub_bot.commands import sticker
-from hub_bot.utils.sticker_sets import StickerSetClient, UploadMetadata
+from msu_hub_bot.telegram.state import ReleasableEventIsolation, StateContextMiddleware
+from msu_hub_bot.commands import sticker
+from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadMetadata
 from telegram_helpers import make_bot, make_message
 
 

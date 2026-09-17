@@ -2,13 +2,13 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from aiogram.types import Message
-from common.tg.runtime import Supervisor
+from msu_hub_bot.telegram.runtime import Supervisor
 
 import pytest
 
-from common.externals import geoguess as source
-from common.externals.exceptions import ExternalServiceError
-from hub_bot.commands import geoguess as game
+from msu_hub_bot.providers import geoguess as source
+from msu_hub_bot.providers.exceptions import ExternalServiceError
+from msu_hub_bot.commands import geoguess as game
 
 
 PHOTO = source.Photo(

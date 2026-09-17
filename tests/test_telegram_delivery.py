@@ -4,8 +4,8 @@ import pytest
 from aiogram import Bot
 from aiogram.types import BufferedInputFile, InputMediaDocument, InputMediaPhoto, ReplyParameters
 
-from common.tg.delivery import ReplyTarget, reply_album, send_album
-from common.tg.files import download_by_file_id, download_text, input_file
+from msu_hub_bot.telegram.delivery import ReplyTarget, reply_album, send_album
+from msu_hub_bot.telegram.files import download_by_file_id, download_text, input_file
 from telegram_helpers import RecordingSession, make_message
 
 

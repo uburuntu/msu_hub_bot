@@ -10,14 +10,14 @@ from unittest.mock import AsyncMock
 import pytest
 from aiohttp import ClientError
 
-from common.externals import topdf
-from common.externals.exceptions import ExternalServiceError
-from hub_bot.commands import lingvanex
+from msu_hub_bot.providers import topdf
+from msu_hub_bot.providers.exceptions import ExternalServiceError
+from msu_hub_bot.commands import lingvanex
 
 
 @pytest.fixture
 def external_handlers():
-    path = Path(__file__).resolve().parents[1] / "hub_bot/commands/externals.py"
+    path = Path(__file__).resolve().parents[1] / "src/msu_hub_bot/commands/externals.py"
     # Each test owns its provider stubs without changing other imported handlers.
     namespace = {}
     exec(compile(path.read_text(), str(path), "exec"), namespace)
@@ -396,7 +396,7 @@ async def test_gpt2_prompt_is_escaped_once(external_handlers):
 
 async def test_search_excerpt_survives_legacy_sender_splitting(external_handlers):
     import xml.etree.ElementTree as element_tree
-    from common.utils import cut_long_text
+    from msu_hub_bot.utils import cut_long_text
 
     target = SimpleNamespace(chat=object(), reply=AsyncMock())
     meta = SimpleNamespace(extract_text=lambda: (target, "synthetic"))

@@ -6,8 +6,8 @@ from aiogram.methods import SendMessage
 from aiogram.types import CallbackQuery, ErrorEvent, Update
 from aiohttp import ClientError
 
-from common.externals.exceptions import ExternalServiceError
-from hub_bot.commands import control
+from msu_hub_bot.providers.exceptions import ExternalServiceError
+from msu_hub_bot.commands import control
 from msu_hub_bot.settings import MissingIntegration, settings
 from telegram_helpers import make_bot, make_message
 

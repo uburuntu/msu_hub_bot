@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import AnswerInlineQuery, ForwardMessage, GetChatMember
 from aiogram.types import Chat, ChatMemberAdministrator, ChatMemberMember, ChatMemberOwner, InlineQuery, Message, User
 
-from hub_bot.commands import admin, debug, infra
+from msu_hub_bot.commands import admin, debug, infra
 
 
 def user(user_id=10):

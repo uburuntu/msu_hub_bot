@@ -1,0 +1,120 @@
+from contextlib import suppress
+
+from aiogram.enums import ChatType
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import ChatMemberAdministrator, ChatMemberOwner, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, Message
+from aiogram.utils.markdown import hbold
+
+from msu_hub_bot.storage.base import BotRepository
+from msu_hub_bot.storage.models import DirectoryCreate
+from msu_hub_bot.telegram.runtime import gather_complete
+from msu_hub_bot.telegram.utils import chat_link, sender_mention
+from msu_hub_bot.telegram.wrapper import BotWrapper
+from msu_hub_bot.events import EcosystemManager
+
+
+async def process_create_infra_chat(
+    message: Message,
+    bot: BotWrapper,
+    db: BotRepository,
+    events_chat_id: int,
+    em: EcosystemManager,
+) -> Message | bool | None:
+    if message.chat.type == ChatType.PRIVATE or await db.get_directory(message.chat.id) is not None:
+        return True
+    admins = await bot.get_chat_administrators(message.chat.id)
+    me = next((admin for admin in admins if admin.user.id == bot.id), None)
+    if not isinstance(me, ChatMemberAdministrator):
+        return None
+    if me.can_delete_messages:
+        await message.delete()
+    if not me.can_promote_members:
+        return None
+    await db.create_directory(
+        DirectoryCreate(
+            chat_id=message.chat.id,
+            name=message.chat.full_name,
+            section=EcosystemManager.ChatGroup.other.name,
+            members=await bot.get_chat_member_count(message.chat.id),
+        )
+    )
+    em.invalidate_directory()
+    event = f"❇️ {sender_mention(message)} добавил в экосистему новый чат: {await chat_link(message.chat, True)}."
+    return await bot.send_message(events_chat_id, event) if events_chat_id else None
+
+
+async def process_delete_infra_chat(
+    message: Message,
+    bot: BotWrapper,
+    db: BotRepository,
+    events_chat_id: int,
+    em: EcosystemManager,
+) -> Message | bool | None:
+    if message.chat.type == ChatType.PRIVATE or await db.get_directory(message.chat.id) is None:
+        return True
+    admins = await bot.get_chat_administrators(message.chat.id)
+    me = next((admin for admin in admins if admin.user.id == bot.id), None)
+    if isinstance(me, ChatMemberAdministrator) and me.can_delete_messages:
+        await message.delete()
+    await db.delete_directory(message.chat.id)
+    em.invalidate_directory()
+    event = f"❎️ {sender_mention(message)} удалил чат из экосистемы: {await chat_link(message.chat, True)}."
+    return await bot.send_message(events_chat_id, event) if events_chat_id else None
+
+
+async def process_update_pins(_message: Message, em: EcosystemManager) -> None:
+    await em.update_pins(forced=True)
+
+
+async def process_pin(message: Message, bot: BotWrapper, em: EcosystemManager) -> Message | bool | None:
+    admins = await bot.get_chat_administrators(message.chat.id)
+    me = next((admin for admin in admins if admin.user.id == bot.id), None)
+    if not isinstance(me, ChatMemberAdministrator):
+        return None
+    if me.can_delete_messages:
+        await message.delete()
+    if me.can_pin_messages:
+        return await em.pin(message.chat.id, forced=True)
+    return None
+
+
+async def process_pin_all(_message: Message, db: BotRepository, em: EcosystemManager) -> list[Message | bool]:
+    chats = await db.list_directory()
+    return await gather_complete(*(em.pin(chat.chat_id) for chat in chats))
+
+
+async def process_links(message: Message, em: EcosystemManager) -> Message:
+    return await message.answer(await em.text())
+
+
+async def process_status(message: Message, bot: BotWrapper, db: BotRepository) -> Message:
+    chats = {chat.chat_id: chat for chat in await db.list_directory()}
+    completed: list[tuple[int, str, str]] = []
+
+    async def check(chat_id: int) -> None:
+        try:
+            member = await bot.get_chat_member(chat_id, bot.id)
+            if isinstance(member, ChatMemberOwner):
+                result = (chat_id, "✅", "✅")
+            elif isinstance(member, ChatMemberAdministrator):
+                result = (chat_id, "✅", "✅" if member.can_promote_members else "❌")
+            else:
+                result = (chat_id, "❌", "❌")
+        except TelegramBadRequest:
+            result = (chat_id, "💔", "💔")
+        completed.append(result)
+
+    await gather_complete(*(check(chat_id) for chat_id in chats))
+    text = hbold("Status") + "\n\n"
+    for chat_id, first, second in completed:
+        text += f"— {chats[chat_id].name}: {first} {second}\n"
+    return await message.reply(text)
+
+
+async def process_inline(inline_query: InlineQuery, em: EcosystemManager) -> bool:
+    text = await em.text()
+    content = InputTextMessageContent(message_text=text)
+    item = InlineQueryResultArticle(id="0", title="Все чаты МГУ", input_message_content=content)
+    with suppress(TelegramBadRequest):
+        return await inline_query.answer(results=[item], is_personal=False, cache_time=10 * 60)
+    return True

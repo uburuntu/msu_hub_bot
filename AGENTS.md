@@ -3,12 +3,13 @@
 - A friends' Swiss-army Telegram bot, born in Moscow State University chats and loved for doing useful, funny and occasionally silly things. Preserve that breadth and personality.
 - Write natural, thoughtful Russian/English: concise for small actions, detailed when useful, with relevant links. Keep selected inside jokes; errors should help, not scold or bury the answer in boilerplate.
 - Read `pyproject.toml`, `uv.lock`, runtime settings and deployment files for the implemented stack; do not duplicate changing version lists in guidance.
+- Application code belongs in `src/msu_hub_bot/`; deployment tooling in `tools/deployment/`, database history in `dbschema/`, and maintained operating contracts in `docs/`.
 - Keep feature decisions traceable. User choices override inventory recommendations; a reviewed decision does not itself mean implementation, validation or deployment is complete.
 - Keep simple things simple: prefer a small in-memory check to timers, persistence or extra services when the behavior does not need them.
 - Build reusable, configurable pieces around the bot's behavior. Preserve `MetaCommand`/`MetaInfo`; use routers, middleware and FSM where their responsibilities fit, with explicit policies instead of accidental framework defaults.
 - Respect the requested scope: planning does not authorize implementation, data migration, deployment or publication.
 - Trace aliases, callbacks, FSM steps, automatic handlers and shared callers before removing a feature. Unreviewed dependent commands require review; preserve explicitly retained novelty features.
-- Use `uv` and Ruff. Current checks: `uv run --no-sync ruff check .` and `uv run --no-sync mypy` and `uv run --no-sync pytest -q`; tests use synthetic inputs and block network. Run checks appropriate to the authorized change.
+- Use `uv` and Ruff. Check with `uv run --no-sync ruff check .`, `uv run --no-sync ruff format --check src tests tools`, `uv run --no-sync python tools/check_types.py`, `uv run --no-sync mypy` and `uv run --no-sync pytest -q`; run checks appropriate to the change. Tests use synthetic inputs and block network.
 - Use Context7 MCP for library/framework/SDK/API/CLI/cloud documentation: resolve the library ID, then query current docs. Plain code review, scripts and business-logic refactoring do not require documentation lookup.
 - For aiogram/Telegram work, keep current upstream checkouts in ignored `references/aiogram` and `references/telegram-bot-api`. If missing, use `gh repo clone aiogram/aiogram references/aiogram -- --depth=1` and `gh repo clone tdlib/telegram-bot-api references/telegram-bot-api -- --depth=1 --recurse-submodules --shallow-submodules`.
 - Search upstream implementation and tests to settle framework/protocol details; familiarity and documentation summaries are insufficient. Check the selected release against the reference revision, record evidence privately, and preserve any local reference edits when refreshing.

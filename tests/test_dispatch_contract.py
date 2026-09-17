@@ -12,12 +12,17 @@ from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
-from common.tg.filters import MetaCommand, SlashCommand
-from common.tg.middlewares.settings import SettingsMiddleware
-from common.tg.state import ReleasableEventIsolation, SelectiveIsolationMiddleware, StateContextMiddleware, TopicFSMContextMiddleware
-from hub_bot.routing import build_router
-from hub_bot.utils.wit import Wit
-from hub_bot.utils.wolfram import WolframAPI
+from msu_hub_bot.telegram.filters import MetaCommand, SlashCommand
+from msu_hub_bot.telegram.middlewares.settings import SettingsMiddleware
+from msu_hub_bot.telegram.state import (
+    ReleasableEventIsolation,
+    SelectiveIsolationMiddleware,
+    StateContextMiddleware,
+    TopicFSMContextMiddleware,
+)
+from msu_hub_bot.routing import build_router
+from msu_hub_bot.providers.wit import Wit
+from msu_hub_bot.providers.wolfram import WolframAPI
 from msu_hub_bot.settings import Settings
 from msu_hub_bot.telemetry import Telemetry
 from telegram_helpers import RecordingSession, make_bot, make_message
@@ -165,7 +170,7 @@ async def test_inline_tyan_callback_is_acknowledged_without_chat_preferences():
 
 @pytest.mark.parametrize("backend", ["edgedb", "supabase"])
 async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(monkeypatch, backend):
-    from hub_bot import app
+    from msu_hub_bot import app
 
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     private_text = "SYNTHETIC_PRIVATE_ROUTER_CANARY"

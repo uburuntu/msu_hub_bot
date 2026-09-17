@@ -702,7 +702,7 @@ def reconcile(
     cutoff = utc(datetime.fromisoformat(utc(as_of)) - timedelta(days=30)) if as_of else None
 
     def expected_rows(table: str, schema: dict[str, Any]) -> Iterator[dict[str, Any]]:
-        from common.db.observations import reference_payload
+        from msu_hub_bot.storage.observations import reference_payload
 
         for row in rows(directory, table, schema):
             if table == "updates":
@@ -743,7 +743,7 @@ def transform_update(row: dict[str, Any], as_of: str) -> dict[str, Any]:
     """Typed identities plus original JSON bodies; never round opaque JSON numbers."""
     from aiogram.types import Update
 
-    from common.db.observations import archive_observation, is_message_payload, reference_payload
+    from msu_hub_bot.storage.observations import archive_observation, is_message_payload, reference_payload
 
     raw = row["data"]
     if not isinstance(raw, dict) or type(raw.get("update_id")) is not int:

@@ -3,8 +3,8 @@ import io
 import pytest
 from PIL import Image, ImageChops
 
-from hub_bot.resources import lobster_font, times_new_roman_font
-from hub_bot.utils import caption_layout as layout
+from msu_hub_bot.resources import lobster_font, times_new_roman_font
+from msu_hub_bot.media import caption_layout as layout
 
 TEXTS = [
     "Длинная русская подпись с буквами Ё, й и щ: слова должны помещаться целиком. " * 5,

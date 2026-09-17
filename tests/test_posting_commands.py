@@ -10,9 +10,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import CopyMessage, SendMessage
 from aiogram.types import Chat, Message, MessageOriginChannel, MessageOriginChat, Update, User
 
-from common.tg.state import ReleasableEventIsolation, StateContextMiddleware, UpdateStateContext
-from hub_bot.commands import posting
-from hub_bot.commands.control import process_cancel
+from msu_hub_bot.telegram.state import ReleasableEventIsolation, StateContextMiddleware, UpdateStateContext
+from msu_hub_bot.commands import posting
+from msu_hub_bot.commands.control import process_cancel
 
 KEY = StorageKey(bot_id=123456, chat_id=-10012345, user_id=10, thread_id=2)
 

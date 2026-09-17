@@ -8,8 +8,8 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.fsm.storage.base import DefaultKeyBuilder, StorageKey
 from aiogram.methods import DeleteMessage
 
-from common.tg.runtime import Supervisor
-from common.tg.storage import RedisStorage, reset_legacy_fsm, reset_v3_fsm
+from msu_hub_bot.telegram.runtime import Supervisor
+from msu_hub_bot.telegram.storage import RedisStorage, reset_legacy_fsm, reset_v3_fsm
 
 
 class MemoryRedis:
@@ -57,7 +57,7 @@ class MemoryRedis:
 
 @pytest.fixture
 def repository(monkeypatch):
-    monkeypatch.setattr("common.tg.storage.time.time", lambda: 1_000)
+    monkeypatch.setattr("msu_hub_bot.telegram.storage.time.time", lambda: 1_000)
     client = MemoryRedis()
     supervisor = Supervisor()
     return RedisStorage(client, prefix="hub", supervisor=supervisor), client, supervisor

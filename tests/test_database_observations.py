@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from aiogram.types import CallbackQuery, Chat, ChatFullInfo, Message, Update, User
 
-from common.db.observations import archive_observation, chat_observation, is_message_payload, reference_payload
+from msu_hub_bot.storage.observations import archive_observation, chat_observation, is_message_payload, reference_payload
 
 NOW = datetime(2026, 9, 17, tzinfo=UTC)
 

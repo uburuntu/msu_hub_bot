@@ -10,14 +10,14 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import EditMessageText
 from aiogram.types import Chat, Document, Message, Update, User
 
-from common.tg.middlewares.check_gets import CheckGets
-from common.tg.middlewares.logs import LoggingMiddleware
-from common.tg.middlewares.settings import Settings
-from common.tg.middlewares.skip777000 import Skip777000
-from common.tg.middlewares.updates import UpdatesMiddleware
-from common.tg.middlewares.viewer import ViewerMiddleware
-from common.tg.runtime import AdmissionMiddleware, Supervisor
-from hub_bot.events import EcosystemManager, EventsMiddleware
+from msu_hub_bot.telegram.middlewares.check_gets import CheckGets
+from msu_hub_bot.telegram.middlewares.logs import LoggingMiddleware
+from msu_hub_bot.telegram.middlewares.settings import Settings
+from msu_hub_bot.telegram.middlewares.skip777000 import Skip777000
+from msu_hub_bot.telegram.middlewares.updates import UpdatesMiddleware
+from msu_hub_bot.telegram.middlewares.viewer import ViewerMiddleware
+from msu_hub_bot.telegram.runtime import AdmissionMiddleware, Supervisor
+from msu_hub_bot.events import EcosystemManager, EventsMiddleware
 from telegram_helpers import RecordingSession
 
 
@@ -157,9 +157,9 @@ async def test_document_without_declared_size_is_bounded_and_stream_closed(monke
     source = io.BytesIO(b"document")
     convert = AsyncMock(return_value=("https://example.test/file.pdf", "https://example.test/thumb.jpg", "file.pdf"))
     reply = AsyncMock()
-    monkeypatch.setattr("common.tg.middlewares.viewer.download", AsyncMock(return_value=source))
-    monkeypatch.setattr("common.tg.middlewares.viewer.bot_for", lambda value: SimpleNamespace())
-    monkeypatch.setattr("common.tg.middlewares.viewer.convert_to_pdf", convert)
+    monkeypatch.setattr("msu_hub_bot.telegram.middlewares.viewer.download", AsyncMock(return_value=source))
+    monkeypatch.setattr("msu_hub_bot.telegram.middlewares.viewer.bot_for", lambda value: SimpleNamespace())
+    monkeypatch.setattr("msu_hub_bot.telegram.middlewares.viewer.convert_to_pdf", convert)
     monkeypatch.setattr(Message, "reply_document", reply)
     event = message(document=Document(file_id="file", file_unique_id="unique", file_name="file.docx"))
     await viewer.view(event, Settings())
@@ -182,7 +182,7 @@ async def test_log_middleware_never_records_update_text_names_or_ids(caplog):
 async def test_membership_side_effects_continue_to_handler_without_ambient_bot(monkeypatch):
     bot = SimpleNamespace(id=123, send_message=AsyncMock(), get_chat_member_count=AsyncMock(return_value=5))
     middleware = EventsMiddleware(bot, SimpleNamespace(list_directory=AsyncMock(return_value=[])), 999)
-    monkeypatch.setattr("hub_bot.events.chat_link", AsyncMock(return_value="Synthetic chat"))
+    monkeypatch.setattr("msu_hub_bot.events.chat_link", AsyncMock(return_value="Synthetic chat"))
     handler = AsyncMock(return_value="handled")
     event = message(from_user=None, new_chat_members=[User(id=123, is_bot=True, first_name="Bot")])
     assert await middleware(handler, event, {}) == "handled"

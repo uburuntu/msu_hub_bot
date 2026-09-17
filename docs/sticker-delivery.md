@@ -19,6 +19,21 @@ when needed, including when preview lookup falls back to a pack link. Valid TGS
 stickers retain their vector animation; malformed TGS timelines over three
 seconds are still rejected.
 
+Conversion uses [sticker_media.py](../src/msu_hub_bot/media/sticker_media.py)
+through the shared thread executor. Input size is checked before downloading
+and again before decoding; downloads precede worker admission. Caller deadlines
+do not terminate running worker threads.
+
+| Format or operation | Enforced limits |
+| --- | --- |
+| Video output | Silent VP9 WEBM, longest side 512 pixels, at most three seconds, 30 FPS and 256 KiB. |
+| Static output | Lossless WEBP, longest side 512 pixels, at most 512 KiB. |
+| Existing TGS | At most 64 KiB compressed and 2 MiB expanded JSON; positive duration at most three seconds. Arbitrary TGS documents are rejected. |
+| FFmpeg/FFprobe | Each invocation has a 60-second timeout; video preparation uses an input probe, one encoding attempt and an output probe. |
+
+The sticker encoder requests two codec threads; this does not cap total decoder
+or filter resource use. Compressed input limits do not bound decoded media memory.
+
 - `UploadedSticker` carries the upload reference separately from its identity
   metadata. Only the required `InputSticker` fields go to Telegram.
 - After a successful save, lookup matches `file_unique_id` and sticker format.
@@ -48,29 +63,13 @@ races, and failure handling after a confirmed save.
 Native MP4/GIF tests use a colour-coded timeline to verify that frames after
 seven source seconds are excluded while the earlier segment remains present.
 
-## Suggested coverage next
-
-Tracked in [issue #7](https://github.com/uburuntu/msu_hub_bot/issues/7).
-
-1. **Reuse existing regular stickers directly.** Avoid unnecessary encoding when
-   the input already has a valid sticker format, dimensions, and duration. Cover
-   static WEBP, vector TGS, VP9 alpha, and duplicate additions.
-2. **Validate more animated image inputs.** Add explicit APNG and animated WEBP
-   coverage, including transparency, loop timing, malformed metadata, and decoder
-   availability in the production image. These depend on the media decoders.
-3. **Accept custom emoji as source material.** Resolve custom emoji entities in
-   text/captions through `getCustomEmojiStickers` and normalize their artwork to
-   regular sticker dimensions. Native custom emoji output should use a separate
-   pack type and rendering policy, including repainting where supported.
-4. **Expose search metadata.** Support the API's 1–20 associated emoji and up to
-   20 search keywords with 64 characters total; the command currently uses at
-   most five emoji. Add editing through `setStickerEmojiList` and
-   `setStickerKeywords`.
 Pack replacement, reordering, title editing, and thumbnail management stay in
 Telegram's apps, which provide a better interface for these operations.
 
 The shared client uses aiogram’s typed `InputSticker` and upload models; media
 conversion remains separate from Telegram delivery and conversation state.
+Enhancement proposals and additional coverage belong in
+[issue #7](https://github.com/uburuntu/msu_hub_bot/issues/7).
 
 References: [Bot API sticker methods](https://core.telegram.org/bots/api#stickers)
 and [InputSticker formats and metadata](https://core.telegram.org/bots/api#inputsticker).

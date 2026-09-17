@@ -8,7 +8,7 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, Chat, InaccessibleMessage, Message, Update, User
 
-from common.tg.state import (
+from msu_hub_bot.telegram.state import (
     ReleasableEventIsolation,
     SelectiveIsolationMiddleware,
     StateContextMiddleware,
