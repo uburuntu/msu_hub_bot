@@ -375,3 +375,53 @@ async def test_failure_log_without_owned_span_does_not_borrow_ambient_trace_or_b
     assert not record.trace_id and not record.span_id
     assert record.time_unix_nano > 0
     assert CANARY not in sink.serialized()
+
+
+@pytest.mark.parametrize("business_failure", [False, True])
+async def test_sdk_log_failure_preserves_business_result_and_clears_context(monkeypatch, caplog, business_failure):
+    from msu_hub_bot import telemetry as module
+
+    sink = Capture()
+    telemetry = Telemetry(config(), {"test.handler"}, transport=sink)
+    await telemetry.start()
+    business_error = ValueError("synthetic business failure")
+    result = object()
+    handles = []
+
+    def failed_emit(**kwargs):
+        raise RuntimeError(CANARY)
+
+    monkeypatch.setattr(telemetry._structured_logger, "emit", failed_emit)
+
+    def business_operation():
+        with telemetry.context(user_id=501, chat_id=-7001):
+            with telemetry.operation(Boundary.HANDLER, "test.handler") as handle:
+                handles.append(handle)
+                if business_failure:
+                    raise business_error
+                return result
+
+    try:
+        if business_failure:
+            with pytest.raises(ValueError) as caught:
+                business_operation()
+            assert caught.value is business_error
+        else:
+            assert business_operation() is result
+        assert not handles[0].active
+        assert module._current.get() is None and module._request.get() is None
+        with telemetry.operation(Boundary.PROVIDER, "http.request"):
+            pass
+    finally:
+        await telemetry.close()
+
+    handler = next(span for span in sink.spans() if span.name == "bot.handler")
+    orphan = next(span for span in sink.spans() if span.name == "provider.request")
+    assert handler.end_time_unix_nano >= handler.start_time_unix_nano
+    assert attributes(handler)["outcome"] == ("unexpected" if business_failure else "success")
+    assert not orphan.parent_span_id and orphan.trace_id != handler.trace_id
+    assert not (IDS | {"handler", "command"}) & attributes(orphan).keys()
+    assert telemetry.dropped_logs == 1
+    assert sink.logs() == []
+    assert "Telemetry log emission failed" in caplog.text
+    assert CANARY not in caplog.text and CANARY not in sink.serialized()

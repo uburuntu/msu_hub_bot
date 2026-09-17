@@ -501,6 +501,7 @@ class Telemetry:
         self._closed = False
         self._close_lock = asyncio.Lock()
         self._outage = False
+        self._log_emit_failed = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self.dropped_spans = 0
         self.dropped_logs = 0
@@ -710,22 +711,34 @@ class Telemetry:
         # An explicit empty context prevents ambient baggage or unrelated traces.
         context = set_span_in_context(span if span is not None else INVALID_SPAN, Context())
         severity = SeverityNumber.ERROR if handle.outcome is Outcome.UNEXPECTED else SeverityNumber.WARN if failed else SeverityNumber.INFO
-        self._structured_logger.emit(
-            timestamp=time.time_ns(),
-            body=event,
-            event_name=event,
-            context=context,
-            severity_number=severity,
-            severity_text=severity.name,
-            attributes={
-                **attributes,
-                **handle.details,
-                **handle.failure,
-                "boundary": boundary.value,
-                "outcome": handle.outcome.value,
-                "duration_ms": round(max(0, duration) * 1000, 3),
-            },
-        )
+        try:
+            self._structured_logger.emit(
+                timestamp=time.time_ns(),
+                body=event,
+                event_name=event,
+                context=context,
+                severity_number=severity,
+                severity_text=severity.name,
+                attributes={
+                    **attributes,
+                    **handle.details,
+                    **handle.failure,
+                    "boundary": boundary.value,
+                    "outcome": handle.outcome.value,
+                    "duration_ms": round(max(0, duration) * 1000, 3),
+                },
+            )
+        except Exception:
+            self.dropped_logs += 1
+            try:
+                self._log_drops.add(1)
+            except Exception:
+                pass
+            if not self._log_emit_failed:
+                logger.warning("Telemetry log emission failed; records will be dropped")
+                self._log_emit_failed = True
+        else:
+            self._log_emit_failed = False
 
     def _measure(self, boundary: Boundary, operation: str, outcome: Outcome, duration: float, **labels: str) -> None:
         if self._meter_provider is not None and not self._closed:
@@ -823,22 +836,29 @@ class Telemetry:
                         dispatch.reported = True
             raise
         finally:
-            duration = time.monotonic() - start
-            if span is not None:
-                span.set_attribute("outcome", handle.outcome.value)
-                if handle.outcome is Outcome.UNEXPECTED:
-                    span.set_status(StatusCode.ERROR)
-            if boundary is not Boundary.DISPATCH:
-                self._measure(boundary, key, handle.outcome, duration, **labels)
-            self._operation_log(boundary, handle, attributes, duration)
-            if dispatch is not None and boundary is Boundary.HANDLER and span is not None:
-                dispatch.last_span = span.get_span_context()
-                dispatch.last_context = tuple(_request_attributes().items())
-            handle.active = False
-            _current.reset(token)
-            _request.reset(request_token)
-            if span is not None:
-                span.end()
+            try:
+                duration = time.monotonic() - start
+                if span is not None:
+                    span.set_attribute("outcome", handle.outcome.value)
+                    if handle.outcome is Outcome.UNEXPECTED:
+                        span.set_status(StatusCode.ERROR)
+                if boundary is not Boundary.DISPATCH:
+                    self._measure(boundary, key, handle.outcome, duration, **labels)
+                self._operation_log(boundary, handle, attributes, duration)
+                if dispatch is not None and boundary is Boundary.HANDLER and span is not None:
+                    dispatch.last_span = span.get_span_context()
+                    dispatch.last_context = tuple(_request_attributes().items())
+            except Exception:
+                logger.warning("Telemetry operation diagnostics failed")
+            finally:
+                handle.active = False
+                _current.reset(token)
+                _request.reset(request_token)
+                if span is not None:
+                    try:
+                        span.end()
+                    except Exception:
+                        logger.warning("Telemetry span completion failed")
 
     @contextmanager
     def dispatch(self, kind: str) -> Iterator[_Dispatch]:
