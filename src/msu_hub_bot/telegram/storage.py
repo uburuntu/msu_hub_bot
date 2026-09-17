@@ -97,7 +97,7 @@ class RedisStorage:
         try:
             with self.telemetry.operation(Boundary.PROVIDER, "telegram.delete", provider=Provider.TELEGRAM):
                 await bot.delete_message(chat_id, message_id)
-        except (TelegramBadRequest, TelegramForbiddenError):
+        except TelegramBadRequest, TelegramForbiddenError:
             pass
         except TelegramAPIError:
             return

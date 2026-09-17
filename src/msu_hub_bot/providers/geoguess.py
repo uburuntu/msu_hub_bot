@@ -116,7 +116,7 @@ def candidates(data):
                     longitude,
                 )
             )
-        except (KeyError, IndexError, TypeError, ValueError):
+        except KeyError, IndexError, TypeError, ValueError:
             continue
     return photos
 

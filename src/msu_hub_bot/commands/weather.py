@@ -197,7 +197,7 @@ class Weather(CallbackCommandBase):
                 -90 <= coordinates[0] <= 90 and -180 <= coordinates[1] <= 180
             ):
                 raise ValueError
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             return await query.answer("Не удалось прочитать координаты. Пришлите геопозицию заново.", show_alert=True)
         if not isinstance(query.message, Message):
             return await query.answer("Сообщение с погодой больше недоступно.", show_alert=True)

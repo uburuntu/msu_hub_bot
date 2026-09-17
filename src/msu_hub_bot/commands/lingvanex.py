@@ -35,7 +35,7 @@ async def tr(meta: MetaInfo, src: str, dest: str) -> Message | None:
                 translated += result + "\n\n"
             else:
                 failed.append("изображение")
-        except (ExternalServiceError, ClientError, TimeoutError):
+        except ExternalServiceError, ClientError, TimeoutError:
             failed.append("изображение")
 
     target, text = meta.extract_text()
@@ -46,7 +46,7 @@ async def tr(meta: MetaInfo, src: str, dest: str) -> Message | None:
                 translated += result
             else:
                 failed.append("текст")
-        except (ExternalServiceError, ClientError, TimeoutError):
+        except ExternalServiceError, ClientError, TimeoutError:
             failed.append("текст")
 
     if translated:

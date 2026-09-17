@@ -95,7 +95,7 @@ class AntiBot(CallbackCommandBase):
         try:
             chat_id, user_id = int(callback_data.chat_id), int(callback_data.user_id)
             action = callback_data.action
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             return await query.answer("Эта кнопка больше не работает.")
         if (
             not isinstance(query.message, Message)

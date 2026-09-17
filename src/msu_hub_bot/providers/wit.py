@@ -88,7 +88,7 @@ class WitAPI:
                     raise WitAPIError(response.status, response.reason or "")
                 try:
                     result = await response.json()
-                except (aiohttp.ContentTypeError, ValueError):
+                except aiohttp.ContentTypeError, ValueError:
                     raise WitAPIError(response.status, "Invalid response") from None
                 if not isinstance(result, dict) or result.get("error") or ("text" in result and not isinstance(result["text"], str)):
                     raise WitAPIError(response.status, "Invalid response")

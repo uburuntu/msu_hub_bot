@@ -90,7 +90,7 @@ class Geoguess:
             await asyncio.wait_for(cls.send_round_photo(message, round_), timeout=PHOTO_TIMEOUT)
             started = True
             await cls.update_board(round_)
-        except (ExternalServiceError, TelegramAPIError, asyncio.TimeoutError):
+        except ExternalServiceError, TelegramAPIError, asyncio.TimeoutError:
             if cls.rounds.get(chat_id) is round_:
                 cls.rounds.pop(chat_id, None)
             await _send(message.reply("Ошибка, попробуйте еще раз"))
@@ -155,7 +155,7 @@ class Geoguess:
             choice = int(callback_data.choice)
             if not 0 <= choice < len(round_.options):
                 raise ValueError
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             return await _send(query.answer("Неизвестный вариант."))
         # No await between checking and recording: simultaneous clicks cannot vote twice.
         round_.votes[user_id] = (choice, query.from_user.full_name[:40])
@@ -202,7 +202,7 @@ class Geoguess:
                     if round_.board_texts[i] != "Список ответов выше.":
                         await _send(boards[i].edit_text("Список ответов выше."))
                         round_.board_texts[i] = "Список ответов выше."
-            except (TelegramAPIError, asyncio.TimeoutError):
+            except TelegramAPIError, asyncio.TimeoutError:
                 logger.warning("Geoguess vote board update failed")
 
     @classmethod
@@ -252,7 +252,7 @@ class Geoguess:
                 result += "Никто не угадал 😄" if round_.votes else "В этот раз никто не ответил."
             try:
                 await _send(round_.message.edit_caption(caption=result, parse_mode="HTML", reply_markup=None))
-            except (TelegramAPIError, asyncio.TimeoutError):
+            except TelegramAPIError, asyncio.TimeoutError:
                 await _send(round_.message.reply(result, parse_mode="HTML", disable_web_page_preview=True))
             for text in winner_messages:
                 await _send(round_.message.reply(text, parse_mode="HTML", disable_web_page_preview=True))

@@ -37,7 +37,7 @@ def _calculate(text: str, commands: list[str]) -> str | None:
                 text,
                 flags=flags,
             )[:MAX_TEXT_LENGTH]
-        except (re.error, ValueError):
+        except re.error, ValueError:
             continue
     return text
 

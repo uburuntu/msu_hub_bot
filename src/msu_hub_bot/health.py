@@ -17,7 +17,7 @@ def ready(max_age: float = 180) -> bool:
     try:
         age = time.monotonic() - float(heartbeat_path().read_text())
         return 0 <= age <= max_age
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return False
 
 

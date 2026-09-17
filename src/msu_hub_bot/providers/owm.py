@@ -130,7 +130,7 @@ async def weather(coordinates: Tuple[float, float], location_name: str = None) -
         )
         name = location_name or current.get("name") or forecast["city"].get("name") or f"{lat:g}, {lon:g}"
         return result, name
-    except (aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError, IndexError):
+    except aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError, IndexError:
         # Transport errors can contain a URL with appid; keep that out of logs.
         raise WeatherServiceError() from None
 
@@ -150,7 +150,7 @@ async def geocoding(name: str) -> Optional[Tuple[Tuple[float, float], str]]:
         name = (place.get("local_names") or {}).get("ru") or place["name"]
         description = ", ".join(str(value) for value in (name, place.get("state"), place.get("country")) if value)
         return coordinates, description
-    except (aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError, IndexError):
+    except aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError, IndexError:
         raise WeatherServiceError() from None
 
 

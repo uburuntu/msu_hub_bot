@@ -49,7 +49,7 @@ def ffmpeg2(
             # subprocess.run kills and reaps the child before returning the error.
             logger.warning("FFmpeg conversion exceeded its deadline")
             return None
-        except (OSError, subprocess.CalledProcessError):
+        except OSError, subprocess.CalledProcessError:
             # Native diagnostics can include input text/URLs; do not print them.
             logger.warning("FFmpeg conversion failed")
             return None

@@ -165,7 +165,7 @@ class SupabaseRepository:
                 and url.path in {"", "/"}
             )
             bot_id = int(config.bot_token.partition(":")[0])
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             raise ValueError("Invalid Supabase repository configuration") from None
         if (
             not valid_url
@@ -231,7 +231,7 @@ class SupabaseRepository:
                 raise RepositoryProtocolError()
             try:
                 return _JSON.validate_python(json.loads(body, parse_constant=_reject_nonfinite, parse_float=_finite_float), strict=True)
-            except (ValidationError, ValueError, RecursionError):
+            except ValidationError, ValueError, RecursionError:
                 raise RepositoryProtocolError() from None
 
     async def _access_token(self) -> str:
@@ -290,7 +290,7 @@ class SupabaseRepository:
             except TimeoutError:
                 span.set_outcome(Outcome.TIMEOUT)
                 raise RepositoryUnavailable(RepositoryFailure.TIMEOUT) from None
-            except (aiohttp.ClientError, OSError):
+            except aiohttp.ClientError, OSError:
                 span.set_outcome(Outcome.UNAVAILABLE)
                 raise RepositoryUnavailable(RepositoryFailure.UNAVAILABLE) from None
             except RepositoryError as error:
@@ -301,7 +301,7 @@ class SupabaseRepository:
                 else:
                     span.set_outcome(Outcome.REJECTED)
                 raise
-            except (ValueError, TypeError, OverflowError):
+            except ValueError, TypeError, OverflowError:
                 raise RepositoryProtocolError() from None
 
     async def check(self) -> None:

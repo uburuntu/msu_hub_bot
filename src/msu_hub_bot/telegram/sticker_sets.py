@@ -147,7 +147,7 @@ class StickerSetClient:
                             payload = data.getvalue()
                             if len(payload) == uploaded.size and hashlib.sha256(payload).hexdigest() == uploaded.sha256:
                                 return sticker.file_id
-        except (TimeoutError, TelegramAPIError):
+        except TimeoutError, TelegramAPIError:
             pass
         logger.warning("Saved sticker preview could not be resolved")
         return None

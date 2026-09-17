@@ -62,7 +62,7 @@ class TelegramRequestPolicy(BaseRequestMiddleware):
                 if attempt + 1 == self.attempts or error.retry_after > self.max_retry_after:
                     raise
                 await asyncio.sleep(max(error.retry_after, 0))
-            except (TelegramNetworkError, TelegramServerError, TimeoutError):
+            except TelegramNetworkError, TelegramServerError, TimeoutError:
                 if not is_read or attempt + 1 == self.attempts:
                     raise
                 await asyncio.sleep(2**attempt)

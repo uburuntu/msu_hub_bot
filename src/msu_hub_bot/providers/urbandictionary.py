@@ -38,5 +38,5 @@ async def urban_dictionary(query: str = None) -> List[dict]:
                         }
                     )
                 return records
-            except (aiohttp.ContentTypeError, KeyError, TypeError, ValueError):
+            except aiohttp.ContentTypeError, KeyError, TypeError, ValueError:
                 raise BadRequestError() from None

@@ -35,7 +35,7 @@ async def _response_json(response) -> dict:
         if not isinstance(result, dict):
             raise TypeError
         return result
-    except (aiohttp.ContentTypeError, TypeError, ValueError):
+    except aiohttp.ContentTypeError, TypeError, ValueError:
         raise BadRequestError() from None
 
 

@@ -88,7 +88,7 @@ class WolframAPI:
         try:
             try:
                 image, ratio = await self.request(query=query)
-            except (WolframAPIError, aiohttp.ClientError, TimeoutError):
+            except WolframAPIError, aiohttp.ClientError, TimeoutError:
                 return await message.reply("Не удалось получить результат от WolframAlpha. Попробуйте другой запрос или повторите позже.")
 
             if ratio > 2.1:

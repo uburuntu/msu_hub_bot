@@ -30,7 +30,7 @@ async def duckduckgo(query: str) -> dict:
                 if not isinstance(result, dict) or not all(isinstance(result.get(key, ""), str) for key in keys):
                     raise ValueError
                 return {key: result.get(key, "") for key in keys}
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 raise BadRequestError() from None
 
 
@@ -66,7 +66,7 @@ async def remove_bg(file: io.BytesIO) -> str:
         if not isinstance(preview, str) or not preview.startswith("/") or preview.startswith("//"):
             raise ValueError
         return "https://slazzer.com" + preview
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         raise BadRequestError() from None
 
 
@@ -110,7 +110,7 @@ async def imgur_upload(file: io.BytesIO, image_or_video: str = "image") -> dict:
             if result.get("processing") is not None and not isinstance(result["processing"], dict):
                 raise ValueError
             return result
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             raise BadRequestError() from None
 
     async with (
@@ -155,5 +155,5 @@ async def porfirevich(text: str) -> str:
                 if not isinstance(replies, list) or not replies or not isinstance(replies[-1], str) or not replies[-1].strip():
                     raise ValueError
                 return replies[-1]
-            except (aiohttp.ContentTypeError, KeyError, TypeError, ValueError):
+            except aiohttp.ContentTypeError, KeyError, TypeError, ValueError:
                 raise BadRequestError() from None
