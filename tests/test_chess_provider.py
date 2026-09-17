@@ -189,6 +189,36 @@ def test_optional_fen_must_agree_with_replayed_pgn():
     assert source.parse_puzzle(data).id == "iSz4O"
 
 
+@pytest.mark.parametrize("en_passant", ["legal", "fen"])
+def test_optional_fen_accepts_equivalent_non_capturable_en_passant(en_passant):
+    data = payload()
+    data["game"]["pgn"] = "e4"
+    data["puzzle"]["initialPly"] = 0
+    data["puzzle"]["solution"] = ["e7e5", "g1f3"]
+    board = chess.Board()
+    board.push_uci("e2e4")
+    data["puzzle"]["fen"] = board.fen(en_passant=en_passant)
+    assert source.parse_puzzle(data).fen == board.fen()
+
+
+@pytest.mark.parametrize("change", ["en_passant", "castling", "invalid"])
+def test_optional_fen_rejects_changed_legal_move_state(change):
+    data = payload()
+    data["game"]["pgn"] = "e4 a6 e5 d5"
+    data["puzzle"]["initialPly"] = 3
+    data["puzzle"]["solution"] = ["e5d6", "e7d6"]
+    board = chess.Board(source.parse_puzzle(data).fen)
+    if change == "en_passant":
+        board.ep_square = None
+    elif change == "castling":
+        board.castling_rights = chess.BB_EMPTY
+    else:
+        board.ep_square = chess.E4
+    data["puzzle"]["fen"] = board.fen(en_passant="fen")
+    with pytest.raises(source.UnsuitablePuzzle):
+        source.parse_puzzle(data)
+
+
 def test_game_over_and_too_few_legal_moves_are_rejected():
     data = payload()
     data["game"]["pgn"] = "f3 e5 g4 Qh4#"

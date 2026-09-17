@@ -126,7 +126,9 @@ def parse_puzzle(data: object) -> Puzzle:
             if not isinstance(supplied_fen, str) or len(supplied_fen) > 200:
                 raise UnsuitablePuzzle("Invalid supplied FEN")
             supplied = chess.Board(supplied_fen)
-            if supplied.fen(en_passant="fen").split()[:4] != board.fen(en_passant="fen").split()[:4]:
+            # Equivalent positions may omit a non-capturable en-passant square.
+            # Compare legal move state, retaining castling and actual captures.
+            if not supplied.is_valid() or supplied.fen().split()[:4] != board.fen().split()[:4]:
                 raise UnsuitablePuzzle("PGN and FEN disagree")
         legal = list(board.legal_moves)
         if len(legal) < 6:
