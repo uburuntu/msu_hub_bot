@@ -1,39 +1,33 @@
+from __future__ import annotations
+
 import asyncio
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterator
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, cast
+from time import monotonic
 from contextlib import suppress
 from enum import Enum
 
 from aiogram.exceptions import TelegramBadRequest
-from aiocache import cached
 from aiogram import Bot
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatType
 from aiogram.types import ChatFullInfo, Message, TelegramObject, InlineKeyboardMarkup
 from aiogram.utils.markdown import hbold, hitalic, hlink, hcode, hide_link
 
-from common.db.edb import EdgeDB
-from hub_bot.db import EcosystemChat
+from common.db.base import BotRepository
+from common.db.models import DirectoryPatch, DirectoryRecord
 from common.tg.utils import chat_url, chat_link, sender_mention
 from common.utils import random_cycle
 
 
-P = ParamSpec("P")
-T = TypeVar("T")
-
-
-def _cached(function: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
-    return cast(Callable[P, Awaitable[T]], cached(ttl=600, noself=True)(function))
-
-
 class EventsMiddleware(BaseMiddleware):
-    def __init__(self, bot: Bot, db: EdgeDB, events_chat_id: int) -> None:
+    def __init__(self, bot: Bot, db: BotRepository, events_chat_id: int, *, em: EcosystemManager | None = None) -> None:
         super().__init__()
         self.bot = bot
         self.db = db
         self.events_chat_id = events_chat_id
-        self.em = EcosystemManager(bot, db)
+        self.em = em or EcosystemManager(bot, db)
 
     async def send_event(self, text: str, preview: bool = False, keyboard: InlineKeyboardMarkup | None = None) -> Message | None:
         if not self.events_chat_id:
@@ -41,7 +35,7 @@ class EventsMiddleware(BaseMiddleware):
         return await self.bot.send_message(self.events_chat_id, text, disable_web_page_preview=not preview, reply_markup=keyboard)
 
     async def log_event_from_ic(self, message: Message) -> Message | None:
-        if not await EcosystemChat.query(self.db).exist_cached(message.chat.id):
+        if message.chat.id not in await self.em.directory():
             return None
 
         chat = message.chat
@@ -126,9 +120,15 @@ class EventsMiddleware(BaseMiddleware):
 
 
 class EcosystemManager:
-    def __init__(self, bot: Bot, db: EdgeDB) -> None:
+    def __init__(self, bot: Bot, db: BotRepository) -> None:
         self.bot = bot
         self.db = db
+        self._directory: dict[int, DirectoryRecord] = {}
+        self._directory_until = 0.0
+        self._directory_lock = asyncio.Lock()
+        self._chats: dict[int, tuple[float, ChatFullInfo]] = {}
+        self._pins_until = 0.0
+        self._pins_lock = asyncio.Lock()
 
         self.images = cast(Callable[..., Iterator[str]], random_cycle)(
             "https://i.imgur.com/AA3fgbf.png",
@@ -143,8 +143,18 @@ class EcosystemManager:
             "https://i.imgur.com/ygG7bhD.jpeg",
         )
 
+    def invalidate_directory(self) -> None:
+        self._directory_until = 0.0
+
+    async def directory(self, *, refresh: bool = False) -> dict[int, DirectoryRecord]:
+        async with self._directory_lock:
+            if refresh or monotonic() >= self._directory_until:
+                self._directory = {chat.chat_id: chat for chat in await self.db.list_directory()}
+                self._directory_until = monotonic() + 300
+            return dict(self._directory)
+
     async def pin(self, chat_id: int, forced: bool = False) -> Message | bool:
-        e_chat = await EcosystemChat.query(self.db).get_cached(chat_id)
+        e_chat = (await self.directory()).get(chat_id)
 
         if e_chat and e_chat.pinned_message_id:
             if not forced:
@@ -156,16 +166,25 @@ class EcosystemManager:
         text = await self.text(chat_id)
         pin_msg = await self.bot.send_message(chat_id, text)
         await pin_msg.pin(disable_notification=True)
-        await EcosystemChat.query(self.db).update(pk=chat_id, pinned_message_id=pin_msg.message_id)
+        await self.db.patch_directory(chat_id, DirectoryPatch(pinned_message_id=pin_msg.message_id))
+        self.invalidate_directory()
         return pin_msg
 
-    @_cached
-    async def update_pins(self) -> None:
+    async def update_pins(self, *, forced: bool = False) -> None:
+        async with self._pins_lock:
+            if not forced and monotonic() < self._pins_until:
+                return
+            if forced:
+                self._chats.clear()
+            await self._update_pins()
+            self._pins_until = monotonic() + 600
+
+    async def _update_pins(self) -> None:
         await self.update_ic_members()
 
-        e_chats = await EcosystemChat.query(self.db).get_all_cached()
+        e_chats = await self.directory(refresh=True)
         coros = [
-            self.bot.edit_message_text(await self.text(ec.chat_id), ec.chat_id, ec.pinned_message_id)
+            self.bot.edit_message_text(await self.text(ec.chat_id), chat_id=ec.chat_id, message_id=ec.pinned_message_id)
             for ec in e_chats.values()
             if ec.pinned_message_id
         ]
@@ -174,36 +193,40 @@ class EcosystemManager:
             if isinstance(result, BaseException) and not isinstance(result, TelegramBadRequest):
                 raise result
 
-    async def update_ic_members(self) -> list[EcosystemChat | None]:
-        e_chats = await EcosystemChat.query(self.db).get_all_cached()
+    async def update_ic_members(self) -> list[DirectoryRecord | None]:
+        e_chats = await self.directory(refresh=True)
 
-        async def update_single(ec: EcosystemChat) -> EcosystemChat | None:
+        async def update_single(ec: DirectoryRecord) -> DirectoryRecord | None:
             chat = await self.get_chat(ec.chat_id)
             members = await self.bot.get_chat_member_count(chat.id)
             if members != ec.members:
-                return cast(EcosystemChat, await EcosystemChat.query(self.db).update(pk=ec.chat_id, members=members))
+                return await self.db.patch_directory(ec.chat_id, DirectoryPatch(members=members))
             return None
 
         results = await asyncio.gather(*(update_single(ec) for ec in e_chats.values()), return_exceptions=True)
-        saved: list[EcosystemChat | None] = []
+        self.invalidate_directory()
+        saved: list[DirectoryRecord | None] = []
         for result in results:
             if isinstance(result, BaseException):
                 raise result
             saved.append(result)
         return saved
 
-    @_cached
     async def get_chat(self, chat_id: int) -> ChatFullInfo:
-        return await self.bot.get_chat(chat_id)
+        cached = self._chats.get(chat_id)
+        if cached is not None and monotonic() < cached[0]:
+            return cached[1]
+        chat = await self.bot.get_chat(chat_id)
+        self._chats[chat_id] = (monotonic() + 600, chat)
+        return chat
 
-    @_cached
     async def link(self, chat_id: int) -> str:
         chat = await self.get_chat(chat_id)
         if chat.username:
             return "@" + chat.username
 
-        e_chats = await EcosystemChat.query(self.db).get_all_cached()
-        if alias := e_chats[chat_id].username_alias:
+        entry = (await self.directory()).get(chat_id)
+        if entry is not None and (alias := entry.username_alias):
             return "@" + str(alias)
 
         url = await chat_url(chat, force_link=True)
@@ -220,9 +243,9 @@ class EcosystemManager:
         channel = "📜 Каналы"
 
     async def text(self, chat_id: int | None = None) -> str:
-        e_chats = await EcosystemChat.query(self.db).get_all_cached()
+        e_chats = await self.directory()
 
-        groups: defaultdict[str, list[EcosystemChat]] = defaultdict(list)
+        groups: defaultdict[str, list[DirectoryRecord]] = defaultdict(list)
         for e_chat in e_chats.values():
             groups[e_chat.section].append(e_chat)
 
@@ -233,7 +256,7 @@ class EcosystemManager:
             "— спам удаляется, а агрессия не одобряется\n\n"
         )
 
-        if chat_id is not None and (e_chats[chat_id].members or 0) < 30:
+        if chat_id is not None and (entry := e_chats.get(chat_id)) is not None and (entry.members or 0) < 30:
             text += (
                 hitalic("Disclaimer: ") + "этот чат развивается, поэтому здесь еще мало людей, "
                 "но если приглашать друзей и вести интересные обсуждения, "

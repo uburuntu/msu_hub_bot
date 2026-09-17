@@ -105,32 +105,23 @@ async def test_crypto_failure_waits_for_other_price_requests(ticker):
         await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_stats_failure_waits_for_other_database_queries(monkeypatch):
-    entered, release = asyncio.Event(), asyncio.Event()
+async def test_stats_uses_one_repository_snapshot_and_propagates_failure():
+    from datetime import UTC, datetime
+    from common.db.models import UsageStats
+
+    counts = UsageStats(users=8, chats=3, updates=21, handled_updates=5)
+    repository = SimpleNamespace(statistics=AsyncMock(return_value=counts))
+    text = await stats.Stats.text(repository)
+    assert "<b>3</b> чатов" in text and "<b>8</b> пользователей" in text
+    assert "<b>5</b> команд" in text and "<b>21</b> сообщений" in text
+    since = repository.statistics.call_args.args[0]
+    assert since.tzinfo is UTC
+    assert 86399 < (datetime.now(UTC) - since).total_seconds() < 86401
     original = RuntimeError("synthetic count failure")
-    completed = []
-
-    async def count(*args):
-        entered.set()
-        await release.wait()
-        completed.append(True)
-        return 1
-
-    monkeypatch.setattr(stats.UserDB, "query", lambda db: SimpleNamespace(count=AsyncMock(side_effect=original)))
-    for model in (stats.ChatDB, stats.UpdateDB):
-        monkeypatch.setattr(model, "query", lambda db: SimpleNamespace(count=count))
-    task = asyncio.create_task(stats.Stats.text(SimpleNamespace()))
-    try:
-        await asyncio.wait_for(entered.wait(), 1)
-        done, _ = await asyncio.wait({task}, timeout=0.01)
-        assert not done
-        release.set()
-        with pytest.raises(RuntimeError) as caught:
-            await task
-        assert caught.value is original and len(completed) == 3
-    finally:
-        release.set()
-        await asyncio.gather(task, return_exceptions=True)
+    repository.statistics.side_effect = original
+    with pytest.raises(RuntimeError) as caught:
+        await stats.Stats.text(repository)
+    assert caught.value is original
 
 
 async def test_weather_map_snapshots_upload_and_keeps_topic(monkeypatch):

@@ -8,7 +8,7 @@ from aiogram.utils.markdown import hcode, hpre
 from pendulum import UTC, DateTime, now
 from tabulate import tabulate
 
-from common.db.edb import EdgeDB
+from common.db.base import BotRepository
 from common.tg.storage import RedisStorage
 from common.tg.utils import command_arguments
 from common.tg.wrapper import BotWrapper
@@ -16,12 +16,12 @@ from common.utils import cut_long_text, one_liner
 from common.vk.api import VkApi
 from common.vk.posts import VkPost
 from common.vk.publish import publish_vk_post
-from hub_bot.db import VkWallPosting
+from common.db.models import VkPatch, VkSubscription
 
 
-async def process_list_vk_wall(message: Message, db: EdgeDB) -> bool:
+async def process_list_vk_wall(message: Message, db: BotRepository) -> bool:
     headers = ["owner_id", "chat_id", "post", "reposts", "header", "susp", "comment"]
-    configs = await VkWallPosting.query(db).get_all()
+    configs = await db.list_vk_subscriptions()
     rows = [[v.owner_id, v.chat_id, v.last_post_id, v.with_reposts, v.with_header, v.is_suspended, v.description] for v in configs]
     for text in cut_long_text(tabulate(rows, headers=headers)):
         await message.reply(hpre(text))
@@ -31,10 +31,10 @@ async def process_list_vk_wall(message: Message, db: EdgeDB) -> bool:
 async def _push_posts(
     posts: list[VkPost],
     chat_id: int,
-    vwps: dict[tuple[int, int], VkWallPosting],
+    vwps: dict[tuple[int, int], VkSubscription],
     notify_chat_id: int,
     bot: BotWrapper,
-    db: EdgeDB,
+    db: BotRepository,
 ) -> None:
     for post in posts:
         config = vwps[(post.owner_id, chat_id)]
@@ -42,19 +42,13 @@ async def _push_posts(
             continue
         try:
             await publish_vk_post(post, bot, config.chat_id, with_header=config.with_header)
-            await VkWallPosting.query(db).update2(
-                "owner_id",
-                config.owner_id,
-                "chat_id",
-                config.chat_id,
-                last_post_id=post.id,
-            )
+            await db.advance_vk_cursor(config.owner_id, config.chat_id, post.id)
         except Exception:
             if notify_chat_id:
                 await bot.send_message(notify_chat_id, "☢️ Не удалось опубликовать пост из VK. Попробуйте повторить выгрузку позже.")
 
 
-async def process_vk_wall(message: Message, bot: BotWrapper, db: EdgeDB, vk_api: VkApi) -> Message:
+async def process_vk_wall(message: Message, bot: BotWrapper, db: BotRepository, vk_api: VkApi) -> Message:
     args = one_liner(command_arguments(message)).split()
     if len(args) < 2:
         return await message.reply("Usage: " + hcode("/vk_wall owner_id chat_id from_id with_reposts with_header suspended comment"))
@@ -65,17 +59,11 @@ async def process_vk_wall(message: Message, bot: BotWrapper, db: EdgeDB, vk_api:
     with_header = bool(int(args[4])) if len(args) > 4 else None
     is_suspended = bool(int(args[5])) if len(args) > 5 else None
     description = args[6] if len(args) > 6 else None
-    config = await VkWallPosting.query(db).upsert2(
-        "owner_id",
-        "chat_id",
-        owner_id=owner_id,
-        chat_id=chat_id,
-        last_post_id=last_post_id,
-        with_reposts=with_reposts,
-        with_header=with_header,
-        is_suspended=is_suspended,
-        description=description,
-    )
+    changes = VkPatch.model_validate({key: value for key, value in {
+        "last_post_id": last_post_id, "with_reposts": with_reposts, "with_header": with_header,
+        "is_suspended": is_suspended, "description": description,
+    }.items() if value is not None})
+    config = await db.upsert_vk_subscription(owner_id, chat_id, changes)
     if is_suspended:
         return await message.reply("ℹ️ Выгрузка стены заморожена")
     posts = await VkPost.from_api_wall(vk_api, config.owner_id)
@@ -121,13 +109,13 @@ class LastCheckUpdater:
 
 async def process_vk_wall_posting(
     bot: BotWrapper,
-    db: EdgeDB,
+    db: BotRepository,
     redis: RedisStorage,
     vk_api: VkApi,
     events_chat_id: int,
     logger: Logger,
 ) -> bool:
-    configs = await VkWallPosting.query(db).get_all()
+    configs = await db.list_vk_subscriptions()
     vwps = {(v.owner_id, v.chat_id): v for v in configs if not v.is_suspended}
     owner_ids = {v.owner_id for v in vwps.values()}
     if not owner_ids:

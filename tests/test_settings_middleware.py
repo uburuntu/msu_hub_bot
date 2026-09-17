@@ -21,23 +21,20 @@ def callback():
 
 
 @pytest.fixture
-def storage(monkeypatch):
+def storage():
     rows = {}
 
-    async def insert(_type, _field, **values):
+    async def load(chat):
         await asyncio.sleep(0)
-        rows.setdefault(values["chat_id"], SimpleNamespace(metadata={}))
+        row = rows.setdefault(chat.chat_id, SimpleNamespace(metadata={}))
+        return deepcopy(row.metadata.get("settings", {}))
 
-    async def get(chat_id):
-        return SimpleNamespace(metadata=deepcopy(rows[chat_id].metadata))
+    async def patch(chat_id, changes):
+        rows[chat_id].metadata.setdefault("settings", {}).update(deepcopy(changes))
+        return deepcopy(rows[chat_id].metadata["settings"])
 
-    async def update(chat_id, **values):
-        rows[chat_id].metadata = deepcopy(values["metadata"])
-
-    query = SimpleNamespace(get=get, update=update)
-    monkeypatch.setattr("common.tg.middlewares.settings.ChatDB.query", lambda db: query)
-    db = SimpleNamespace(insert_skip_conflict=AsyncMock(side_effect=insert))
-    return db, rows, query
+    db = SimpleNamespace(load_settings=AsyncMock(side_effect=load), patch_settings=patch)
+    return db, rows, db
 
 
 async def test_first_contact_initializes_before_handler_and_saves(storage):
@@ -76,7 +73,7 @@ async def test_concurrent_callbacks_share_preferences_and_preserve_extras(storag
     assert not objects[0].auto_video_links
     assert rows[100].metadata["other"] == 7
     assert rows[100].metadata["settings"]["future_option"] == {"enabled": True}
-    db.insert_skip_conflict.assert_awaited_once()
+    db.load_settings.assert_awaited_once()
 
 
 async def test_inline_query_has_no_previous_chat_preferences(storage):
@@ -89,7 +86,7 @@ async def test_inline_query_has_no_previous_chat_preferences(storage):
     inline = InlineQuery(id="inline", query="text", offset="", from_user=User(id=10, is_bot=False, first_name="Friend"))
     await SettingsMiddleware(db)(handler, inline, {"settings": Settings()})
     assert seen == [{}]
-    db.insert_skip_conflict.assert_not_awaited()
+    db.load_settings.assert_not_awaited()
 
 
 async def test_pending_write_keeps_new_mutation_dirty_until_second_save(storage):
@@ -100,15 +97,16 @@ async def test_pending_write_keeps_new_mutation_dirty_until_second_save(storage)
     started, release = asyncio.Event(), asyncio.Event()
     writes = []
 
-    async def update(chat_id, **values):
-        snapshot = deepcopy(values["metadata"])
+    async def update(chat_id, changes):
+        snapshot = deepcopy(changes)
         writes.append(snapshot)
         if len(writes) == 1:
             started.set()
             await release.wait()
-        rows[chat_id].metadata = snapshot
+        rows[chat_id].metadata.setdefault("settings", {}).update(snapshot)
+        return deepcopy(rows[chat_id].metadata["settings"])
 
-    query.update = update
+    query.patch_settings = update
     first = asyncio.create_task(preferences.save(db))
     await started.wait()
     preferences.auto_video_links = False
@@ -118,10 +116,21 @@ async def test_pending_write_keeps_new_mutation_dirty_until_second_save(storage)
     release.set()
     await asyncio.gather(first, second)
     assert len(writes) == 2
-    assert writes[0]["settings"]["auto_video_links"] is True
+    assert writes[0] == {"auto_speech_recognition": False}
+    assert writes[1] == {"auto_video_links": False}
     assert rows[100].metadata["settings"]["auto_video_links"] is False
     assert rows[100].metadata["settings"]["auto_speech_recognition"] is False
     assert not preferences._is_dirty
+
+
+async def test_preference_save_patches_only_changed_keys_after_an_external_update(storage):
+    db, rows, _ = storage
+    rows[100] = SimpleNamespace(metadata={"other": 7, "settings": {"auto_video_links": True}})
+    preferences = await SettingsMiddleware(db).proxy(message().chat)
+    rows[100].metadata["settings"].update({"auto_video_links": False, "future_option": [1, 2]})
+    preferences.with_nsfw = True
+    await preferences.save(db)
+    assert rows[100].metadata == {"other": 7, "settings": {"auto_video_links": False, "future_option": [1, 2], "with_nsfw": True}}
 
 
 async def test_cache_pressure_cannot_replace_an_active_preference_object(storage):
@@ -152,7 +161,7 @@ async def test_handler_failure_preserves_dirty_settings_and_original_error(stora
     db, _, query = storage
     middleware = SettingsMiddleware(db)
     original = ValueError("handler failure")
-    query.update = AsyncMock(side_effect=RuntimeError("save failure"))
+    query.patch_settings = AsyncMock(side_effect=RuntimeError("save failure"))
 
     async def handler(event, data):
         data["settings"].with_nsfw = True
@@ -184,14 +193,14 @@ async def test_shutdown_attempts_other_dirty_chats_after_one_save_fails(storage)
     second = await middleware.proxy(message(200).chat)
     first.with_nsfw = second.with_nsfw = True
     original = RuntimeError("one chat save failed")
-    update = query.update
+    update = query.patch_settings
 
-    async def save(chat_id, **values):
+    async def save(chat_id, changes):
         if chat_id == 100:
             raise original
-        await update(chat_id, **values)
+        return await update(chat_id, changes)
 
-    query.update = save
+    query.patch_settings = save
     with pytest.raises(ExceptionGroup) as caught:
         await middleware.close()
     assert caught.value.exceptions == (original,)

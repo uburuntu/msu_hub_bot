@@ -5,11 +5,10 @@ from aiogram.types import KeyboardButton, Message, MessageOriginChannel, Message
 from aiogram.utils.markdown import hbold, hcode
 from pydantic import BaseModel, Field
 
-from common.db.edb import EdgeDB
+from common.db.base import BotRepository
 from common.tg.runtime import gather_complete
 from common.tg.state import UpdateStateContext, release_state_isolation
 from common.tg.wrapper import BotWrapper
-from hub_bot.db import EcosystemChat
 
 
 class MakePostStates(StatesGroup):
@@ -115,8 +114,8 @@ class MakePost:
         return await message.answer("Рассылка завершена!")
 
 
-async def _destinations(db: EdgeDB, posting_tb_chat_id: int) -> list[int]:
-    chats = await EcosystemChat.query(db).get_all()
+async def _destinations(db: BotRepository, posting_tb_chat_id: int) -> list[int]:
+    chats = await db.list_directory()
     return [
         chat.chat_id for chat in chats if (chat.members or 0) >= 55 and chat.section != "channel" and chat.chat_id != posting_tb_chat_id
     ]
@@ -125,7 +124,7 @@ async def _destinations(db: EdgeDB, posting_tb_chat_id: int) -> list[int]:
 async def process_post_all(
     message: Message,
     bot: BotWrapper,
-    db: EdgeDB,
+    db: BotRepository,
     posting_tb_chat_id: int,
 ) -> list[Message] | None:
     if not (post_message := message.reply_to_message):
@@ -137,7 +136,7 @@ async def process_post_all(
 async def process_post_forward_all(
     message: Message,
     bot: BotWrapper,
-    db: EdgeDB,
+    db: BotRepository,
     posting_tb_chat_id: int,
 ) -> list[Message] | None:
     if not (post_message := message.reply_to_message):

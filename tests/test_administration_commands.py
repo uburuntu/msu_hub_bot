@@ -45,20 +45,19 @@ def replies(monkeypatch):
     "action,method", [("ban", "ban_chat_member"), ("restrict", "restrict_chat_member"), ("unban", "unban_chat_member")]
 )
 async def test_bulk_admin_uses_native_operations_and_existing_restriction_semantics(monkeypatch, action, method):
-    query = SimpleNamespace(get_all=AsyncMock(return_value=[SimpleNamespace(chat_id=-1), SimpleNamespace(chat_id=-2)]))
-    monkeypatch.setattr(admin.EcosystemChat, "query", lambda db: query)
+    query = SimpleNamespace(list_directory=AsyncMock(return_value=[SimpleNamespace(chat_id=-1), SimpleNamespace(chat_id=-2)]))
     call = AsyncMock(return_value=True)
     bot = SimpleNamespace(**{method: call})
     handler = getattr(admin, f"process_{action}")
-    assert await handler(message(f"/{action} 42"), bot, object()) == [True, True]
+    assert await handler(message(f"/{action} 42"), bot, query) == [True, True]
     assert [entry.args[:2] for entry in call.await_args_list] == [(-1, 42), (-2, 42)]
     if action == "restrict":
         assert call.await_args_list[0].args[2].model_dump(exclude_none=True) == {}
     if action == "unban":
         assert all(entry.kwargs == {"only_if_banned": True} for entry in call.await_args_list)
-    query.get_all.reset_mock()
-    assert await handler(message(f"/{action} invalid"), bot, object()) is None
-    query.get_all.assert_not_awaited()
+    query.list_directory.reset_mock()
+    assert await handler(message(f"/{action} invalid"), bot, query) is None
+    query.list_directory.assert_not_awaited()
 
 
 @pytest.mark.parametrize("promote,already_admin,expected", [(False, False, False), (True, True, False), (True, False, True)])
@@ -106,33 +105,33 @@ async def test_forward_range_continues_after_missing_message():
 
 @pytest.mark.parametrize("promote", [False, True])
 async def test_directory_insert_requires_bot_promote_rights(monkeypatch, replies, promote):
-    query = SimpleNamespace(exist=AsyncMock(return_value=False), insert=AsyncMock())
-    monkeypatch.setattr(infra.EcosystemChat, "query", lambda db: query)
+    query = SimpleNamespace(get_directory=AsyncMock(return_value=None), create_directory=AsyncMock())
     bot = SimpleNamespace(
         id=123456,
         get_chat_administrators=AsyncMock(return_value=[administrator(can_promote_members=promote)]),
         get_chat_member_count=AsyncMock(return_value=55),
         send_message=AsyncMock(),
     )
-    await infra.process_create_infra_chat(message(), bot, object(), 0)
-    assert query.insert.await_count == int(promote)
+    manager = SimpleNamespace(invalidate_directory=lambda: None)
+    await infra.process_create_infra_chat(message(), bot, query, 0, manager)
+    assert query.create_directory.await_count == int(promote)
     if promote:
-        assert query.insert.call_args.kwargs["members"] == 55
-        assert query.insert.call_args.kwargs["section"] == "other"
+        assert query.create_directory.call_args.args[0].members == 55
+        assert query.create_directory.call_args.args[0].section == "other"
     bot.send_message.assert_not_awaited()
 
 
 async def test_directory_delete_retains_existing_owner_authorized_behavior(monkeypatch, replies):
-    query = SimpleNamespace(exist=AsyncMock(return_value=True), delete=AsyncMock())
-    monkeypatch.setattr(infra.EcosystemChat, "query", lambda db: query)
+    query = SimpleNamespace(get_directory=AsyncMock(return_value=object()), delete_directory=AsyncMock())
     bot = SimpleNamespace(id=123456, get_chat_administrators=AsyncMock(return_value=[]), send_message=AsyncMock())
-    await infra.process_delete_infra_chat(message(), bot, object(), 0)
-    query.delete.assert_awaited_once_with(pk=-10012345)
+    manager = SimpleNamespace(invalidate_directory=lambda: None)
+    await infra.process_delete_infra_chat(message(), bot, query, 0, manager)
+    query.delete_directory.assert_awaited_once_with(-10012345)
 
 
 async def test_status_uses_native_member_variants_and_bad_request_marker(monkeypatch, replies):
-    chats = {number: SimpleNamespace(name=f"Chat {number}") for number in range(1, 5)}
-    monkeypatch.setattr(infra.EcosystemChat, "query", lambda db: SimpleNamespace(get_all_cached=AsyncMock(return_value=chats)))
+    chats = {number: SimpleNamespace(chat_id=number, name=f"Chat {number}") for number in range(1, 5)}
+    db = SimpleNamespace(list_directory=AsyncMock(return_value=list(chats.values())))
     responses = {
         1: ChatMemberOwner(user=user(123456), is_anonymous=False),
         2: administrator(can_promote_members=False),
@@ -145,7 +144,7 @@ async def test_status_uses_native_member_variants_and_bad_request_marker(monkeyp
             raise TelegramBadRequest(method=GetChatMember(chat_id=chat_id, user_id=user_id), message="missing")
         return responses[chat_id]
 
-    await infra.process_status(message(), SimpleNamespace(id=123456, get_chat_member=get_member), object())
+    await infra.process_status(message(), SimpleNamespace(id=123456, get_chat_member=get_member), db)
     text = replies.call_args.args[0]
     assert "Chat 1: ✅ ✅" in text and "Chat 2: ✅ ❌" in text
     assert "Chat 3: ❌ ❌" in text and "Chat 4: 💔 💔" in text

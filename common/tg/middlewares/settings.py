@@ -5,20 +5,18 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from copy import deepcopy
-from typing import Any, Protocol, cast
+from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.types import Chat, TelegramObject
 from msu_hub_bot.telemetry import Backend, Boundary, Telemetry
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr
+from pydantic import BaseModel, ConfigDict, JsonValue, PrivateAttr, TypeAdapter
 
-from common.db.edb import ChatDB, EdgeDB
+from common.db.base import BotRepository
+from common.db.observations import chat_observation
 
-
-class _InsertDatabase(Protocol):
-    async def insert_skip_conflict(self, type_name: str, unique_field: str, **values: object) -> object: ...
+_JSON_SETTINGS = TypeAdapter(dict[str, JsonValue])
 
 
 class Settings(BaseModel):
@@ -37,39 +35,37 @@ class Settings(BaseModel):
         return self.model_dump() != self._saved_snapshot
 
     @classmethod
-    async def create(cls, db: EdgeDB, chat_id: int) -> Settings:
-        row = await ChatDB.query(db).get(chat_id)
-        metadata = row.metadata if isinstance(row.metadata, dict) else {}
-        values = metadata.get("settings")
-        values = dict(values) if isinstance(values, dict) else {}
+    async def create(cls, db: BotRepository, chat: Chat) -> Settings:
+        values = dict(await db.load_settings(chat_observation(chat)))
         for internal in ("_chat_id", "_is_dirty", "_saved_snapshot", "_save_lock"):
             values.pop(internal, None)
         settings = cls.model_validate(values)
-        settings._chat_id = chat_id
+        settings._chat_id = chat.id
         settings._saved_snapshot = settings.model_dump()
         return settings
 
-    async def save(self, db: EdgeDB, force: bool = False) -> Settings:
+    async def save(self, db: BotRepository, force: bool = False) -> Settings:
         async with self._save_lock:
             if not self._is_dirty and not force:
                 return self
             if self._chat_id is None:
                 raise RuntimeError("Chat preferences have no persistence identity")
-            snapshot = self.model_dump()
-            row = await ChatDB.query(db).get(self._chat_id)
-            metadata = deepcopy(row.metadata) if isinstance(row.metadata, dict) else {}
-            metadata["settings"] = snapshot
-            await ChatDB.query(db).update(self._chat_id, metadata=metadata)
+            snapshot = _JSON_SETTINGS.validate_python(self.model_dump())
+            changes = {key: value for key, value in snapshot.items() if force or key not in self._saved_snapshot or value != self._saved_snapshot[key]}
+            await db.patch_settings(self._chat_id, changes)
             self._saved_snapshot = snapshot
         return self
 
 
 class SettingsMiddleware(BaseMiddleware):
-    def __init__(self, db: EdgeDB, *, cache_size: int = 128, telemetry: Telemetry | None = None) -> None:
+    def __init__(
+        self, db: BotRepository, *, cache_size: int = 128, telemetry: Telemetry | None = None, backend: Backend = Backend.EDGEDB,
+    ) -> None:
         if cache_size < 1:
             raise ValueError("Preference cache size must be positive")
         self.db = db
         self.telemetry = telemetry or Telemetry()
+        self.backend = backend
         self.cache_size = cache_size
         self.proxies: OrderedDict[int, Settings] = OrderedDict()
         self._active: dict[int, int] = {}
@@ -79,23 +75,13 @@ class SettingsMiddleware(BaseMiddleware):
         if chat.id in self.proxies:
             self.proxies.move_to_end(chat.id)
             return self.proxies[chat.id]
-        with self.telemetry.operation(Boundary.STORAGE, "settings.load", backend=Backend.EDGEDB, trace=False):
+        with self.telemetry.operation(Boundary.STORAGE, "settings.load", backend=self.backend, trace=False):
             return await self._load(chat)
 
     async def _load(self, chat: Chat) -> Settings:
         async with self._load_lock:
             if chat.id not in self.proxies:
-                await cast(_InsertDatabase, self.db).insert_skip_conflict(
-                    "telegram::Chat",
-                    "chat_id",
-                    chat_id=chat.id,
-                    type=chat.type,
-                    title=chat.title,
-                    username=chat.username,
-                    first_name=chat.first_name,
-                    last_name=chat.last_name,
-                )
-                self.proxies[chat.id] = await Settings.create(self.db, chat.id)
+                self.proxies[chat.id] = await Settings.create(self.db, chat)
             self.proxies.move_to_end(chat.id)
             return self.proxies[chat.id]
 
@@ -146,5 +132,5 @@ class SettingsMiddleware(BaseMiddleware):
 
     async def _save(self, preferences: Settings) -> None:
         if preferences._is_dirty:
-            with self.telemetry.operation(Boundary.STORAGE, "settings.save", backend=Backend.EDGEDB):
+            with self.telemetry.operation(Boundary.STORAGE, "settings.save", backend=self.backend):
                 await preferences.save(self.db)

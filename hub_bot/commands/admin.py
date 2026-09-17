@@ -5,34 +5,33 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import ChatMemberAdministrator, ChatMemberOwner, ChatPermissions, Message
 from aiogram.utils.markdown import hcode, hpre
 
-from common.db.edb import EdgeDB
+from common.db.base import BotRepository
 from common.tg.runtime import gather_complete
 from common.tg.utils import chat_link, command_arguments
 from common.tg.wrapper import BotWrapper
-from hub_bot.db import EcosystemChat
 
 
-async def process_ban(message: Message, bot: BotWrapper, db: EdgeDB) -> list[bool] | None:
+async def process_ban(message: Message, bot: BotWrapper, db: BotRepository) -> list[bool] | None:
     argument = command_arguments(message)
     if not argument.isdigit():
         return None
-    chats = await EcosystemChat.query(db).get_all()
+    chats = await db.list_directory()
     return await gather_complete(*(bot.ban_chat_member(chat.chat_id, int(argument)) for chat in chats))
 
 
-async def process_restrict(message: Message, bot: BotWrapper, db: EdgeDB) -> list[bool] | None:
+async def process_restrict(message: Message, bot: BotWrapper, db: BotRepository) -> list[bool] | None:
     argument = command_arguments(message)
     if not argument.isdigit():
         return None
-    chats = await EcosystemChat.query(db).get_all()
+    chats = await db.list_directory()
     return await gather_complete(*(bot.restrict_chat_member(chat.chat_id, int(argument), ChatPermissions()) for chat in chats))
 
 
-async def process_unban(message: Message, bot: BotWrapper, db: EdgeDB) -> list[bool] | None:
+async def process_unban(message: Message, bot: BotWrapper, db: BotRepository) -> list[bool] | None:
     argument = command_arguments(message)
     if not argument.isdigit():
         return None
-    chats = await EcosystemChat.query(db).get_all()
+    chats = await db.list_directory()
     return await gather_complete(*(bot.unban_chat_member(chat.chat_id, int(argument), only_if_banned=True) for chat in chats))
 
 

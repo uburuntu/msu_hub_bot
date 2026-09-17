@@ -8,7 +8,7 @@ from aiogram.types import Chat, Message, User
 from pendulum import from_timestamp
 
 from hub_bot.commands import vk
-from hub_bot.db import VkWallPosting
+from common.db.models import VkSubscription
 
 
 def message(text):
@@ -22,9 +22,9 @@ def message(text):
 
 
 def config(**values):
-    defaults = dict(id=UUID(int=1), owner_id=-10, chat_id=-20, last_post_id=5, with_reposts=False, with_header=True, is_suspended=False)
+    defaults = dict(id=UUID(int=1), created=from_timestamp(1_700_000_000), owner_id=-10, chat_id=-20, last_post_id=5, with_reposts=False, with_header=True, is_suspended=False)
     defaults.update(values)
-    return VkWallPosting(**defaults)
+    return VkSubscription(**defaults)
 
 
 def post(number=6, **values):
@@ -48,26 +48,24 @@ async def test_vk_push_skips_old_posts_and_reposts_then_marks_delivered_post(mon
         order.append("marker")
 
     publisher = AsyncMock(side_effect=publish)
-    query = SimpleNamespace(update2=AsyncMock(side_effect=update))
+    query = SimpleNamespace(advance_vk_cursor=AsyncMock(side_effect=update))
     monkeypatch.setattr(vk, "publish_vk_post", publisher)
-    monkeypatch.setattr(VkWallPosting, "query", lambda db: query)
     bot = SimpleNamespace(send_message=AsyncMock())
     newest = post(7)
-    await vk._push_posts([post(4), post(6, is_repost=True), newest], -20, {(-10, -20): config()}, 12345, bot, object())
+    await vk._push_posts([post(4), post(6, is_repost=True), newest], -20, {(-10, -20): config()}, 12345, bot, query)
     assert order == ["publish", "marker"]
     publisher.assert_awaited_once_with(newest, bot, -20, with_header=True)
-    query.update2.assert_awaited_once_with("owner_id", -10, "chat_id", -20, last_post_id=7)
+    query.advance_vk_cursor.assert_awaited_once_with(-10, -20, 7)
     bot.send_message.assert_not_awaited()
 
 
 async def test_vk_push_failure_keeps_marker_and_never_sends_raw_error(monkeypatch, capsys):
     publisher = AsyncMock(side_effect=RuntimeError("private-provider-canary"))
-    query = SimpleNamespace(update2=AsyncMock())
+    query = SimpleNamespace(advance_vk_cursor=AsyncMock())
     monkeypatch.setattr(vk, "publish_vk_post", publisher)
-    monkeypatch.setattr(VkWallPosting, "query", lambda db: query)
     bot = SimpleNamespace(send_message=AsyncMock())
-    await vk._push_posts([post()], -20, {(-10, -20): config()}, 12345, bot, object())
-    query.update2.assert_not_awaited()
+    await vk._push_posts([post()], -20, {(-10, -20): config()}, 12345, bot, query)
+    query.advance_vk_cursor.assert_not_awaited()
     bot.send_message.assert_awaited_once()
     assert "private-provider-canary" not in repr(bot.send_message.call_args) + capsys.readouterr().out
     assert "Traceback" not in repr(bot.send_message.call_args)
@@ -75,24 +73,21 @@ async def test_vk_push_failure_keeps_marker_and_never_sends_raw_error(monkeypatc
 
 async def test_vk_push_continues_existing_best_effort_batch_after_one_failure(monkeypatch):
     publisher = AsyncMock(side_effect=[RuntimeError("synthetic"), None])
-    query = SimpleNamespace(update2=AsyncMock())
+    query = SimpleNamespace(advance_vk_cursor=AsyncMock())
     monkeypatch.setattr(vk, "publish_vk_post", publisher)
-    monkeypatch.setattr(VkWallPosting, "query", lambda db: query)
     bot = SimpleNamespace(send_message=AsyncMock())
-    await vk._push_posts([post(6), post(7)], -20, {(-10, -20): config()}, 0, bot, object())
-    query.update2.assert_awaited_once_with("owner_id", -10, "chat_id", -20, last_post_id=7)
+    await vk._push_posts([post(6), post(7)], -20, {(-10, -20): config()}, 0, bot, query)
+    query.advance_vk_cursor.assert_awaited_once_with(-10, -20, 7)
     bot.send_message.assert_not_awaited()
 
 
 async def test_vk_wall_suspend_updates_configuration_without_provider_request(monkeypatch, replies):
-    query = SimpleNamespace(upsert2=AsyncMock(return_value=config(is_suspended=True)))
-    monkeypatch.setattr(VkWallPosting, "query", lambda db: query)
+    query = SimpleNamespace(upsert_vk_subscription=AsyncMock(return_value=config(is_suspended=True)))
     provider = AsyncMock()
     monkeypatch.setattr(vk.VkPost, "from_api_wall", provider)
-    await vk.process_vk_wall(message("/vk_wall -10 -20 5 0 1 1 pause"), SimpleNamespace(), object(), object())
-    assert query.upsert2.call_args.kwargs == dict(
-        owner_id=-10,
-        chat_id=-20,
+    await vk.process_vk_wall(message("/vk_wall -10 -20 5 0 1 1 pause"), SimpleNamespace(), query, object())
+    assert query.upsert_vk_subscription.call_args.args[:2] == (-10, -20)
+    assert query.upsert_vk_subscription.call_args.args[2].model_dump(exclude_unset=True) == dict(
         last_post_id=5,
         with_reposts=False,
         with_header=True,
@@ -105,15 +100,15 @@ async def test_vk_wall_suspend_updates_configuration_without_provider_request(mo
 
 async def test_vk_wall_uses_injected_api_bot_and_database(monkeypatch, replies):
     entry = config()
-    query = SimpleNamespace(upsert2=AsyncMock(return_value=entry))
-    monkeypatch.setattr(VkWallPosting, "query", lambda db: query)
+    query = SimpleNamespace(upsert_vk_subscription=AsyncMock(return_value=entry))
     posts = [post()]
     provider = AsyncMock(return_value=posts)
     push = AsyncMock()
     monkeypatch.setattr(vk.VkPost, "from_api_wall", provider)
     monkeypatch.setattr(vk, "_push_posts", push)
-    bot, db, api = object(), object(), object()
+    bot, db, api = object(), query, object()
     await vk.process_vk_wall(message("/vk_wall -10 -20"), bot, db, api)
+    assert query.upsert_vk_subscription.call_args.args[2].model_dump(exclude_unset=True) == {}
     provider.assert_awaited_once_with(api, -10)
     push.assert_awaited_once_with(posts, -20, {(-10, -20): entry}, 12345, bot, db)
     assert "окончена" in replies.call_args.args[0]
@@ -149,7 +144,7 @@ async def test_watermark_uses_existing_default_and_commits_only_clean_exit(failu
 
 async def test_scheduled_vk_batch_keeps_suspension_grouping_order_and_aggregate_logs(monkeypatch, caplog):
     configs = [config(), config(chat_id=-30), config(owner_id=-11, chat_id=-40), config(owner_id=-12, is_suspended=True)]
-    monkeypatch.setattr(VkWallPosting, "query", lambda db: SimpleNamespace(get_all=AsyncMock(return_value=configs)))
+    db = SimpleNamespace(list_vk_subscriptions=AsyncMock(return_value=configs))
     earlier, later = post(6), post(7)
     provider = AsyncMock(return_value=[later, earlier])
     push = AsyncMock()
@@ -157,7 +152,7 @@ async def test_scheduled_vk_batch_keeps_suspension_grouping_order_and_aggregate_
     monkeypatch.setattr(vk, "_push_posts", push)
     last = from_timestamp(1_700_000_000)
     redis = SimpleNamespace(get_dt=AsyncMock(return_value=last), set_dt=AsyncMock())
-    bot, db, api = object(), object(), object()
+    bot, api = object(), object()
     logger = logging.getLogger("tests.vk")
     caplog.set_level("INFO", logger="tests.vk")
     assert await vk.process_vk_wall_posting(bot, db, redis, api, 12345, logger)

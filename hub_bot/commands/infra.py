@@ -1,26 +1,22 @@
 from contextlib import suppress
-from typing import Any, Protocol, cast
 
 from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import ChatMemberAdministrator, ChatMemberOwner, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, Message
 from aiogram.utils.markdown import hbold
 
-from common.db.edb import EdgeDB
+from common.db.base import BotRepository
+from common.db.models import DirectoryCreate
 from common.tg.runtime import gather_complete
 from common.tg.utils import chat_link, sender_mention
 from common.tg.wrapper import BotWrapper
-from hub_bot.db import EcosystemChat
 from hub_bot.events import EcosystemManager
 
 
-class _DirectoryMutations(Protocol):
-    async def insert(self, **values: Any) -> object: ...
-    async def delete(self, pk: int) -> object: ...
-
-
-async def process_create_infra_chat(message: Message, bot: BotWrapper, db: EdgeDB, events_chat_id: int) -> Message | bool | None:
-    if message.chat.type == ChatType.PRIVATE or await EcosystemChat.query(db).exist(message.chat.id):
+async def process_create_infra_chat(
+    message: Message, bot: BotWrapper, db: BotRepository, events_chat_id: int, em: EcosystemManager,
+) -> Message | bool | None:
+    if message.chat.type == ChatType.PRIVATE or await db.get_directory(message.chat.id) is not None:
         return True
     admins = await bot.get_chat_administrators(message.chat.id)
     me = next((admin for admin in admins if admin.user.id == bot.id), None)
@@ -30,30 +26,34 @@ async def process_create_infra_chat(message: Message, bot: BotWrapper, db: EdgeD
         await message.delete()
     if not me.can_promote_members:
         return None
-    await cast(_DirectoryMutations, EcosystemChat.query(db)).insert(
+    await db.create_directory(DirectoryCreate(
         chat_id=message.chat.id,
         name=message.chat.full_name,
         section=EcosystemManager.ChatGroup.other.name,
         members=await bot.get_chat_member_count(message.chat.id),
-    )
+    ))
+    em.invalidate_directory()
     event = f"❇️ {sender_mention(message)} добавил в экосистему новый чат: {await chat_link(message.chat, True)}."
     return await bot.send_message(events_chat_id, event) if events_chat_id else None
 
 
-async def process_delete_infra_chat(message: Message, bot: BotWrapper, db: EdgeDB, events_chat_id: int) -> Message | bool | None:
-    if message.chat.type == ChatType.PRIVATE or not await EcosystemChat.query(db).exist(message.chat.id):
+async def process_delete_infra_chat(
+    message: Message, bot: BotWrapper, db: BotRepository, events_chat_id: int, em: EcosystemManager,
+) -> Message | bool | None:
+    if message.chat.type == ChatType.PRIVATE or await db.get_directory(message.chat.id) is None:
         return True
     admins = await bot.get_chat_administrators(message.chat.id)
     me = next((admin for admin in admins if admin.user.id == bot.id), None)
     if isinstance(me, ChatMemberAdministrator) and me.can_delete_messages:
         await message.delete()
-    await cast(_DirectoryMutations, EcosystemChat.query(db)).delete(pk=message.chat.id)
+    await db.delete_directory(message.chat.id)
+    em.invalidate_directory()
     event = f"❎️ {sender_mention(message)} удалил чат из экосистемы: {await chat_link(message.chat, True)}."
     return await bot.send_message(events_chat_id, event) if events_chat_id else None
 
 
 async def process_update_pins(_message: Message, em: EcosystemManager) -> None:
-    await em.update_pins()
+    await em.update_pins(forced=True)
 
 
 async def process_pin(message: Message, bot: BotWrapper, em: EcosystemManager) -> Message | bool | None:
@@ -68,17 +68,17 @@ async def process_pin(message: Message, bot: BotWrapper, em: EcosystemManager) -
     return None
 
 
-async def process_pin_all(_message: Message, db: EdgeDB, em: EcosystemManager) -> list[Message | bool]:
-    chats = await EcosystemChat.query(db).get_all_cached()
-    return await gather_complete(*(em.pin(chat.chat_id) for chat in chats.values()))
+async def process_pin_all(_message: Message, db: BotRepository, em: EcosystemManager) -> list[Message | bool]:
+    chats = await db.list_directory()
+    return await gather_complete(*(em.pin(chat.chat_id) for chat in chats))
 
 
 async def process_links(message: Message, em: EcosystemManager) -> Message:
     return await message.answer(await em.text())
 
 
-async def process_status(message: Message, bot: BotWrapper, db: EdgeDB) -> Message:
-    chats = await EcosystemChat.query(db).get_all_cached()
+async def process_status(message: Message, bot: BotWrapper, db: BotRepository) -> Message:
+    chats = {chat.chat_id: chat for chat in await db.list_directory()}
     completed: list[tuple[int, str, str]] = []
 
     async def check(chat_id: int) -> None:

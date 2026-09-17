@@ -161,12 +161,12 @@ async def test_bulk_posting_preserves_directory_selection_and_copy_method(monkey
         SimpleNamespace(chat_id=-4, members=99, section="channel"),
         SimpleNamespace(chat_id=-5, members=99, section="other"),
     ]
-    monkeypatch.setattr(posting.EcosystemChat, "query", lambda db: SimpleNamespace(get_all=AsyncMock(return_value=chats)))
+    db = SimpleNamespace(list_directory=AsyncMock(return_value=chats))
     bot = AsyncMock()
     source = message("source", message_id=22)
     command = message("/post_all", reply_to_message=source)
     function = posting.process_post_forward_all if forward else posting.process_post_all
-    await function(command, bot, object(), -5)
+    await function(command, bot, db, -5)
     if forward:
         bot.forward_message.assert_awaited_once_with(-1, KEY.chat_id, 22, disable_notification=True)
         bot.assert_not_awaited()
