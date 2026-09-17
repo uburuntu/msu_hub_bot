@@ -12,7 +12,7 @@ The target JSON contains:
 
 - `connection`: explicit `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` and optional TLS environment values.
 - `expected_database` and `expected_system_identifier`: the intended database name and PostgreSQL cluster identity from `pg_control_system()`.
-- `expected_schema_version`: the applied SQL migration number, defaulting to `2`. This differs from the public RPC contract version.
+- `expected_schema_version`: the applied SQL migration number, defaulting to `3`. This differs from the public RPC contract version, which remains `1`.
 - Optional `psql_command`: normally `["psql"]`. A local container transport may use `["docker", "exec", "-i", "-e", "PGPASSWORD", "-e", "PGUSER", "-e", "PGDATABASE", "supabase-db", "psql"]`. Forward environment variable names, never their values. The container must receive every connection variable it needs.
 
 The administrative identity needs access to cluster identity, application tables and private observation helpers. Never give these privileges or platform credentials to the bot. The target guard checks the cluster, database, SQL revision and configured bot principal before transfer.
@@ -79,7 +79,7 @@ uv run python -m tools.migrate_storage retention-report \
 
 The date above is illustrative. Preparation records each rejection in a private artifact and blocks application if any record cannot be transformed. Eligible messages that the typed extractor cannot represent also block application. Identity extraction uses the shared observer; stored bodies come from original JSON values. Receipts and embedded messages keep references, while each normalized body expires independently from its original message date. Entity profiles, memberships and topics use the same merge rules as runtime traffic.
 
-Normalization is resumable and transactional. Its audit compares expected message keys, winning edit versions, full normalized rows and SHA256 body hashes. `retention-report` only counts expired and retained rows. An administrator applies bounded `hub_private.retain_messages` batches separately after recovery checks. After retention, repeat reference reconciliation with `--normalized --retained-only --as-of ...`; remaining expired target receipts are reported as extras, and identity/settings/directory/subscription data must remain intact. Normalization may discover additional identities. The `validated` result requires preserved source fields and independently accounts each extra user/chat against the verified observation artifact; unexplained extras still fail validation.
+Normalization is resumable and transactional. Its audit compares expected message keys, winning edit versions, full normalized rows and SHA256 body hashes. `retention-report` only counts expired and retained rows. An administrator applies bounded `msu_hub_private.retain_messages` batches separately after recovery checks. After retention, repeat reference reconciliation with `--normalized --retained-only --as-of ...`; remaining expired target receipts are reported as extras, and identity/settings/directory/subscription data must remain intact. Normalization may discover additional identities. The `validated` result requires preserved source fields and independently accounts each extra user/chat against the verified observation artifact; unexplained extras still fail validation.
 
 ## Recovery boundary
 

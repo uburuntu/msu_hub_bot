@@ -1,10 +1,12 @@
 # Bot database contract
 
-Apply numbered SQL migrations administratively, in order, to the selected Supabase database. The image deployment never applies migrations. `hub_private.schema_migrations` records applied SQL revisions; the health RPC reports the independent API contract version.
+Apply numbered SQL migrations administratively, in order, to the selected Supabase database. The image deployment never applies migrations. `msu_hub_private.schema_migrations` records applied SQL revisions; the health RPC reports the independent API contract version.
+
+Migrations 001 and 002 retain their original `hub_private`, `hub_api` and `hub_owner` definitions. Migration 003 renames those objects to `msu_hub_private`, `msu_hub_api` and `msu_hub_owner` in place and updates schema-qualified function bodies. Its SQL ledger revision is **3**; RPC signatures and API contract version **1** are unchanged. Fresh installations apply the complete history, without rewriting earlier migrations.
 
 Use [database operations](../../docs/database-operations.md) for routine schema changes, backfills, validation and recovery.
 
-Only `hub_api` belongs in the Data API's exposed schemas. Its RPCs require an enabled `hub_private.principals` record matching `auth.uid()`. Provision the dedicated Auth identity and its bot ID administratively; the runtime cannot choose its scope, register principals, access underlying tables, or invoke retention. Private tables enable RLS with no ordinary-user policies. The `hub_owner` role owns application objects and definer functions; it cannot log in, administer roles/databases, inherit roles, or bypass RLS on other owners' tables. Outside the application schemas it receives only access to `auth.uid()`. Functions use explicit grants and fixed search paths.
+Of this application's schemas, only `msu_hub_api` belongs in the Data API's exposed schemas. Its RPCs require an enabled `msu_hub_private.principals` record matching `auth.uid()`. Provision the dedicated Auth identity and its bot ID administratively; the runtime cannot choose its scope, register principals, access underlying tables, or invoke retention. Private tables enable RLS with no ordinary-user policies. The `msu_hub_owner` role owns application objects and definer functions; it cannot log in, administer roles/databases, inherit roles, or bypass RLS on other owners' tables. Outside the application schemas it receives only access to `auth.uid()`. Functions use explicit grants and fixed search paths.
 
 The runtime signs in with a dedicated Supabase Auth account and publishable API key, keeps access/refresh tokens in memory, and refreshes on demand before expiry. One lock serializes authentication; failed refreshes cause a later fresh sign-in after a cooldown. RPCs are not automatically retried after uncertain outcomes. Every RPC checks the enabled principal, so disabling it blocks subsequent calls even with an unexpired access token. This account represents the bot, not its Telegram users: command-level authorization remains necessary.
 
@@ -18,7 +20,7 @@ Archival is queued after handling, with its receipt timestamp captured beforehan
 
 ## Table lifecycle
 
-All tables below belong to `hub_private`. No automatic expiry applies unless listed.
+All tables below belong to `msu_hub_private`. No automatic expiry applies unless listed.
 
 | Table | Creation and updates | End of life |
 | --- | --- | --- |
@@ -37,7 +39,7 @@ All tables below belong to `hub_private`. No automatic expiry applies unless lis
 
 ## Retention and recovery
 
-Update receipts expire 30 days after `created`; normalized messages expire 30 days after `sent_at`. Each message body belongs only to its normalized row: receipts contain message references, and normalized parent messages contain references to nested messages. Fresh replies, callbacks and edits cannot extend an older message body's lifetime. Non-message event payloads remain in their receipts. The administrative `hub_private.retain_messages(batch, now)` function deletes at most the requested batch from each message-bearing table; repeat bounded batches until both counts are zero. It neither schedules itself nor deletes users, chats, settings, directory entries, subscriptions or Redis state. Backups and the preserved source database have separate recovery policies.
+Update receipts expire 30 days after `created`; normalized messages expire 30 days after `sent_at`. Each message body belongs only to its normalized row: receipts contain message references, and normalized parent messages contain references to nested messages. Fresh replies, callbacks and edits cannot extend an older message body's lifetime. Non-message event payloads remain in their receipts. The administrative `msu_hub_private.retain_messages(batch, now)` function deletes at most the requested batch from each message-bearing table; repeat bounded batches until both counts are zero. It neither schedules itself nor deletes users, chats, settings, directory entries, subscriptions or Redis state. Backups and the preserved source database have separate recovery policies.
 
 `mutation_journal` records durable entity/settings/directory/subscription changes and deletion tombstones for reverse synchronization. Insert/update entries contain identity keys; delete entries preserve the removed row. Reconcile the monotonic sequence with a consistent current durable snapshot, and retire journal entries only after a verified recovery checkpoint. Message bodies are excluded; recover them from retained message rows or an appropriate recovery backup. A backend rollback must stop writers and reconcile changes before restarting the previous backend; selecting an old image alone is insufficient.
 

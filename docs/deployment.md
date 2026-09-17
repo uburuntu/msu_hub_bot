@@ -76,8 +76,8 @@ scores. Keep its namespace and database unchanged when switching durable storage
 EdgeDB requires `HUB_EDGEDB_DSN` and the configured TLS trust. Supabase requires
 `HUB_SUPABASE_URL`, a publishable `HUB_SUPABASE_KEY`, and a dedicated Auth account
 in `HUB_SUPABASE_EMAIL` / `HUB_SUPABASE_PASSWORD`. `HUB_SUPABASE_SCHEMA` defaults
-to `hub_api`. The server must authorize that principal for the bot; readiness
-checks verify both the RPC schema version and bot identity. The application
+to `msu_hub_api`. The server must authorize that principal for the bot; readiness
+checks verify both the RPC API contract version and bot identity. The application
 signs in and refreshes short-lived tokens over the API. It does not need a
 PostgreSQL password, service-role key or platform signing secret.
 
@@ -103,14 +103,14 @@ deployments also stop the current poller before starting its replacement.
 Successful polling updates a readiness heartbeat. A release has five minutes
 to become healthy; shutdown has a 90-second allowance. Failure stops the new
 poller before restoring the previous image and configuration when both releases
-use the same database backend. Initial rollback
+use the same database backend and, for Supabase, the same API schema. Initial rollback
 restores that container and its original restart policy. A host without an
 existing container can deploy directly; manual rollback becomes available
 after a second successful release.
 
 Use **Actions → Rollback → Run workflow** from main to restore the preceding
 release. `current.json` and `previous.json` record revision, image ID, and release
-directory plus the storage backend. Stored runtime configuration is sensitive; do not attach these
+directory plus the storage backend and Supabase API schema. Stored runtime configuration is sensitive; do not attach these
 directories to issues or CI artifacts. Container logs are rotated locally.
 Failed Docker operations and startup logs are retained privately in the
 release's `failure.log`.
@@ -127,15 +127,35 @@ and the wrapper preserves both releases instead of resuming the old database
 writer. Manual rollback across backends is also refused. Older release records
 without a backend field mean EdgeDB. Reconcile post-cutover writes before an
 administrator deliberately restores either backend; image rollback cannot copy
-those writes. Ordinary same-backend deployment rollback remains automatic.
+those writes. Automatic rollback requires matching backend and API namespace.
 
-Before starting a release that changes backends, the wrapper records a private
+Before starting a release that changes backend or Supabase API schema, the wrapper records a private
 `storage-transition.json` recovery marker. It removes the marker only after the
 healthy release's current and previous records are safely published. An interrupted
 or failed transition blocks every later deploy and rollback request, including
-requests for the old backend. An administrator must reconcile the data, establish
+requests for the old backend or namespace. An administrator must reconcile the data, establish
 the authoritative release records, and archive the marker under the deployment
 lock before resuming releases. The restricted Actions key cannot clear this guard.
+
+### Schema rename recovery
+
+The storage compatibility guard includes `HUB_SUPABASE_SCHEMA`. Older Supabase
+release records obtain it from validated saved runtime configuration; a missing
+setting in that historical configuration means the original `hub_api`. Missing
+or malformed release files must not silently authorize rollback. A schema rename is
+an administrative operation with a planned bot pause, outside application CD;
+see [database operations](database-operations.md#renaming-application-schemas).
+
+Before cutover, prepare and rehearse the proven image with a new immutable
+release configuration selecting the renamed API. Preserve its original release
+files. If the DDL transaction fails, verify rollback before restarting the
+original configuration. Once DDL commits, recovery uses the proven image with
+the new namespace; an automatic restart using the old namespace is unsafe.
+Keep the transition guard active until an administrator verifies the resulting
+contract and establishes authoritative compatible release records under the
+host lock. Deploy the candidate with the proven, newly configured release as
+its rollback target. Resume CD only when both current and previous releases use
+the renamed namespace and polling, API access and maintenance checks pass.
 
 ## Conversation resets across FSM generations
 

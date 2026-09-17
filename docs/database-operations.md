@@ -25,16 +25,16 @@ application change, released in that order:
 3. Add a nullable column without changing existing callers, for example:
 
    ```sql
-   ALTER TABLE hub_private.users ADD COLUMN timezone text;
+   ALTER TABLE msu_hub_private.users ADD COLUMN timezone text;
    ```
 
    Extend only the necessary private helper and reviewed RPC. Preserve old
    argument names, optional-input behavior and response types. New objects
-   must belong to `hub_owner`; functions use a fixed empty `search_path` and
+   must belong to `msu_hub_owner`; functions use a fixed empty `search_path` and
    qualified object names. Revoke default/public execution and grant only
    the intended API signatures. A replaced function keeps its existing owner
    and grants, so verify them as well.
-4. Record the new revision in `hub_private.schema_migrations`, issue
+4. Record the new revision in `msu_hub_private.schema_migrations`, issue
    `NOTIFY pgrst, 'reload schema';`, and commit together with the DDL. Verify
    the refreshed API after commit. SQL migration numbers and the health RPC's
    API contract version are independent: an additive column does not require
@@ -80,11 +80,11 @@ changed columns/functions, including installed operator tools:
 
 | Change | Safe approach |
 | --- | --- |
-| New table | Put it in `hub_private`, owned by `hub_owner`, with deliberate keys, foreign-key deletion rules and indexes. Enable RLS without ordinary-user policies; revoke table/sequence access from `PUBLIC`, `anon` and `authenticated`. Define its creation, update, deletion and recovery lifecycle. |
-| New RPC | Expose only a versioned function in `hub_api`. Authorize through `hub_private.require_principal()`, enforce the intended data scope, validate inputs and use fixed search paths. Derive bot scope on the server for bot-scoped records. Use the existing restricted definer-owner pattern and grant execution only to `authenticated`. Test both allowed and denied calls. |
+| New table | Put it in `msu_hub_private`, owned by `msu_hub_owner`, with deliberate keys, foreign-key deletion rules and indexes. Enable RLS without ordinary-user policies; revoke table/sequence access from `PUBLIC`, `anon` and `authenticated`. Define its creation, update, deletion and recovery lifecycle. |
+| New RPC | Expose only a versioned function in `msu_hub_api`. Authorize through `msu_hub_private.require_principal()`, enforce the intended data scope, validate inputs and use fixed search paths. Derive bot scope on the server for bot-scoped records. Use the existing restricted definer-owner pattern and grant execution only to `authenticated`. Test both allowed and denied calls. |
 | Index | Check representative query plans first. For a busy table, consider `CREATE INDEX CONCURRENTLY`; it cannot run inside a transaction block. Use an explicitly reviewed nontransactional migration with preconditions, index-validity checks and documented recovery for an interrupted build. Record completion only after verification. |
 | CHECK / foreign key | Where supported, add `NOT VALID`, correct existing data in batches, then `VALIDATE CONSTRAINT`. These constraints still apply to new writes. Adding an inbound reference to messages/updates changes retention safety and requires its own review. |
-| Rename / drop | Add the replacement first, keep compatible reads/writes, backfill and verify, then remove old consumers. Drop only in a later migration after the rollback window and a dependency check. Never use broad `CASCADE` as cleanup. |
+| Column rename / drop | Add the replacement first, keep compatible reads/writes, backfill and verify, then remove old consumers. Drop only in a later migration after the rollback window and a dependency check. Never use broad `CASCADE` as cleanup. |
 | Type / NOT NULL | Assess conversion failures, table rewrites and lock duration on representative data. Prefer a replacement column with compatible writes and bounded backfill for large rewrites. Validate before enforcing constraints; do not hide failed values with lossy casts or invented defaults. |
 | Data repair | Begin with read-only, bounded inspection and an explicit set of affected keys/counts. Prefer the existing RPC so validation and cache behavior remain consistent. Administrative SQL needs a guarded transaction or resumable batches, journal/recovery review and verification through the application; never run an unqualified update/delete. |
 
@@ -100,6 +100,33 @@ private operator procedure to update the dedicated Auth credential and runtime
 secret source together, deploy, and verify login/refresh and principal identity.
 Never rotate shared platform signing or service keys as if they belonged only
 to this bot. Tokens and passwords must not enter shell arguments or public logs.
+
+## Renaming application schemas
+
+`ALTER SCHEMA ... RENAME TO` and an owner-role rename preserve existing object
+identities and rows. They do not rewrite schema-qualified names embedded in
+quoted SQL or PL/pgSQL function bodies. Review and replace those definitions
+explicitly, including local row types and search paths, while preserving
+signatures, owners and grants. Reject target-name collisions; never rename or
+replace shared platform schemas as part of application cleanup.
+
+Rehearse against the preceding SQL revision with representative data and a
+verified isolated restore. Check unchanged application rows, table identities,
+constraints and privileges, plus real Auth/RPC access and denied direct-table
+access. Preserve the immutable migration history and original recovery copies.
+
+Use a planned write pause: disable CD, hold the deployment lock, pause affected
+maintenance and stop the sole poller. Keep the durable storage-transition guard
+active while applying the guarded transactional rename and updating API exposure,
+runtime profiles and maintenance expectations. Preserve other applications'
+exposed schemas. Recreate services whose environment-based schema configuration
+changed; `NOTIFY pgrst, 'reload schema'` alone cannot replace their environment.
+
+Follow [deployment recovery](deployment.md#schema-rename-recovery) for failures
+before or after SQL commit and compatible rollback configurations. Validate
+bounded retention and its scheduled run, API readiness and a new verified backup
+before resuming CD. Operator commands and protected configuration stay private;
+SQL ledger revisions and RPC API versions remain independent.
 
 ## Validation and application
 
@@ -149,6 +176,8 @@ reconciliation and a verified isolated restore first. Never overwrite the shared
 platform to recover one application without assessing every other application's
 data and preserving the current recovery copy.
 
-Primary references: PostgreSQL [ALTER TABLE](https://www.postgresql.org/docs/17/sql-altertable.html)
+Primary references: PostgreSQL [ALTER TABLE](https://www.postgresql.org/docs/17/sql-altertable.html),
+[ALTER SCHEMA](https://www.postgresql.org/docs/17/sql-alterschema.html),
+[function bodies](https://www.postgresql.org/docs/17/sql-createfunction.html)
 and [CREATE INDEX](https://www.postgresql.org/docs/17/sql-createindex.html), and
 PostgREST [schema cache reloads](https://docs.postgrest.org/en/v14/references/schema_cache.html).
