@@ -22,7 +22,16 @@ def message(text):
 
 
 def config(**values):
-    defaults = dict(id=UUID(int=1), created=from_timestamp(1_700_000_000), owner_id=-10, chat_id=-20, last_post_id=5, with_reposts=False, with_header=True, is_suspended=False)
+    defaults = dict(
+        id=UUID(int=1),
+        created=from_timestamp(1_700_000_000),
+        owner_id=-10,
+        chat_id=-20,
+        last_post_id=5,
+        with_reposts=False,
+        with_header=True,
+        is_suspended=False,
+    )
     defaults.update(values)
     return VkSubscription(**defaults)
 

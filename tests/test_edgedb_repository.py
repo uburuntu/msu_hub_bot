@@ -15,13 +15,26 @@ NOW = datetime(2026, 9, 17, tzinfo=UTC)
 
 
 def chat_row(metadata):
-    return {"id": "00000000-0000-0000-0000-000000000001", "created": NOW.isoformat(),
-        "chat_id": -1001, "type": "supergroup", "title": "Synthetic", "metadata": metadata}
+    return {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "created": NOW.isoformat(),
+        "chat_id": -1001,
+        "type": "supergroup",
+        "title": "Synthetic",
+        "metadata": metadata,
+    }
 
 
 def directory_row(**values):
-    return {"id": "00000000-0000-0000-0000-000000000002", "created": NOW.isoformat(),
-        "chat_id": -1001, "name": "Synthetic", "section": "other", "is_hidden": False, **values}
+    return {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "created": NOW.isoformat(),
+        "chat_id": -1001,
+        "name": "Synthetic",
+        "section": "other",
+        "is_hidden": False,
+        **values,
+    }
 
 
 class JsonClient:
@@ -74,9 +87,17 @@ async def test_settings_load_only_initializes_a_missing_chat_without_refreshing_
 
 
 async def test_vk_upsert_returns_complete_record_and_omitted_fields_keep_defaults():
-    row = {"id": "00000000-0000-0000-0000-000000000003", "created": NOW.isoformat(),
-        "owner_id": -10, "chat_id": -20, "last_post_id": 9, "with_reposts": False,
-        "with_header": True, "is_suspended": False, "description": "Synthetic"}
+    row = {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "created": NOW.isoformat(),
+        "owner_id": -10,
+        "chat_id": -20,
+        "last_post_id": 9,
+        "with_reposts": False,
+        "with_header": True,
+        "is_suspended": False,
+        "description": "Synthetic",
+    }
     client = JsonClient(row)
     record = await EdgeDBRepository(client=client).upsert_vk_subscription(-10, -20, VkPatch(with_header=False))
     query, parameters, _ = client.calls[0]
@@ -143,15 +164,15 @@ async def test_concurrent_setting_patches_merge_without_losing_unknown_metadata(
         repository.patch_settings(-1001, {"auto_video_links": False}),
         repository.patch_settings(-1001, {"with_nsfw": True}),
     )
-    assert client.metadata == {"other": {"value": 7},
-        "settings": {"future_option": [1, 2], "auto_video_links": False, "with_nsfw": True}}
+    assert client.metadata == {"other": {"value": 7}, "settings": {"future_option": [1, 2], "auto_video_links": False, "with_nsfw": True}}
 
 
 async def test_archival_rolls_back_metadata_and_raw_record_together_on_failure():
     original = RuntimeError("synthetic database failure")
     client = JsonClient(chat_row("{}"), original)
-    update = ArchivedUpdate(update_id=1, kind="message", handled=True, data={"update_id": 1},
-        chats=[ChatObservation(chat_id=-1001, type="supergroup")])
+    update = ArchivedUpdate(
+        update_id=1, kind="message", handled=True, data={"update_id": 1}, chats=[ChatObservation(chat_id=-1001, type="supergroup")]
+    )
     with pytest.raises(RuntimeError) as caught:
         await EdgeDBRepository(client=client).archive_update(update)
     assert caught.value is original and not client.committed
@@ -161,8 +182,9 @@ async def test_archival_rolls_back_metadata_and_raw_record_together_on_failure()
 
 async def test_legacy_archive_preserves_original_envelope_without_serializing_it_to_other_backends():
     original = {"update_id": 11, "message": {"message_id": 7, "text": "LEGACY_BODY_CANARY"}}
-    update = ArchivedUpdate(update_id=11, kind="message", handled=True,
-        data={"update_id": 11, "message": {"message_id": 7}}, legacy_data=original)
+    update = ArchivedUpdate(
+        update_id=11, kind="message", handled=True, data={"update_id": 11, "message": {"message_id": 7}}, legacy_data=original
+    )
     assert "LEGACY_BODY_CANARY" not in repr(update) + update.model_dump_json()
     client = JsonClient({"id": directory_row()["id"]})
     await EdgeDBRepository(client=client).archive_update(update)

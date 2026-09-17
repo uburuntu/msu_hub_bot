@@ -15,11 +15,16 @@ def user(number=10):
 def message(**values):
     if "from_user" in values:
         values["from"] = values.pop("from_user")
-    return Message.model_validate({
-        "message_id": 1, "date": NOW - timedelta(minutes=2),
-        "chat": {"id": -1001, "type": "supergroup", "title": "Synthetic"},
-        "from": user(), "text": "current-body", **values,
-    })
+    return Message.model_validate(
+        {
+            "message_id": 1,
+            "date": NOW - timedelta(minutes=2),
+            "chat": {"id": -1001, "type": "supergroup", "title": "Synthetic"},
+            "from": user(),
+            "text": "current-body",
+            **values,
+        }
+    )
 
 
 def test_archive_extracts_reply_forward_entity_and_membership_users():
@@ -120,8 +125,14 @@ def test_import_retention_time_is_independent_from_historical_receipt_time():
 def test_import_reference_transform_preserves_numeric_lexical_values_without_mutating_input():
     precise = Decimal("12345678901234567890.12345678901234567890")
     nested = {"message_id": 2, "date": 1, "chat": {"id": -1001, "type": "supergroup"}, "text": "nested-body"}
-    body = {"message_id": 1, "date": 2, "chat": {"id": -1001, "type": "supergroup"}, "text": "root-body",
-        "opaque_numeric": precise, "reply_to_message": nested}
+    body = {
+        "message_id": 1,
+        "date": 2,
+        "chat": {"id": -1001, "type": "supergroup"},
+        "text": "root-body",
+        "opaque_numeric": precise,
+        "reply_to_message": nested,
+    }
     envelope = {"update_id": 9, "message": body, "opaque_numeric": precise}
     receipt = reference_payload(envelope)
     assert receipt["opaque_numeric"] is precise
@@ -135,9 +146,18 @@ def test_import_reference_transform_preserves_numeric_lexical_values_without_mut
 
 def test_chat_profile_omits_pinned_message_and_absent_optional_properties():
     chat = ChatFullInfo(
-        id=-1001, type="supergroup", title="Synthetic", accent_color_id=1, max_reaction_count=1,
-        accepted_gift_types={"unlimited_gifts": True, "limited_gifts": True, "unique_gifts": True, "premium_subscription": True,
-            "gifts_from_channels": True},
+        id=-1001,
+        type="supergroup",
+        title="Synthetic",
+        accent_color_id=1,
+        max_reaction_count=1,
+        accepted_gift_types={
+            "unlimited_gifts": True,
+            "limited_gifts": True,
+            "unique_gifts": True,
+            "premium_subscription": True,
+            "gifts_from_channels": True,
+        },
         pinned_message=message(text="PINNED_BODY_CANARY"),
     )
     observation = chat_observation(chat, NOW)
@@ -149,20 +169,43 @@ def test_chat_profile_omits_pinned_message_and_absent_optional_properties():
 
 
 def test_membership_update_observes_actor_and_subject_separately():
-    row = archive_observation(Update.model_validate({
-        "update_id": 4,
-        "chat_member": {
-            "chat": Chat(id=-1001, type="supergroup", title="Synthetic"), "from": user(10), "date": NOW,
-            "old_chat_member": {"status": "member", "user": user(20)},
-            "new_chat_member": {"status": "restricted", "user": user(20), "is_member": True,
-                "can_send_messages": False, "can_send_audios": False, "can_send_documents": False,
-                "can_send_photos": False, "can_send_videos": False, "can_send_video_notes": False,
-                "can_send_voice_notes": False, "can_send_polls": False, "can_send_other_messages": False,
-                "can_add_web_page_previews": False, "can_change_info": False, "can_invite_users": False,
-                "can_react_to_messages": False, "can_edit_tag": False,
-                "can_pin_messages": False, "can_manage_topics": False, "until_date": 0},
-        },
-    }), True, received_at=NOW)
+    row = archive_observation(
+        Update.model_validate(
+            {
+                "update_id": 4,
+                "chat_member": {
+                    "chat": Chat(id=-1001, type="supergroup", title="Synthetic"),
+                    "from": user(10),
+                    "date": NOW,
+                    "old_chat_member": {"status": "member", "user": user(20)},
+                    "new_chat_member": {
+                        "status": "restricted",
+                        "user": user(20),
+                        "is_member": True,
+                        "can_send_messages": False,
+                        "can_send_audios": False,
+                        "can_send_documents": False,
+                        "can_send_photos": False,
+                        "can_send_videos": False,
+                        "can_send_video_notes": False,
+                        "can_send_voice_notes": False,
+                        "can_send_polls": False,
+                        "can_send_other_messages": False,
+                        "can_add_web_page_previews": False,
+                        "can_change_info": False,
+                        "can_invite_users": False,
+                        "can_react_to_messages": False,
+                        "can_edit_tag": False,
+                        "can_pin_messages": False,
+                        "can_manage_topics": False,
+                        "until_date": 0,
+                    },
+                },
+            }
+        ),
+        True,
+        received_at=NOW,
+    )
     assert {item.user_id for item in row.users} == {10, 20}
     assert len(row.memberships) == 1
     membership = row.memberships[0]
