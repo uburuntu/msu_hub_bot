@@ -130,6 +130,37 @@ def test_principal_gate_covers_every_api_and_private_tables(db):
     assert db.run("SELECT hub_private.retain_messages();", principal=PRINCIPAL, check=False).returncode
 
 
+def test_definer_owner_has_no_platform_administration_privileges(db):
+    assert (
+        db.value("""
+        SELECT jsonb_build_array(rolcanlogin,rolinherit,rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls)
+        FROM pg_roles WHERE rolname='hub_owner';
+    """)
+        == [False] * 7
+    )
+    assert (
+        db.value("""
+        SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname IN ('hub_private','hub_api')
+        AND (p.proowner <> 'hub_owner'::regrole OR NOT p.proconfig @> ARRAY['search_path=""']);
+    """)
+        == 0
+    )
+    assert (
+        db.value("""
+        SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='hub_private' AND c.relkind IN ('r','S') AND c.relowner <> 'hub_owner'::regrole;
+    """)
+        == 0
+    )
+    assert db.value("SELECT count(*) FROM pg_auth_members WHERE member='hub_owner'::regrole;") == 0
+    db.run("CREATE TABLE public.unrelated_private_marker(value text); REVOKE ALL ON public.unrelated_private_marker FROM PUBLIC;")
+    assert db.run("SET ROLE hub_owner; SELECT * FROM public.unrelated_private_marker;", check=False).returncode
+    assert db.run("SET ROLE hub_owner; ALTER ROLE authenticated SUPERUSER;", check=False).returncode
+    assert db.run("SET SESSION AUTHORIZATION authenticated; SET ROLE hub_owner;", check=False).returncode
+    assert db.value("SELECT to_jsonb(has_function_privilege('hub_owner','auth.uid()','EXECUTE'));") is True
+
+
 @pytest.mark.parametrize("metadata", ["{}", None, [], {"unknown": [1, None], "settings": {"with_nsfw": True, "future": 7}}])
 def test_settings_preserve_original_metadata_and_atomic_patch(db, metadata):
     db.run(f"INSERT INTO hub_private.chats(chat_id,type,metadata) VALUES (-101,'group',{literal(metadata)});")

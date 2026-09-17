@@ -1,5 +1,19 @@
--- Application tables and authenticated RPCs are isolated from other Supabase projects.
+-- Application tables and authenticated RPCs are isolated from other applications.
 BEGIN;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'hub_owner') THEN
+        CREATE ROLE hub_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+    ELSIF EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = 'hub_owner'
+        AND (rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+    ) OR EXISTS (
+        SELECT 1 FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = 'hub_owner')
+    ) THEN
+        RAISE EXCEPTION 'Existing hub_owner role has incompatible privileges';
+    END IF;
+END;
+$$;
 CREATE SCHEMA hub_private;
 CREATE SCHEMA hub_api;
 REVOKE ALL ON SCHEMA hub_private, hub_api FROM PUBLIC, anon, authenticated;
@@ -487,6 +501,28 @@ $$;
 REVOKE ALL ON ALL TABLES IN SCHEMA hub_private FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA hub_private FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA hub_private, hub_api FROM PUBLIC, anon, authenticated;
+-- Definer execution has application ownership, not a platform administrator's privileges.
+ALTER SCHEMA hub_private OWNER TO hub_owner;
+ALTER SCHEMA hub_api OWNER TO hub_owner;
+DO $$
+DECLARE item record;
+BEGIN
+    FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'hub_private' AND c.relkind = 'r'
+    LOOP
+        EXECUTE format('ALTER TABLE hub_private.%I OWNER TO hub_owner', item.relname);
+    END LOOP;
+    FOR item IN SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS arguments
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname IN ('hub_private','hub_api')
+    LOOP
+        EXECUTE format('ALTER FUNCTION %I.%I(%s) OWNER TO hub_owner', item.nspname, item.proname, item.arguments);
+    END LOOP;
+END;
+$$;
+GRANT USAGE ON SCHEMA auth TO hub_owner;
+GRANT EXECUTE ON FUNCTION auth.uid() TO hub_owner;
+ALTER DEFAULT PRIVILEGES FOR ROLE hub_owner IN SCHEMA hub_private, hub_api REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION hub_api.health_v1(), hub_api.ensure_chat_v1(jsonb), hub_api.get_chat_v1(bigint),
     hub_api.load_settings_v1(jsonb), hub_api.patch_settings_v1(bigint,jsonb), hub_api.statistics_v1(timestamptz),
     hub_api.list_directory_v1(), hub_api.get_directory_v1(bigint), hub_api.create_directory_v1(jsonb),
