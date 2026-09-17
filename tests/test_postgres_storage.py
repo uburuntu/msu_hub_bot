@@ -106,6 +106,75 @@ def archive(update_id=1, **extra):
     }
 
 
+def migration_target(db, directory):
+    from urllib.parse import parse_qs, unquote, urlsplit
+
+    from tools.migrate_storage import Postgres
+
+    parsed = urlsplit(db.dsn)
+    query = parse_qs(parsed.query)
+    database = db.run("SELECT current_database();").stdout.strip()
+    cluster = db.run("SELECT system_identifier FROM pg_control_system();").stdout.strip()
+    connection = {
+        "PGDATABASE": database,
+        "PGHOST": parsed.hostname or query.get("host", [""])[0],
+        "PGPORT": str(parsed.port or query.get("port", [5432])[0]),
+    }
+    if parsed.username:
+        connection["PGUSER"] = unquote(parsed.username)
+    if parsed.password:
+        connection["PGPASSWORD"] = unquote(parsed.password)
+    return Postgres({"connection": connection, "expected_database": database, "expected_system_identifier": cluster}, directory, 999)
+
+
+def test_administrative_copy_import_preserves_exact_values_and_resumes(db, tmp_path):
+    from test_migrate_storage import make_export
+
+    from tools.migrate_storage import decode, import_data, reconcile
+
+    directory = tmp_path / "private-export"
+    manifest = make_export(directory)
+    target = migration_target(db, directory)
+    import_data(target, directory, manifest, 1)
+    import_data(target, directory, manifest, 1, replay=True)
+    assert reconcile(target, directory, manifest)["exact"]
+    assert db.value("SELECT count(*) FROM hub_private.updates;") == 2
+    assert db.value("SELECT data FROM hub_private.updates ORDER BY id LIMIT 1;") is None
+    assert decode(db.run("SELECT settings FROM hub_private.chat_settings;").stdout)["future"]["unknown"][0] == decode("1.00000000000000001")
+    assert db.run("SELECT min(first_seen_at)=min(created) FROM hub_private.users;").stdout.strip() == "t"
+
+
+def test_administrative_copy_failure_is_atomic_and_does_not_remove_existing_data(db, tmp_path):
+    from test_migrate_storage import make_export, source_records
+
+    from tools.migrate_storage import MigrationError, batch_script
+
+    directory = tmp_path / "private-export"
+    manifest = make_export(directory)
+    target = migration_target(db, directory)
+    db.run("INSERT INTO hub_private.users(user_id,is_bot,first_name) VALUES(17,false,'Preserved');")
+    records = source_records()["users"]
+    records.append({**records[0], "id": "00000000-0000-0000-0000-000000000088"})
+    with pytest.raises(MigrationError, match="target_operation_failed"):
+        target.run(batch_script("users", records, manifest))
+    assert db.value("SELECT count(*) FROM hub_private.users;") == 1
+    assert db.value("SELECT to_jsonb(first_name) FROM hub_private.users;") == "Preserved"
+
+
+def test_administrative_copy_json_null_metadata_survives(db, tmp_path):
+    from test_migrate_storage import make_export, source_records
+
+    from tools.migrate_storage import batch_script
+
+    directory = tmp_path / "private-export"
+    manifest = make_export(directory)
+    target = migration_target(db, directory)
+    records = source_records()["users"]
+    records[0]["metadata"] = None
+    target.run(batch_script("users", records, manifest))
+    assert db.run("SELECT metadata='null'::jsonb AND metadata IS NOT NULL FROM hub_private.users;").stdout.strip() == "t"
+
+
 def test_principal_gate_covers_every_api_and_private_tables(db):
     arguments = {
         "health": "",
