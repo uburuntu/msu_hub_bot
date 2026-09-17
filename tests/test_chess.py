@@ -48,6 +48,7 @@ class GameSession(RecordingSession):
         self.photo_hook = None
         self.media_error = False
         self.caption_error = False
+        self.edit_hook = None
 
     async def make_request(self, bot, method, timeout=None):
         self.timeouts.append(timeout)
@@ -66,6 +67,8 @@ class GameSession(RecordingSession):
             return message
         if isinstance(method, (EditMessageText, EditMessageCaption, EditMessageMedia)):
             self.methods.append(method)
+            if self.edit_hook is not None:
+                await self.edit_hook(method)
             if isinstance(method, EditMessageMedia) and self.media_error:
                 raise TelegramBadRequest(method=method, message="message can't be edited")
             if isinstance(method, EditMessageCaption) and self.caption_error:
@@ -109,7 +112,9 @@ class ScoreStore:
 async def rig(monkeypatch):
     monkeypatch.setattr(game.Chess, "rounds", {})
     monkeypatch.setattr(game.Chess, "recent_puzzles", game.LRUCache(maxsize=1024))
+    monkeypatch.setattr(game.Chess, "completed", game.TTLCache(maxsize=game.MAX_ROUNDS, ttl=game.RESULT_TTL))
     monkeypatch.setattr(game, "today", lambda: DAY)
+    monkeypatch.setattr(game, "EDIT_INTERVAL", 0)
     monkeypatch.setattr(game, "random_puzzle", AsyncMock(return_value=PUZZLE))
     monkeypatch.setattr(game, "render_board", Mock(return_value=PNG))
     session = GameSession()
@@ -164,6 +169,22 @@ def reveals(rig):
     return [method for method in rig.session.methods if isinstance(method, EditMessageMedia)]
 
 
+def captions(rig):
+    return [method for method in rig.session.methods if isinstance(method, (EditMessageCaption, EditMessageMedia))]
+
+
+def buttons(round_):
+    return [button for row in round_.markup.inline_keyboard for button in row] if round_.markup is not None else []
+
+
+async def all_pages(rig, round_):
+    rendered = []
+    for page in range(round_.view.pages):
+        await click(rig, round_, f"page_{page}")
+        rendered.append(round_.view)
+    return rendered
+
+
 @pytest.mark.parametrize("side,label", [("w", "бел"), ("b", "чёр")])
 async def test_photo_has_six_moves_and_side_without_revealing_solution(rig, side, label):
     game.random_puzzle.return_value = replace(PUZZLE, fen=PUZZLE.fen.replace(" w ", f" {side} "))
@@ -192,9 +213,9 @@ async def test_votes_hide_choices_and_finish_reveals_everyone_with_signed_points
     await click(rig, round_, answer, user_id=42)
     await click(rig, round_, (answer + 1) % 6, user_id=43, username=None)
     await click(rig, round_, (answer + 1) % 6, user_id=42)
-    hidden = "\n".join(round_.board_texts)
-    assert "2" in hidden and "User &lt;name&gt;" in hidden and "@user_name" in hidden
-    assert "tg://user?id=43" in hidden
+    hidden = round_.view.caption
+    assert "2" in hidden and "User <name>" in hidden and "@user_name" in hidden
+    assert any(entity.url == "tg://user?id=43" for entity in round_.view.entities)
     assert all(option.label not in hidden for option in round_.options)
     assert round_.votes[42][0] == answer
     await asyncio.gather(click(rig, round_, "finish", user_id=99), click(rig, round_, "finish", user_id=98))
@@ -204,12 +225,15 @@ async def test_votes_hide_choices_and_finish_reveals_everyone_with_signed_points
     assert rig.client.scores[game.score_key(rig.message.chat.id)] == {"42": 1, "43": 0}
     deltas = rig.client.eval.call_args.args[8:]
     assert deltas == ("42", "User <name>", "user_name", 1, "43", "User <name>", "", -1)
-    final = "\n".join(round_.board_texts)
-    assert all(option.label in final for option in round_.options)
-    assert "✅" in final and "❌" in final and "@user_name" in final and "tg://user?id=43" in final
-    assert len(reveals(rig)) == 1 and reveals(rig)[0].reply_markup is None
+    pages = await all_pages(rig, round_)
+    final = "\n".join(page.caption for page in pages)
+    assert round_.options[answer].label in final and round_.options[(answer + 1) % 6].label in final
+    assert "✓" in final and "✗" in final and "@user_name" in final
+    assert any(entity.url == "tg://user?id=43" for page in pages for entity in page.entities)
+    assert len(reveals(rig)) == 1
+    assert all(game.ChessCallback.unpack(button.callback_data).choice.startswith("page_") for button in buttons(round_))
     assert all(move in text_of(reveals(rig)[0]) for move in PUZZLE.line)
-    assert PUZZLE.id in text_of(reveals(rig)[0])
+    assert any(entity.url == f"https://lichess.org/training/{PUZZLE.id}" for entity in reveals(rig)[0].media.caption_entities)
     game.render_board.assert_called_with(PUZZLE.fen, arrow=PUZZLE.solution[0])
     assert all(method.message_thread_id == 17 for method in rig.session.methods if isinstance(method, (SendMessage, SendPhoto)))
     assert all("request_timeout" not in method.model_extra for method in rig.session.methods)
@@ -494,40 +518,51 @@ async def test_round_scores_on_finish_day_and_top_does_not_mix_midnight_keys(rig
     assert "18.09.2026" in rig.session.methods[-1].text and "@user_name" in rig.session.methods[-1].text
 
 
-async def test_large_voter_lists_escape_html_and_keep_everyone_in_safe_chunks(rig):
+async def test_large_voter_lists_stay_in_one_photo_and_all_completed_pages_remain_accessible(rig):
     round_ = await start(rig)
     answer = correct(round_)
-    round_.votes = {uid: (answer if uid % 2 else (answer + 1) % 6, f"Player {uid:04d} " + "<&" * 60) for uid in range(150)}
+    round_.votes = {uid: (answer if uid % 2 else (answer + 1) % 6, f"Player {uid:04d} " + "<&🧭" * 60) for uid in range(150)}
     round_.usernames = {uid: f"participant_{uid:04d}" for uid in range(150)}
     await game.Chess.update_board(round_)
-    assert len(round_.board_texts) > 1
-    hidden = "\n".join(round_.board_texts)
+    active = await all_pages(rig, round_)
+    hidden = "\n".join(page.caption for page in active)
     assert all(f"@participant_{uid:04d}" in hidden for uid in range(150))
     assert all(option.label not in hidden for option in round_.options)
     await click(rig, round_, "finish")
-    shown = "\n".join(round_.board_texts)
+    assert not game.Chess.rounds and game.Chess.completed[rig.message.chat.id, round_.token] is round_
+    final = await all_pages(rig, round_)
+    shown = "\n".join(page.caption for page in final)
     assert all(f"@participant_{uid:04d}" in shown for uid in range(150))
-    assert "<&" not in shown and "&lt;&amp;" in shown
-    assert all(len(text) <= 3000 for text in round_.board_texts)
-    assert all(len(text_of(method)) <= 4096 for method in rig.session.methods if isinstance(method, (SendMessage, EditMessageText)))
-    assert all(len(text_of(method)) <= 1024 for method in rig.session.methods if isinstance(method, (SendPhoto, EditMessageMedia)))
+    for view in [*active, *final]:
+        units = len(view.caption.encode("utf-16-le")) // 2
+        assert units <= 1024 and len(view.entities) < 100
+        assert all(entity.offset + entity.length <= units for entity in view.entities)
+    assert len([method for method in rig.session.methods if isinstance(method, SendPhoto)]) == 1
+    assert not any(isinstance(method, (SendMessage, EditMessageText)) for method in rig.session.methods)
+    assert len({method.message_id for method in captions(rig)}) == 1
+    rig.client.eval.assert_awaited_once()
 
 
 @pytest.mark.parametrize("caption_fails", [False, True])
-async def test_failed_media_edit_still_delivers_solution_in_same_topic(rig, caption_fails):
+async def test_failed_media_edit_uses_same_photo_and_can_retry_without_rescoring(rig, caption_fails):
     round_ = await start(rig)
+    await click(rig, round_, correct(round_))
     rig.session.media_error = True
     rig.session.caption_error = caption_fails
     await click(rig, round_, "finish")
     result = rig.session.methods[-1]
-    assert all(move in text_of(result) for move in PUZZLE.line)
-    if caption_fails:
-        assert isinstance(result, SendMessage)
-        assert result.reply_parameters.message_id == round_.message.message_id and result.message_thread_id == 17
-    else:
-        assert isinstance(result, EditMessageCaption) and result.message_id == round_.message.message_id
-        assert result.reply_markup is None
-    assert result.parse_mode == "HTML" and not game.Chess.rounds
+    assert isinstance(result, EditMessageCaption) and result.message_id == round_.message.message_id
+    assert all(move in result.caption for move in PUZZLE.line)
+    assert result.parse_mode is None and not game.Chess.rounds
+    assert not round_.solution_shown
+    assert not any(isinstance(method, SendMessage) for method in rig.session.methods)
+    assert round_.view.caption == result.caption if not caption_fails else round_.view.caption != result.caption
+    rig.client.eval.assert_awaited_once()
+    rig.session.media_error = rig.session.caption_error = False
+    await click(rig, round_, "finish")
+    assert round_.solution_shown and round_.closed
+    assert len(reveals(rig)) == 2
+    rig.client.eval.assert_awaited_once()
 
 
 async def test_storage_failure_still_reveals_solution_and_top_reports_unavailable(rig):
@@ -541,6 +576,105 @@ async def test_storage_failure_still_reveals_solution_and_top_reports_unavailabl
     rig.client.zrevrange.side_effect = RuntimeError("synthetic unavailable storage")
     await game.Chess.top(rig.message, rig.redis)
     assert rig.session.methods[-1].text == "Рейтинг сейчас недоступен."
+
+
+async def test_completion_persists_scores_before_waiting_for_display_lock(rig):
+    round_ = await start(rig)
+    await click(rig, round_, correct(round_))
+    saved = asyncio.Event()
+    original_apply = rig.client.apply
+
+    async def save(*args):
+        result = await original_apply(*args)
+        saved.set()
+        return result
+
+    rig.client.eval.side_effect = save
+    await round_.board_lock.acquire()
+    try:
+        task = game.Chess.start_finish(rig.message.chat.id, round_, rig.redis, rig.supervisor)
+        await asyncio.wait_for(saved.wait(), timeout=1)
+        assert rig.client.scores[game.score_key(rig.message.chat.id)] == {"42": 1}
+        assert task is not None and not task.done()
+        assert not reveals(rig)
+    finally:
+        round_.board_lock.release()
+        await rig.supervisor.drain(timeout=1, cancel_timeout=0.5)
+    assert len(reveals(rig)) == 1
+
+
+async def test_concurrent_votes_coalesce_and_edit_attempts_are_paced(rig, monkeypatch):
+    monkeypatch.setattr(game, "EDIT_INTERVAL", 0.03)
+    round_ = await start(rig)
+    edit_times = []
+
+    async def note_edit(method):
+        edit_times.append(asyncio.get_running_loop().time())
+
+    rig.session.edit_hook = note_edit
+    await asyncio.gather(*(click(rig, round_, correct(round_), user_id=uid) for uid in range(24)))
+    assert len(round_.votes) == 24 and len(captions(rig)) <= 2
+    assert "24" in round_.view.caption
+    await click(rig, round_, "page_1")
+    await click(rig, round_, "finish")
+    assert all(later - earlier >= 0.025 for earlier, later in zip(edit_times, edit_times[1:]))
+    assert round_.closed and round_.solution_shown
+    assert len(reveals(rig)) == 1
+
+
+@pytest.mark.parametrize("finish", [False, True])
+async def test_not_modified_response_accepts_already_delivered_view(rig, finish):
+    round_ = await start(rig)
+
+    async def not_modified(method):
+        raise TelegramBadRequest(method=method, message="Bad Request: message is not modified: content and reply markup are the same")
+
+    rig.session.edit_hook = not_modified
+    await click(rig, round_, "finish" if finish else correct(round_))
+    assert round_.view == game.Chess.render_view(round_)
+    assert round_.solution_shown is finish
+    count = len(captions(rig))
+    await game.Chess.update_board(round_)
+    assert len(captions(rig)) == count
+
+
+async def test_render_failure_keeps_solution_readable_and_retryable(rig):
+    round_ = await start(rig)
+    game.render_board.side_effect = ValueError("Synthetic unavailable renderer")
+    await click(rig, round_, "finish")
+    assert not round_.solution_shown and not reveals(rig)
+    assert all(move in round_.view.caption for move in PUZZLE.line)
+    assert isinstance(captions(rig)[-1], EditMessageCaption)
+    game.render_board.side_effect = None
+    await click(rig, round_, "finish")
+    assert round_.solution_shown and len(reveals(rig)) == 1
+    assert not any(isinstance(method, SendMessage) for method in rig.session.methods)
+
+
+@pytest.mark.parametrize("choice", ["page_-1", "page_", "page_1.5", "page_١", "page_999999999"])
+async def test_invalid_page_buttons_do_not_change_votes_or_display(rig, choice):
+    round_ = await start(rig)
+    view = round_.view
+    await click(rig, round_, choice)
+    assert round_.view == view and not round_.votes and not captions(rig)
+    assert rig.session.methods[-1].text == "Неизвестная страница."
+
+
+async def test_completed_navigation_does_not_interfere_with_new_game_or_repeat_scoring(rig):
+    old = await start(rig)
+    await click(rig, old, correct(old))
+    await click(rig, old, "finish")
+    current = await start(rig)
+    await click(rig, old, "page_999")
+    assert old.view.page == old.view.pages - 1
+    assert current is game.Chess.rounds[rig.message.chat.id] and not current.closed and not current.votes
+    rig.client.eval.assert_awaited_once()
+    game.Chess.completed.clear()
+    before = len(captions(rig))
+    await click(rig, old, "page_0")
+    assert len(captions(rig)) == before
+    assert "недоступен" in rig.session.methods[-1].text
+    assert game.Chess.completed.maxsize == 128 and game.Chess.completed.ttl == 86400
 
 
 async def test_send_deadline_includes_blocked_telegram_middleware(rig, monkeypatch):

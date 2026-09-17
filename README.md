@@ -8,6 +8,20 @@ The runtime uses aiogram 3, Pydantic 2, Supabase, and Redis. Dependencies are lo
 reproducible builds. External tools depend on their providers' availability
 and configuration; see the bot's `/help` for commands.
 
+## Chat quizzes
+
+`/geoguess` asks you to locate a photo; `/chess` asks for the best move in a
+[Lichess puzzle](https://lichess.org/training). Each game keeps its question,
+solution and paginated results in one photo message. Votes stay hidden until
+anyone finishes the round or its ten-minute timer expires.
+
+`/geoguess_top` and `/chess_top` show separate daily chat rankings (Moscow time):
+a correct answer earns one point; an error loses one, with a floor of zero.
+Scores expire after the following day. Active rounds and result navigation live
+in memory; navigation is available for up to 24 hours within a bounded cache
+and ends on restart. The displayed result and saved daily scores remain.
+Lichess access is anonymous and subject to its shared request limits.
+
 ## Development
 
 Use Python 3.14 and uv 0.12.15 or newer. Native development works on macOS; the
