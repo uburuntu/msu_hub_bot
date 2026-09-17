@@ -1,0 +1,369 @@
+{
+  "name": "Hub · Crowd favourites",
+  "slug": "bot-usage",
+  "definition": {
+    "kind": "Dashboard",
+    "metadata": {
+      "name": "Hub · Crowd favourites",
+      "project": "PROJECT_NAME"
+    },
+    "spec": {
+      "display": {
+        "name": "Hub · Crowd favourites",
+        "description": "The bot's greatest hits: handlers, command aliases, buttons and conversation steps. Handler totals use unsampled metrics; aliases and latency use sampled traces."
+      },
+      "datasources": {},
+      "variables": [],
+      "panels": {
+        "popular-handlers": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Popular handlers",
+              "description": "Completed handler calls from unsampled metrics. Includes buttons and conversation steps; aliases share a handler."
+            },
+            "plugin": {
+              "kind": "BarChart",
+              "spec": {
+                "orientation": "horizontal",
+                "showValues": true,
+                "calculation": "last-number",
+                "format": {
+                  "unit": "decimal",
+                  "shortValues": true
+                },
+                "sort": "desc",
+                "orderBy": "value",
+                "mode": "value"
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_increase(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' = 'bot.handler' AND attributes->>'outcome' <> 'ignored'\n    GROUP BY service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT operation AS handler, SUM(n) AS invocations\nFROM streams GROUP BY handler HAVING SUM(n) > 0\nORDER BY invocations DESC, handler LIMIT 15"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "handler-outcomes": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Handler reliability",
+              "description": "Failure % covers success, unavailable, timeout and unexpected outcomes. Rejected, ignored and cancelled calls are shown separately."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_increase(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' = 'bot.handler'\n    GROUP BY service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT operation AS handler,\n       SUM(n) AS invocations,\n       SUM(CASE WHEN outcome = 'success' THEN n ELSE 0 END) AS succeeded,\n       SUM(CASE WHEN outcome IN ('unavailable', 'timeout', 'unexpected') THEN n ELSE 0 END) AS failed,\n       SUM(CASE WHEN outcome = 'rejected' THEN n ELSE 0 END) AS rejected,\n       SUM(CASE WHEN outcome = 'ignored' THEN n ELSE 0 END) AS ignored,\n       SUM(CASE WHEN outcome = 'cancelled' THEN n ELSE 0 END) AS cancelled,\n       100.0 * SUM(CASE WHEN outcome IN ('unavailable', 'timeout', 'unexpected') THEN n ELSE 0 END)\n         / NULLIF(SUM(CASE WHEN outcome IN ('success', 'unavailable', 'timeout', 'unexpected') THEN n ELSE 0 END), 0) AS failure_percent\nFROM streams GROUP BY handler HAVING SUM(n) > 0\nORDER BY failed DESC, invocations DESC, handler LIMIT 30"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "popular-commands": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Command aliases · sampled",
+              "description": "Registered command aliases in retained traces. Sampling and the trace budget can affect this ranking."
+            },
+            "plugin": {
+              "kind": "BarChart",
+              "spec": {
+                "orientation": "horizontal",
+                "showValues": true,
+                "calculation": "last-number",
+                "format": {
+                  "unit": "decimal",
+                  "shortValues": true
+                },
+                "sort": "desc",
+                "orderBy": "value",
+                "mode": "value"
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT CASE WHEN attributes->>'command.kind' = 'hashtag' THEN '#' ELSE '/' END\n         || (attributes->>'command') AS command,\n       COUNT(*) AS sampled_invocations\nFROM records\nWHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'span' AND span_name = 'bot.handler'\n  AND attributes->>'command' IS NOT NULL\n  AND attributes->>'outcome' <> 'ignored'\nGROUP BY command ORDER BY sampled_invocations DESC, command LIMIT 15"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "command-entry": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Slash or hashtag · sampled",
+              "description": "How people invoke commands in the retained sample: slash commands or hashtags."
+            },
+            "plugin": {
+              "kind": "PieChart",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT attributes->>'command.kind' AS entry,\n       COUNT(*) AS sampled_invocations\nFROM records\nWHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'span' AND span_name = 'bot.handler'\n  AND attributes->>'command' IS NOT NULL\n  AND attributes->>'command.kind' IN ('slash', 'hashtag')\n  AND attributes->>'outcome' <> 'ignored'\nGROUP BY entry ORDER BY sampled_invocations DESC, entry"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "handler-activity": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Handler activity",
+              "description": "Completed handler calls per minute, grouped by Telegram update kind. Excludes ignored handlers."
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom",
+                  "mode": "list",
+                  "size": "small"
+                },
+                "yAxis": {
+                  "show": true,
+                  "min": 0,
+                  "format": {
+                    "unit": "decimal",
+                    "shortValues": true
+                  }
+                },
+                "visual": {
+                  "display": "line",
+                  "lineWidth": 1.5,
+                  "areaOpacity": 0.06,
+                  "pointRadius": 2,
+                  "connectNulls": false
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        time_bucket($resolution, recorded_timestamp) AS x,\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_rate(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' = 'bot.handler' AND attributes->>'outcome' <> 'ignored'\n    GROUP BY x, service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT x, COALESCE(update_kind, 'unknown') AS update_kind, 60 * SUM(n) AS invocations_per_minute\nFROM streams GROUP BY x, update_kind ORDER BY x, update_kind",
+                      "groupBy": "update_kind",
+                      "metrics": [
+                        "invocations_per_minute"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "slow-handlers": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Handler latency · sampled",
+              "description": "Sampled wall time including awaited dependencies. Compare p95 with the sample count."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT COALESCE(attributes->>'handler', attributes->>'operation', 'unknown') AS handler,\n       COUNT(*) AS sampled_invocations,\n       round(1000 * AVG(duration), 1) AS mean_ms,\n       round(1000 * approx_percentile_cont(0.95) WITHIN GROUP (ORDER BY duration), 1) AS p95_ms,\n       round(1000 * MAX(duration), 1) AS max_ms\nFROM records\nWHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'span' AND span_name = 'bot.handler'\n  AND duration IS NOT NULL AND attributes->>'outcome' <> 'ignored'\nGROUP BY handler ORDER BY p95_ms DESC, sampled_invocations DESC LIMIT 20"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "recent-commands": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Recent commands · private sample",
+              "description": "Recent sampled commands with numeric user/chat IDs. Open a trace to see its requests and timing."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT date_trunc('second', start_timestamp) AS time_utc,\n       CASE WHEN attributes->>'command.kind' = 'hashtag' THEN '#' ELSE '/' END\n         || (attributes->>'command') AS command,\n       attributes->>'handler' AS handler, attributes->>'outcome' AS outcome,\n       round(1000 * duration, 1) AS duration_ms,\n       json_get_int(attributes, 'telegram.user_id') AS actor_user_id,\n       json_get_int(attributes, 'telegram.chat_id') AS source_chat_id,\n       trace_id, span_id\nFROM records\nWHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'span' AND span_name = 'bot.handler'\n  AND attributes->>'command' IS NOT NULL\nORDER BY start_timestamp DESC LIMIT 30"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "layouts": [
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "The greatest hits",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 12,
+                "height": 11,
+                "content": {
+                  "$ref": "#/spec/panels/popular-handlers"
+                }
+              },
+              {
+                "x": 12,
+                "y": 0,
+                "width": 12,
+                "height": 11,
+                "content": {
+                  "$ref": "#/spec/panels/popular-commands"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "How the chat plays",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 16,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/handler-activity"
+                }
+              },
+              {
+                "x": 16,
+                "y": 0,
+                "width": 8,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/command-entry"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Speed & reliability",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 24,
+                "height": 9,
+                "content": {
+                  "$ref": "#/spec/panels/handler-outcomes"
+                }
+              },
+              {
+                "x": 0,
+                "y": 9,
+                "width": 24,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/slow-handlers"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Follow a command",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 24,
+                "height": 11,
+                "content": {
+                  "$ref": "#/spec/panels/recent-commands"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "duration": "24h",
+      "refreshInterval": "60s"
+    }
+  }
+}

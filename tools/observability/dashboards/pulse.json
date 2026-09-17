@@ -1,0 +1,607 @@
+{
+  "name": "Hub · Pulse",
+  "slug": "bot-pulse",
+  "definition": {
+    "kind": "Dashboard",
+    "metadata": {
+      "name": "Hub · Pulse",
+      "project": "PROJECT_NAME"
+    },
+    "spec": {
+      "display": {
+        "name": "Hub · Pulse",
+        "description": "Production at a glance: polling, traffic, queues and Supabase archival. Metrics include unsampled work; freshness distinguishes quiet from offline."
+      },
+      "datasources": {},
+      "variables": [],
+      "panels": {
+        "freshness-card": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Telemetry age",
+              "description": "Seconds since the newest production metric. Amber after 60s, red after 180s; empty means no observation in the selected window."
+            },
+            "plugin": {
+              "kind": "Values",
+              "spec": {
+                "format": {
+                  "unit": "seconds",
+                  "shortValues": true,
+                  "decimalPlaces": 1
+                },
+                "statusThresholds": {
+                  "warning": 60,
+                  "critical": 180
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT EXTRACT(EPOCH FROM (now() - MAX(recorded_timestamp))) AS seconds FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "poll-card": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Since last good poll",
+              "description": "Latest reported seconds since a successful Telegram poll. Read alongside telemetry age."
+            },
+            "plugin": {
+              "kind": "Values",
+              "spec": {
+                "format": {
+                  "unit": "seconds",
+                  "shortValues": true,
+                  "decimalPlaces": 1
+                },
+                "statusThresholds": {
+                  "warning": 45,
+                  "critical": 90
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT scalar_value AS seconds FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name = 'bot.poll.age' ORDER BY recorded_timestamp DESC LIMIT 1"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "handlers-card": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Handler runs",
+              "description": "Completed non-ignored handlers during the selected interval, from unsampled counters."
+            },
+            "plugin": {
+              "kind": "Values",
+              "spec": {
+                "format": {
+                  "unit": "decimal",
+                  "shortValues": true,
+                  "decimalPlaces": 0
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_increase(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' = 'bot.handler' AND attributes->>'outcome' <> 'ignored'\n    GROUP BY service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT SUM(n) AS runs FROM streams"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "failures-card": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Handler failures",
+              "description": "Unavailable, timeout or unexpected handler outcomes in this interval, from unsampled counters."
+            },
+            "plugin": {
+              "kind": "Values",
+              "spec": {
+                "format": {
+                  "unit": "decimal",
+                  "shortValues": true,
+                  "decimalPlaces": 0
+                },
+                "statusThresholds": {
+                  "warning": 1,
+                  "critical": 10
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_increase(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' = 'bot.handler' AND attributes->>'outcome' <> 'ignored'\n    GROUP BY service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT SUM(CASE WHEN outcome IN ('unavailable', 'timeout', 'unexpected') THEN n ELSE 0 END) AS failures FROM streams"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "latest-signal": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Latest telemetry",
+              "description": "Latest observed gauges, their age and deployment. A stale sample or missing series needs attention."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH latest AS (\n    SELECT recorded_timestamp, service_version, metric_name, scalar_value,\n           ROW_NUMBER() OVER (PARTITION BY metric_name ORDER BY recorded_timestamp DESC) AS position\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name IN ('bot.poll.age', 'bot.updates.active', 'bot.jobs.active', 'bot.workers.active', 'bot.workers.queued')\n)\nSELECT metric_name AS signal, scalar_value AS last_value, recorded_timestamp AS sampled_at,\n       EXTRACT(EPOCH FROM (now() - recorded_timestamp)) AS sample_age_seconds, service_version AS release\nFROM latest WHERE position = 1 ORDER BY signal"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "poll-age": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Polling age",
+              "description": "Seconds since a successful Telegram poll, using the peak per bucket. Gaps mean telemetry was not received."
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom",
+                  "mode": "list",
+                  "size": "small"
+                },
+                "yAxis": {
+                  "show": true,
+                  "min": 0,
+                  "format": {
+                    "unit": "seconds",
+                    "shortValues": true,
+                    "decimalPlaces": 1
+                  }
+                },
+                "visual": {
+                  "display": "line",
+                  "lineWidth": 1.5,
+                  "areaOpacity": 0.06,
+                  "pointRadius": 2,
+                  "connectNulls": false
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT time_bucket($resolution, recorded_timestamp) AS x,\n       MAX(scalar_value) AS seconds_since_success\nFROM metrics\nWHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name = 'bot.poll.age'\nGROUP BY x ORDER BY x"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "poll-outcomes": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Polling outcomes",
+              "description": "Completed Telegram polling attempts per minute. Successful empty polls count too."
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom",
+                  "mode": "list",
+                  "size": "small"
+                },
+                "yAxis": {
+                  "show": true,
+                  "min": 0,
+                  "format": {
+                    "unit": "decimal",
+                    "shortValues": true
+                  }
+                },
+                "visual": {
+                  "display": "line",
+                  "lineWidth": 1.5,
+                  "areaOpacity": 0.06,
+                  "pointRadius": 2,
+                  "connectNulls": false
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        time_bucket($resolution, recorded_timestamp) AS x,\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_rate(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.poll.requests'\n    GROUP BY x, service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT x, outcome, 60 * SUM(n) AS requests_per_minute\nFROM streams GROUP BY x, outcome ORDER BY x, outcome",
+                      "groupBy": "outcome",
+                      "metrics": [
+                        "requests_per_minute"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "update-outcomes": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Update outcomes",
+              "description": "Completed update dispatches per minute, including ignored messages. One result per update."
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom",
+                  "mode": "list",
+                  "size": "small"
+                },
+                "yAxis": {
+                  "show": true,
+                  "min": 0,
+                  "format": {
+                    "unit": "decimal",
+                    "shortValues": true
+                  }
+                },
+                "visual": {
+                  "display": "line",
+                  "lineWidth": 1.5,
+                  "areaOpacity": 0.06,
+                  "pointRadius": 2,
+                  "connectNulls": false
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        time_bucket($resolution, recorded_timestamp) AS x,\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_rate(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' = 'bot.dispatch'\n    GROUP BY x, service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT x, outcome, 60 * SUM(n) AS updates_per_minute\nFROM streams GROUP BY x, outcome ORDER BY x, outcome",
+                      "groupBy": "outcome",
+                      "metrics": [
+                        "updates_per_minute"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "active-work": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Active work",
+              "description": "Peak updates, jobs, active workers and queued work. Useful for spotting a backlog."
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom",
+                  "mode": "list",
+                  "size": "small"
+                },
+                "yAxis": {
+                  "show": true,
+                  "min": 0,
+                  "format": {
+                    "unit": "decimal",
+                    "shortValues": true
+                  }
+                },
+                "visual": {
+                  "display": "line",
+                  "lineWidth": 1.5,
+                  "areaOpacity": 0.06,
+                  "pointRadius": 2,
+                  "connectNulls": false
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT time_bucket($resolution, recorded_timestamp) AS x, metric_name AS work,\n       MAX(scalar_value) AS peak_active\nFROM metrics\nWHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n  AND metric_name IN ('bot.updates.active', 'bot.jobs.active', 'bot.workers.active', 'bot.workers.queued')\nGROUP BY x, work ORDER BY x, work",
+                      "groupBy": "work",
+                      "metrics": [
+                        "peak_active"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "archive-outcomes": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Update archival",
+              "description": "Supabase archive operations per minute, separated by outcome."
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom",
+                  "mode": "list",
+                  "size": "small"
+                },
+                "yAxis": {
+                  "show": true,
+                  "min": 0,
+                  "format": {
+                    "unit": "decimal",
+                    "shortValues": true
+                  }
+                },
+                "visual": {
+                  "display": "line",
+                  "lineWidth": 1.5,
+                  "areaOpacity": 0.06,
+                  "pointRadius": 2,
+                  "connectNulls": false
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        time_bucket($resolution, recorded_timestamp) AS x,\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_rate(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' = 'storage.operation' AND attributes->>'operation' = 'archive.write'\n    GROUP BY x, service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT x, outcome, 60 * SUM(n) AS archive_writes_per_minute\nFROM streams GROUP BY x, outcome ORDER BY x, outcome",
+                      "groupBy": "outcome",
+                      "metrics": [
+                        "archive_writes_per_minute"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "telemetry-loss": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Telemetry queue losses",
+              "description": "Queue and emission drops during the selected interval. Read alongside telemetry freshness."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT metric_name, service_version,\n           metric_increase(value, recorded_timestamp) AS dropped\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name IN ('bot.telemetry.dropped_spans', 'bot.telemetry.dropped_logs')\n    GROUP BY metric_name, service_version\n)\nSELECT metric_name AS signal, SUM(dropped) AS dropped\nFROM streams GROUP BY signal ORDER BY signal"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "layouts": [
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Right now",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 6,
+                "height": 4,
+                "content": {
+                  "$ref": "#/spec/panels/freshness-card"
+                }
+              },
+              {
+                "x": 6,
+                "y": 0,
+                "width": 6,
+                "height": 4,
+                "content": {
+                  "$ref": "#/spec/panels/poll-card"
+                }
+              },
+              {
+                "x": 12,
+                "y": 0,
+                "width": 6,
+                "height": 4,
+                "content": {
+                  "$ref": "#/spec/panels/handlers-card"
+                }
+              },
+              {
+                "x": 18,
+                "y": 0,
+                "width": 6,
+                "height": 4,
+                "content": {
+                  "$ref": "#/spec/panels/failures-card"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Traffic & breathing room",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 12,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/update-outcomes"
+                }
+              },
+              {
+                "x": 12,
+                "y": 0,
+                "width": 12,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/active-work"
+                }
+              },
+              {
+                "x": 0,
+                "y": 8,
+                "width": 12,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/poll-age"
+                }
+              },
+              {
+                "x": 12,
+                "y": 8,
+                "width": 12,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/poll-outcomes"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Storage & telemetry",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 16,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/archive-outcomes"
+                }
+              },
+              {
+                "x": 16,
+                "y": 0,
+                "width": 8,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/telemetry-loss"
+                }
+              },
+              {
+                "x": 0,
+                "y": 8,
+                "width": 24,
+                "height": 7,
+                "content": {
+                  "$ref": "#/spec/panels/latest-signal"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "duration": "1h",
+      "refreshInterval": "60s"
+    }
+  }
+}

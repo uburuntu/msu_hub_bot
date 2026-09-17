@@ -68,6 +68,12 @@ Use counters for handler outcomes, provider attempts/failures and job results; h
 
 Measure polling health through aggregate counters and outage/recovery transitions, not per-poll logs. Record metrics independently of trace sampling. Set an explicit trace budget; sample whole traces consistently. A retained failure log may refer to a trace that was not sampled. Bounded queues and failed exports still allow loss, so do not promise complete incident retention. A collector or service mesh is not required for this design.
 
+## Dashboards
+
+Versioned Logfire dashboard definitions live in [`pulse.json`](../tools/observability/dashboards/pulse.json), [`usage.json`](../tools/observability/dashboards/usage.json) and [`failures.json`](../tools/observability/dashboards/failures.json). They are API create payloads with `definition.metadata.project` set to `PROJECT_NAME`. Counters provide totals independently of trace sampling; alias usage and record-based latency views describe sampled activity. Failure records can survive unsampled traces but remain subject to export loss. Keep definitions free of credentials, project identifiers and captured query results; deployed dashboards remain private operational data.
+
+Follow the current [dashboard documentation](https://logfire.pydantic.dev/docs/guides/web-ui/dashboards/) and the selected region's `/api/openapi.json`. Use a separate, project-scoped management token with dashboard read/write permissions outside the bot runtime. Substitute the project name in a private payload copy; the API URL uses its UUID: `/api/v1/projects/{project_uuid}/dashboards/`. List before creating and match by slug. Before updating, save the existing definition and version: GET-one returns `{dashboard: definition}`, while POST/PUT return a dashboard object. PUT the revised definition with the current version; reread conflicts instead of overwriting them. Verify the saved definition and rendered panels, then retain `PROJECT_NAME` in the committed copy.
+
 ## Configuration and lifecycle
 
 The application must receive only a project-scoped write token through `LOGFIRE_TOKEN`. `LOGFIRE_API_KEY`, read tokens and CLI login credentials are management/inspection credentials; do not inject them into the bot container, image, ordinary test jobs or application settings. Select the intended project and region explicitly during deployment setup; do not discover or create projects during bot startup.

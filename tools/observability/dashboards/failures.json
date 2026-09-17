@@ -1,0 +1,335 @@
+{
+  "name": "Hub · Trouble desk",
+  "slug": "bot-failures",
+  "definition": {
+    "kind": "Dashboard",
+    "metadata": {
+      "name": "Hub · Trouble desk",
+      "project": "PROJECT_NAME"
+    },
+    "spec": {
+      "display": {
+        "name": "Hub · Trouble desk",
+        "description": "Start with a failure, follow its trace, find the affected source or destination. Execution failures and Telegram request diagnostics are counted separately."
+      },
+      "datasources": {},
+      "variables": [],
+      "panels": {
+        "failed-executions": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Failed executions",
+              "description": "Retained failure logs from handlers, jobs and dispatch. Telegram diagnostic logs are counted separately below."
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom",
+                  "mode": "list",
+                  "size": "small"
+                },
+                "yAxis": {
+                  "show": true,
+                  "min": 0,
+                  "format": {
+                    "unit": "decimal",
+                    "shortValues": true
+                  }
+                },
+                "visual": {
+                  "display": "bar",
+                  "lineWidth": 1.5,
+                  "areaOpacity": 0,
+                  "pointRadius": 2,
+                  "connectNulls": false,
+                  "stack": "all"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT time_bucket($resolution, start_timestamp) AS x,\n       attributes->>'outcome' AS outcome, COUNT(*) AS failure_logs\nFROM records WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'log' AND span_name = 'bot.operation.failed' AND attributes->>'outcome' IN ('unavailable', 'timeout', 'unexpected')\nGROUP BY x, outcome ORDER BY x, outcome",
+                      "groupBy": "outcome",
+                      "metrics": [
+                        "failure_logs"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "failure-groups": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Failure groups",
+              "description": "Retained execution failures grouped by handler, operation and safe reason."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT attributes->>'boundary' AS boundary, attributes->>'handler' AS handler,\n       attributes->>'operation' AS operation, attributes->>'error.reason' AS reason,\n       COUNT(*) AS failure_logs, MAX(start_timestamp) AS latest\nFROM records WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'log' AND span_name = 'bot.operation.failed' AND attributes->>'outcome' IN ('unavailable', 'timeout', 'unexpected')\nGROUP BY boundary, handler, operation, reason\nORDER BY failure_logs DESC, latest DESC LIMIT 20"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "recent-failures": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Recent failures · private",
+              "description": "Numeric source IDs, safe failure details and application location. Open a trace to investigate."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT date_trunc('second', start_timestamp) AS time_utc,\n       attributes->>'handler' AS handler, attributes->>'command' AS command,\n       attributes->>'error.reason' AS reason,\n       CASE WHEN attributes->>'code.file.path' IS NOT NULL\n            THEN (attributes->>'code.file.path') || COALESCE(':' || (attributes->>'code.line.number'), '')\n       END AS location,\n       json_get_int(attributes, 'telegram.user_id') AS actor_user_id,\n       json_get_int(attributes, 'telegram.chat_id') AS source_chat_id,\n       trace_id, span_id\nFROM records WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'log' AND span_name = 'bot.operation.failed' AND attributes->>'outcome' IN ('unavailable', 'timeout', 'unexpected')\nORDER BY start_timestamp DESC LIMIT 40"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "telegram-errors": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Telegram failure reasons",
+              "description": "Failed outgoing request attempts, including errors the handler recovered from. May share a cause with an execution failure."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT attributes->>'telegram.method' AS method, attributes->>'error.reason' AS reason,\n       attributes->>'outcome' AS outcome, COUNT(*) AS failed_request_logs,\n       MAX(start_timestamp) AS latest\nFROM records WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'log' AND span_name = 'telegram.request.failed'\nGROUP BY method, reason, outcome\nORDER BY failed_request_logs DESC, latest DESC LIMIT 20"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "recent-telegram-errors": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Telegram failures · private",
+              "description": "The destination can differ from the chat that triggered the command. Retry delay is in seconds."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT date_trunc('second', start_timestamp) AS time_utc,\n       attributes->>'telegram.method' AS method, attributes->>'error.reason' AS reason,\n       json_get_int(attributes, 'telegram.user_id') AS actor_user_id,\n       json_get_int(attributes, 'telegram.chat_id') AS source_chat_id,\n       json_get_int(attributes, 'telegram.target_chat_id') AS target_chat_id,\n       json_get_int(attributes, 'telegram.retry_after') AS retry_after_seconds,\n       trace_id, span_id\nFROM records WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'log' AND span_name = 'telegram.request.failed'\nORDER BY start_timestamp DESC LIMIT 40"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "dependency-outcomes": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Dependency reliability",
+              "description": "Unsampled provider, storage, Telegram and media operations. Nested operations remain separate rows."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (\n    SELECT\n        service_version,\n        attributes->>'boundary' AS boundary,\n        attributes->>'operation' AS operation,\n        attributes->>'outcome' AS outcome,\n        attributes->>'provider' AS provider,\n        attributes->>'backend' AS backend,\n        attributes->>'update.kind' AS update_kind,\n        metric_increase(value, recorded_timestamp) AS n\n    FROM metrics\n    WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production'\n      AND metric_name = 'bot.operations' AND attributes->>'boundary' IN ('provider.request', 'storage.operation', 'telegram.request', 'media.operation')\n    GROUP BY service_version, boundary, operation, outcome, provider, backend, update_kind\n)\nSELECT boundary, operation, provider, backend,\n       SUM(n) AS operations,\n       SUM(CASE WHEN outcome IN ('unavailable', 'timeout', 'unexpected') THEN n ELSE 0 END) AS failed,\n       SUM(CASE WHEN outcome IN ('rejected', 'ignored', 'cancelled') THEN n ELSE 0 END) AS excluded_outcomes,\n       100.0 * SUM(CASE WHEN outcome IN ('unavailable', 'timeout', 'unexpected') THEN n ELSE 0 END)\n         / NULLIF(SUM(CASE WHEN outcome IN ('success', 'unavailable', 'timeout', 'unexpected') THEN n ELSE 0 END), 0) AS failure_percent\nFROM streams GROUP BY boundary, operation, provider, backend HAVING SUM(n) > 0\nORDER BY failed DESC, operations DESC, boundary, operation LIMIT 30"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "dependency-latency": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Dependency latency · sampled",
+              "description": "Sampled dependency wall time. Compare p95 with the number of retained operations."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT span_name AS boundary, attributes->>'operation' AS operation,\n       attributes->>'provider' AS provider, attributes->>'backend' AS backend,\n       attributes->>'telegram.method' AS telegram_method, COUNT(*) AS sampled_operations,\n       round(1000 * AVG(duration), 1) AS mean_ms,\n       round(1000 * approx_percentile_cont(0.95) WITHIN GROUP (ORDER BY duration), 1) AS p95_ms\nFROM records\nWHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind = 'span'\n  AND span_name IN ('provider.request', 'storage.operation', 'telegram.request', 'media.operation')\n  AND duration IS NOT NULL\nGROUP BY boundary, operation, provider, backend, telegram_method\nORDER BY p95_ms DESC, sampled_operations DESC LIMIT 25"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "layouts": [
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "What needs attention",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 12,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/failed-executions"
+                }
+              },
+              {
+                "x": 12,
+                "y": 0,
+                "width": 12,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/failure-groups"
+                }
+              },
+              {
+                "x": 0,
+                "y": 8,
+                "width": 24,
+                "height": 12,
+                "content": {
+                  "$ref": "#/spec/panels/recent-failures"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Telegram destinations",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 24,
+                "height": 7,
+                "content": {
+                  "$ref": "#/spec/panels/telegram-errors"
+                }
+              },
+              {
+                "x": 0,
+                "y": 7,
+                "width": 24,
+                "height": 11,
+                "content": {
+                  "$ref": "#/spec/panels/recent-telegram-errors"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Under the hood",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 24,
+                "height": 9,
+                "content": {
+                  "$ref": "#/spec/panels/dependency-outcomes"
+                }
+              },
+              {
+                "x": 0,
+                "y": 9,
+                "width": 24,
+                "height": 9,
+                "content": {
+                  "$ref": "#/spec/panels/dependency-latency"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "duration": "24h",
+      "refreshInterval": "60s"
+    }
+  }
+}
