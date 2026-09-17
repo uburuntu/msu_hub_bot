@@ -34,6 +34,41 @@ jobs:
       - run: uv run --no-sync mypy
       - run: uv run --no-sync pytest -q
 
+  storage:
+    name: PostgreSQL storage contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-only-postgres
+          POSTGRES_DB: hub_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hub_test_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: 0.12.15
+          python-version: '3.11'
+          enable-cache: true
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - run: uv sync --locked
+      - name: Exercise schema, isolation, atomic mutations and retention
+        run: uv run --no-sync pytest -q tests/test_postgres_storage.py
+        env:
+          HUB_TEST_POSTGRES_DSN: postgresql://postgres:test-only-postgres@localhost:5432/hub_test_ci
+
   security:
     name: Secrets and workflows
     runs-on: ubuntu-latest

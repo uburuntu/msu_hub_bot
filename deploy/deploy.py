@@ -63,7 +63,15 @@ def validate_payload(payload):
             or "\0" in value
         ):
             raise DeploymentError("Invalid runtime configuration")
-    if not all(values.get(key) for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", "HUB_EDGEDB_DSN")):
+    backend = values.get("HUB_STORAGE_BACKEND", "edgedb")
+    if backend not in {"edgedb", "supabase"}:
+        raise DeploymentError("Invalid storage backend")
+    database_fields = (
+        ("HUB_EDGEDB_DSN",)
+        if backend == "edgedb"
+        else ("HUB_SUPABASE_URL", "HUB_SUPABASE_KEY", "HUB_SUPABASE_EMAIL", "HUB_SUPABASE_PASSWORD")
+    )
+    if not all(values.get(key) for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", *database_fields)):
         raise DeploymentError("Missing core runtime settings")
     if not isinstance(payload["archive_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", payload["archive_sha256"]):
         raise DeploymentError("Invalid archive checksum")
@@ -297,6 +305,8 @@ for path in Path('/proc').iterdir():
             previous, current = self.read_state("previous.json"), self.read_state("current.json")
             if not previous or previous.get("empty") or not current:
                 raise DeploymentError("No prior release recorded")
+            if previous.get("storage_backend", "edgedb") != current.get("storage_backend", "edgedb"):
+                raise DeploymentError("Rollback changes the storage backend; reconcile data before restoring a release")
             try:
                 self.restore(previous)
             except Exception:
@@ -316,7 +326,11 @@ for path in Path('/proc').iterdir():
         environment["HUB_LOGS_FILE"] = "/tmp/msu_hub_bot.log"
         write_private(directory / "runtime.env", "HUB_CONFIG_JSON=" + json.dumps(environment, ensure_ascii=True) + "\n")
         write_private(directory / "compose.json", json.dumps(compose_document(payload["image"], directory / "runtime.env"), indent=2))
-        state = {"release": release, **{key: payload[key] for key in ("revision", "image", "archive_sha256", "archive_size")}}
+        state = {
+            "release": release,
+            "storage_backend": environment.get("HUB_STORAGE_BACKEND", "edgedb"),
+            **{key: payload[key] for key in ("revision", "image", "archive_sha256", "archive_size")},
+        }
         write_private(directory / "release.json", json.dumps(state))
         self.receive_image(payload, directory, stream)
         report("Image received; checking configuration and connections")
@@ -345,11 +359,16 @@ for path in Path('/proc').iterdir():
             self.compose(state, "up", "--detach", "--no-deps", "bot")
             self.wait_healthy()
         except Exception:
-            report("Release failed; restoring the previous poller")
             try:
                 self.record_container_failure()
             except Exception:
                 pass
+            if not previous.get("empty") and previous.get("storage_backend", "edgedb") != state["storage_backend"]:
+                self.stop_replacement()
+                raise DeploymentError(
+                    "Release failed after a storage-backend change; poller stopped. Reconcile data before restoring either release"
+                ) from None
+            report("Release failed; restoring the previous poller")
             self.restore(previous)
             report("Previous poller restored")
             raise DeploymentError("Release failed and was rolled back") from None

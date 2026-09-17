@@ -9,7 +9,7 @@ uses a host lock. A deployment sends one JSON header followed by a compressed
 image archive over the same encrypted SSH connection.
 
 Requirements: Linux x86-64, Python 3, Docker, Compose 2.30 or later, and access to
-the existing Redis/EdgeDB services through Docker network `msu_db`. The account
+Redis and the selected database backend through Docker network `msu_db`. The account
 must be able to use Docker. Passwordless sudo is not required.
 
 Install the reviewed wrapper as `~/msu_hub_bot/deploy.py` in a mode-700 directory.
@@ -66,10 +66,30 @@ management API keys, read tokens and CLI credentials out of runtime settings;
 Build and image-validation steps receive no project token. See the
 [observability contract](observability.md) before enabling export.
 
+## Database configuration
+
+`HUB_STORAGE_BACKEND` selects `edgedb` or `supabase`; its default is `edgedb`.
+Redis remains required for topic conversations, scheduled deletions and game
+scores. Keep its namespace and database unchanged when switching durable storage.
+
+EdgeDB requires `HUB_EDGEDB_DSN` and the configured TLS trust. Supabase requires
+`HUB_SUPABASE_URL`, a publishable `HUB_SUPABASE_KEY`, and a dedicated Auth account
+in `HUB_SUPABASE_EMAIL` / `HUB_SUPABASE_PASSWORD`. `HUB_SUPABASE_SCHEMA` defaults
+to `hub_api`. The server must authorize that principal for the bot; readiness
+checks verify both the RPC schema version and bot identity. The application
+signs in and refreshes short-lived tokens over the API. It does not need a
+PostgreSQL password, service-role key or platform signing secret.
+
+Provision the full Supabase platform, application schema, principal grants,
+retention and backups separately from application deployment. Install the
+reviewed host wrapper before sending Supabase configuration. CI exercises SQL
+contracts in an empty disposable PostgreSQL database; its credentials never
+refer to production. Runtime readiness validates the actual API path.
+
 ## Cutover and rollback
 
 Before stopping the current bot, the wrapper verifies and loads the image and runs a
-separate preflight: configuration validation, Redis ping, EdgeDB `SELECT 1`,
+separate preflight: configuration validation, Redis ping, the selected database's readiness check,
 Telegram `getMe`, and required media programs. Preflight never polls Telegram,
 sends messages, or migrates the database.
 
@@ -81,14 +101,15 @@ deployments also stop the current poller before starting its replacement.
 
 Successful polling updates a readiness heartbeat. A release has five minutes
 to become healthy; shutdown has a 90-second allowance. Failure stops the new
-poller before restoring the previous image and configuration. Initial rollback
+poller before restoring the previous image and configuration when both releases
+use the same database backend. Initial rollback
 restores that container and its original restart policy. A host without an
 existing container can deploy directly; manual rollback becomes available
 after a second successful release.
 
 Use **Actions → Rollback → Run workflow** from main to restore the preceding
 release. `current.json` and `previous.json` record revision, image ID, and release
-directory. Stored runtime configuration is sensitive; do not attach these
+directory plus the storage backend. Stored runtime configuration is sensitive; do not attach these
 directories to issues or CI artifacts. Container logs are rotated locally.
 Failed Docker operations and startup logs are retained privately in the
 release's `failure.log`.
@@ -98,6 +119,14 @@ can reload the preceding image if it was removed from Docker's local cache.
 Older generated release directories and unused application images are cleaned
 up after a successful deployment. Shared database containers and other
 applications are outside this cleanup.
+
+Changing database backends requires a separate write freeze, protected export,
+import and reconciliation. A failed release after such a change is stopped,
+and the wrapper preserves both releases instead of resuming the old database
+writer. Manual rollback across backends is also refused. Older release records
+without a backend field mean EdgeDB. Reconcile post-cutover writes before an
+administrator deliberately restores either backend; image rollback cannot copy
+those writes. Ordinary same-backend deployment rollback remains automatic.
 
 ## Conversation resets across FSM generations
 
@@ -138,7 +167,7 @@ wrapper and a new restricted key, verify the new host key independently, and
 update the production SSH secrets. Runtime application secrets
 stay in GitHub. Stop the old host's bot before activating the new one.
 
-The initial migration deliberately keeps the existing data stores. Moving or
-restoring Redis/EdgeDB, changing TLS trust, and applying schema migrations are
-separate operations. The retained `dbschema` directory is reference material;
-deployment never applies it automatically.
+Moving or restoring databases, changing TLS trust, and applying schema or
+retention migrations are separate operations. Deployment never applies
+`dbschema` migrations or resets conversation state automatically. Shared
+database services and other applications are outside the release wrapper's authority.

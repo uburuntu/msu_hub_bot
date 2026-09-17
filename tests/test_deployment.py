@@ -23,6 +23,32 @@ def payload():
     }
 
 
+def supabase_payload():
+    request = payload()
+    request["environment"].pop("HUB_EDGEDB_DSN")
+    request["environment"].update(
+        HUB_STORAGE_BACKEND="supabase",
+        HUB_SUPABASE_URL="http://database.invalid:8000",
+        HUB_SUPABASE_KEY="synthetic-publishable-key",
+        HUB_SUPABASE_EMAIL="bot@example.invalid",
+        HUB_SUPABASE_PASSWORD="synthetic-password",
+    )
+    return request
+
+
+def test_deployment_requires_selected_backend_credentials():
+    deployment.validate_payload(payload())
+    deployment.validate_payload(supabase_payload())
+    request = supabase_payload()
+    request["environment"].pop("HUB_SUPABASE_PASSWORD")
+    with pytest.raises(deployment.DeploymentError, match="Missing core"):
+        deployment.validate_payload(request)
+    request = payload()
+    request["environment"]["HUB_STORAGE_BACKEND"] = "other"
+    with pytest.raises(deployment.DeploymentError, match="Invalid storage backend"):
+        deployment.validate_payload(request)
+
+
 @pytest.mark.parametrize("image", ["elsewhere/bot:latest", "msu-hub-bot:latest", "$(touch /tmp/pwned)"])
 def test_rejects_mutable_or_foreign_images(image):
     request = payload()
@@ -129,6 +155,53 @@ def test_failed_manual_rollback_restores_current_release(tmp_path):
         deployer.deploy({"action": "rollback"})
     assert events == ["old", "current"]
     assert deployer.read_state("current.json") == current
+
+
+@pytest.mark.parametrize("previous_backend,current_backend", [(None, "supabase"), ("supabase", "edgedb")])
+def test_manual_rollback_cannot_resume_a_different_database_writer(tmp_path, previous_backend, current_backend):
+    previous = {"release": "old", **({"storage_backend": previous_backend} if previous_backend else {})}
+    current = {"release": "current", "storage_backend": current_backend}
+    deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
+    deployment.write_private(tmp_path / "current.json", json.dumps(current))
+    deployer = deployment.Deployer(tmp_path)
+    events = []
+    deployer.restore = lambda state: events.append("restore")
+    with pytest.raises(deployment.DeploymentError, match="reconcile data"):
+        deployer.deploy({"action": "rollback"})
+    assert events == []
+    assert deployer.read_state("current.json") == current
+    assert deployer.read_state("previous.json") == previous
+
+
+@pytest.mark.parametrize("same_backend", [False, True])
+def test_failed_supabase_release_stops_before_backend_guard_or_safe_restore(tmp_path, same_backend):
+    previous = {"release": "old"}
+    if same_backend:
+        previous["storage_backend"] = "supabase"
+    deployment.write_private(tmp_path / "current.json", json.dumps(previous))
+    deployer = deployment.Deployer(tmp_path)
+    events = []
+    deployer.run = lambda *args, **kwargs: ""
+    deployer.receive_image = lambda *args: None
+    deployer.compose = lambda state, *args, **kwargs: events.append(args[0])
+    deployer.stop_legacy = lambda: events.append("stop_legacy")
+    deployer.stop_replacement = lambda: events.append("stop_replacement")
+    deployer.record_container_failure = lambda: events.append("diagnostics")
+    deployer.restore = lambda state: events.append("restore")
+
+    def fail():
+        raise deployment.DeploymentError("unhealthy")
+
+    deployer.wait_healthy = fail
+    expected = "rolled back" if same_backend else "Reconcile data"
+    with pytest.raises(deployment.DeploymentError, match=expected):
+        deployer.deploy(supabase_payload())
+    assert events[:5] == ["config", "run", "stop_legacy", "stop_replacement", "up"]
+    assert events[5:] == ["diagnostics", "restore" if same_backend else "stop_replacement"]
+    assert deployer.read_state("current.json") == previous
+    release = next((tmp_path / "releases").iterdir())
+    assert (release / "runtime.env").exists() and (release / "release.json").exists()
+    assert json.loads((release / "release.json").read_text())["storage_backend"] == "supabase"
 
 
 def make_archive(path, *, foreign_tag=False, traversal=False, contains_env=False, runtime_env=None):
