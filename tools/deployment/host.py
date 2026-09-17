@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -21,9 +22,11 @@ from pathlib import Path, PurePosixPath
 
 IMAGE_RE = re.compile(r"sha256:[0-9a-f]{64}")
 REVISION_RE = re.compile(r"[0-9a-f]{40}")
+SCHEMA_RE = re.compile(r"[a-z][a-z0-9_]{0,62}")
 CONTAINER = "msu_hub_bot"
 LEGACY = "hub_bot"
 MAX_ARCHIVE_SIZE = 2 * 1024**3
+MAX_CONFIGURATION_SIZE = 256 * 1024
 
 
 class DeploymentError(Exception):
@@ -36,6 +39,34 @@ def report(message):
     except OSError:
         # A disconnected CI runner must not interrupt cutover or rollback.
         pass
+
+
+def validate_environment(values, *, historical=False):
+    if not isinstance(values, dict) or not values:
+        raise DeploymentError("Missing runtime configuration")
+    for key, value in values.items():
+        if (
+            not isinstance(key, str)
+            or not (re.fullmatch(r"HUB_[A-Z0-9_]+", key) or key == "LOGFIRE_TOKEN")
+            or key == "HUB_CONFIG_JSON"
+            or not isinstance(value, str)
+            or "\0" in value
+        ):
+            raise DeploymentError("Invalid runtime configuration")
+    backend = values.get("HUB_STORAGE_BACKEND", "edgedb")
+    if backend not in {"edgedb", "supabase"}:
+        raise DeploymentError("Invalid storage backend")
+    if backend == "supabase":
+        schema = values.get("HUB_SUPABASE_SCHEMA", "hub_api" if historical else "")
+        if not SCHEMA_RE.fullmatch(schema):
+            raise DeploymentError("Invalid or missing Supabase schema")
+    database_fields = (
+        ("HUB_EDGEDB_DSN",)
+        if backend == "edgedb"
+        else ("HUB_SUPABASE_URL", "HUB_SUPABASE_KEY", "HUB_SUPABASE_EMAIL", "HUB_SUPABASE_PASSWORD")
+    )
+    if not all(values.get(key) for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", *database_fields)):
+        raise DeploymentError("Missing core runtime settings")
 
 
 def validate_payload(payload):
@@ -51,28 +82,7 @@ def validate_payload(payload):
         raise DeploymentError("Image must be an immutable SHA256 image ID")
     if not isinstance(payload["revision"], str) or not REVISION_RE.fullmatch(payload["revision"]):
         raise DeploymentError("Invalid source revision")
-    values = payload["environment"]
-    if not isinstance(values, dict) or not values:
-        raise DeploymentError("Missing runtime configuration")
-    for key, value in values.items():
-        if (
-            not isinstance(key, str)
-            or not (re.fullmatch(r"HUB_[A-Z0-9_]+", key) or key == "LOGFIRE_TOKEN")
-            or key == "HUB_CONFIG_JSON"
-            or not isinstance(value, str)
-            or "\0" in value
-        ):
-            raise DeploymentError("Invalid runtime configuration")
-    backend = values.get("HUB_STORAGE_BACKEND", "edgedb")
-    if backend not in {"edgedb", "supabase"}:
-        raise DeploymentError("Invalid storage backend")
-    database_fields = (
-        ("HUB_EDGEDB_DSN",)
-        if backend == "edgedb"
-        else ("HUB_SUPABASE_URL", "HUB_SUPABASE_KEY", "HUB_SUPABASE_EMAIL", "HUB_SUPABASE_PASSWORD")
-    )
-    if not all(values.get(key) for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", *database_fields)):
-        raise DeploymentError("Missing core runtime settings")
+    validate_environment(payload["environment"])
     if not isinstance(payload["archive_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", payload["archive_sha256"]):
         raise DeploymentError("Invalid archive checksum")
     if type(payload["archive_size"]) is not int or not 0 < payload["archive_size"] <= MAX_ARCHIVE_SIZE:
@@ -151,6 +161,27 @@ def write_private(path, data):
     sync_directory(path.parent)
 
 
+def read_private(path):
+    """Read bounded regular files owned by this account without following symlinks."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077 or info.st_size > MAX_CONFIGURATION_SIZE:
+            raise ValueError("Unsafe private file")
+        content = source.read(MAX_CONFIGURATION_SIZE + 1)
+        if len(content) > MAX_CONFIGURATION_SIZE:
+            raise ValueError("Oversized private file")
+    return content.decode("utf-8")
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON field")
+        result[key] = value
+    return result
+
+
 def compose_document(image, env_path):
     return {
         "services": {
@@ -198,6 +229,38 @@ class Deployer:
     def read_state(self, filename):
         path = self.root / filename
         return json.loads(path.read_text()) if path.exists() else None
+
+    def storage_identity(self, state):
+        backend = state.get("storage_backend", "edgedb") if isinstance(state, dict) else None
+        if not isinstance(backend, str) or backend not in {"edgedb", "supabase"}:
+            raise DeploymentError("Invalid stored storage backend")
+        if backend == "edgedb":
+            return backend, None
+        try:
+            release = state.get("release")
+            if not isinstance(release, str) or not re.fullmatch(r"[0-9a-f]{40}-[0-9]+", release):
+                raise ValueError("Invalid release path")
+            parent = self.root / "releases"
+            directory = parent / release
+            for path, mask in ((parent, 0o022), (directory, 0o077)):
+                info = path.lstat()
+                if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & mask:
+                    raise ValueError("Unsafe release directory")
+            recorded = json.loads(read_private(directory / "release.json"), object_pairs_hook=unique_object)
+            if recorded != state or state.get("revision") != release.split("-", 1)[0]:
+                raise ValueError("Inconsistent release metadata")
+            text = read_private(directory / "runtime.env")
+            prefix = "HUB_CONFIG_JSON="
+            if not text.startswith(prefix) or not text.endswith("\n") or "\n" in text[:-1] or "\r" in text:
+                raise ValueError("Invalid configuration envelope")
+            environment = json.loads(text[len(prefix) : -1], object_pairs_hook=unique_object)
+            validate_environment(environment, historical="supabase_schema" not in state)
+            schema = environment.get("HUB_SUPABASE_SCHEMA", "hub_api")
+            if environment.get("HUB_STORAGE_BACKEND", "edgedb") != backend or state.get("supabase_schema", schema) != schema:
+                raise ValueError("Inconsistent storage identity")
+            return backend, schema
+        except (OSError, ValueError, DeploymentError):
+            raise DeploymentError("Invalid protected release configuration") from None
 
     def receive_image(self, payload, directory, stream):
         archive = directory / "image.tar.gz"
@@ -319,8 +382,8 @@ for path in Path('/proc').iterdir():
             previous, current = self.read_state("previous.json"), self.read_state("current.json")
             if not previous or previous.get("empty") or not current:
                 raise DeploymentError("No prior release recorded")
-            if previous.get("storage_backend", "edgedb") != current.get("storage_backend", "edgedb"):
-                raise DeploymentError("Rollback changes the storage backend; reconcile data before restoring a release")
+            if self.storage_identity(previous) != self.storage_identity(current):
+                raise DeploymentError("Rollback changes the storage backend or Supabase schema; reconcile data before restoring a release")
             try:
                 self.restore(previous)
             except Exception:
@@ -345,6 +408,8 @@ for path in Path('/proc').iterdir():
             "storage_backend": environment.get("HUB_STORAGE_BACKEND", "edgedb"),
             **{key: payload[key] for key in ("revision", "image", "archive_sha256", "archive_size")},
         }
+        if state["storage_backend"] == "supabase":
+            state["supabase_schema"] = environment["HUB_SUPABASE_SCHEMA"]
         write_private(directory / "release.json", json.dumps(state))
         self.receive_image(payload, directory, stream)
         report("Image received; checking configuration and connections")
@@ -366,8 +431,8 @@ for path in Path('/proc').iterdir():
         if previous is None:
             legacy = self.inspect(LEGACY)
             previous = {"legacy": True, "restart_policy": legacy["HostConfig"]["RestartPolicy"]["Name"]} if legacy else {"empty": True}
-        changing_backend = not previous.get("empty") and previous.get("storage_backend", "edgedb") != state["storage_backend"]
-        if changing_backend:
+        changing_storage = not previous.get("empty") and self.storage_identity(previous) != self.storage_identity(state)
+        if changing_storage:
             # A candidate can write before health succeeds. Preserve the fence
             # across process interruption and failed release-state publication.
             write_private(transition, json.dumps({"previous": previous, "candidate": state}))
@@ -382,10 +447,10 @@ for path in Path('/proc').iterdir():
                 self.record_container_failure()
             except Exception:
                 pass
-            if changing_backend:
+            if changing_storage:
                 self.stop_replacement()
                 raise DeploymentError(
-                    "Release failed after a storage-backend change; poller stopped. Reconcile data before restoring either release"
+                    "Release failed after a storage identity change; poller stopped. Reconcile data before restoring either release"
                 ) from None
             report("Release failed; restoring the previous poller")
             self.restore(previous)
@@ -393,7 +458,7 @@ for path in Path('/proc').iterdir():
             raise DeploymentError("Release failed and was rolled back") from None
         write_private(self.root / "previous.json", json.dumps(previous))
         write_private(self.root / "current.json", json.dumps(state))
-        if changing_backend:
+        if changing_storage:
             transition.unlink()
             sync_directory(self.root)
         report("Deployed " + payload["revision"] + " " + payload["image"])

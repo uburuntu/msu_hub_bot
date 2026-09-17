@@ -2,6 +2,7 @@ import importlib.util
 import hashlib
 import io
 import json
+import os
 import tarfile
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def payload():
     }
 
 
-def supabase_payload():
+def supabase_payload(schema="msu_hub_api"):
     request = payload()
     request["environment"].pop("HUB_EDGEDB_DSN")
     request["environment"].update(
@@ -32,8 +33,26 @@ def supabase_payload():
         HUB_SUPABASE_KEY="synthetic-publishable-key",
         HUB_SUPABASE_EMAIL="bot@example.invalid",
         HUB_SUPABASE_PASSWORD="synthetic-password",
+        HUB_SUPABASE_SCHEMA=schema,
     )
     return request
+
+
+def stored_supabase(tmp_path, *, schema="msu_hub_api", number=1, historical=False, omit_schema=False):
+    request = supabase_payload(schema)
+    state = {
+        "release": request["revision"] + f"-{number}",
+        "storage_backend": "supabase",
+        **{key: request[key] for key in ("revision", "image", "archive_sha256", "archive_size")},
+    }
+    if not historical:
+        state["supabase_schema"] = schema
+    if omit_schema:
+        request["environment"].pop("HUB_SUPABASE_SCHEMA")
+    directory = tmp_path / "releases" / state["release"]
+    deployment.write_private(directory / "release.json", json.dumps(state))
+    deployment.write_private(directory / "runtime.env", "HUB_CONFIG_JSON=" + json.dumps(request["environment"]) + "\n")
+    return state
 
 
 def test_deployment_requires_selected_backend_credentials():
@@ -47,6 +66,128 @@ def test_deployment_requires_selected_backend_credentials():
     request["environment"]["HUB_STORAGE_BACKEND"] = "other"
     with pytest.raises(deployment.DeploymentError, match="Invalid storage backend"):
         deployment.validate_payload(request)
+
+
+@pytest.mark.parametrize("schema", [None, "", "hub-api", "Hub_Api", "a" * 64, "hub_api; private-canary", "$(private-canary)"])
+def test_new_supabase_payload_requires_an_explicit_schema(schema):
+    request = supabase_payload()
+    if schema is None:
+        request["environment"].pop("HUB_SUPABASE_SCHEMA")
+    else:
+        request["environment"]["HUB_SUPABASE_SCHEMA"] = schema
+    with pytest.raises(deployment.DeploymentError, match="Supabase schema") as caught:
+        deployment.validate_payload(request)
+    assert "private-canary" not in str(caught.value)
+
+
+@pytest.mark.parametrize("schema,omit_schema", [("hub_api", True), ("hub_api", False), ("msu_hub_api", False)])
+def test_historical_supabase_identity_comes_from_the_private_runtime_file(tmp_path, schema, omit_schema):
+    state = stored_supabase(tmp_path, schema=schema, historical=True, omit_schema=omit_schema)
+    assert deployment.Deployer(tmp_path).storage_identity(state) == ("supabase", schema)
+
+
+def test_new_metadata_does_not_enable_the_historical_schema_default(tmp_path):
+    state = stored_supabase(tmp_path, schema="hub_api", omit_schema=True)
+    with pytest.raises(deployment.DeploymentError, match="Invalid protected release configuration"):
+        deployment.Deployer(tmp_path).storage_identity(state)
+
+
+@pytest.mark.parametrize("release", ["../private-canary", "/private-canary", "b" * 40 + "-1/child", "not-a-release"])
+def test_historical_storage_identity_rejects_unsafe_release_paths(tmp_path, release):
+    state = stored_supabase(tmp_path, historical=True)
+    state["release"] = release
+    with pytest.raises(deployment.DeploymentError, match="Invalid protected release configuration") as caught:
+        deployment.Deployer(tmp_path).storage_identity(state)
+    assert "private-canary" not in str(caught.value)
+
+
+@pytest.mark.parametrize("target", ["runtime.env", "release.json", "release_directory", "releases_parent"])
+def test_storage_identity_does_not_follow_symlinks(tmp_path, target):
+    state = stored_supabase(tmp_path, historical=True)
+    directory = tmp_path / "releases" / state["release"]
+    path = directory if target == "release_directory" else directory.parent if target == "releases_parent" else directory / target
+    destination = tmp_path / "private-canary"
+    path.rename(destination)
+    path.symlink_to(destination)
+    with pytest.raises(deployment.DeploymentError, match="Invalid protected release configuration") as caught:
+        deployment.Deployer(tmp_path).storage_identity(state)
+    assert "private-canary" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "target,mode", [("runtime.env", 0o640), ("release.json", 0o644), ("release_directory", 0o750), ("releases_parent", 0o777)]
+)
+def test_storage_identity_requires_protected_permissions(tmp_path, target, mode):
+    state = stored_supabase(tmp_path)
+    directory = tmp_path / "releases" / state["release"]
+    path = directory if target == "release_directory" else directory.parent if target == "releases_parent" else directory / target
+    path.chmod(mode)
+    with pytest.raises(deployment.DeploymentError, match="Invalid protected release configuration"):
+        deployment.Deployer(tmp_path).storage_identity(state)
+
+
+def test_storage_identity_rejects_releases_owned_by_a_different_account(tmp_path, monkeypatch):
+    state = stored_supabase(tmp_path)
+    monkeypatch.setattr(deployment.os, "geteuid", lambda: tmp_path.stat().st_uid + 1)
+    with pytest.raises(deployment.DeploymentError, match="Invalid protected release configuration"):
+        deployment.Deployer(tmp_path).storage_identity(state)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "envelope",
+        "extra_line",
+        "malformed",
+        "duplicate",
+        "nested",
+        "nonstrings",
+        "oversized",
+        "non_utf8",
+        "fifo",
+        "directory",
+        "backend",
+        "schema",
+        "metadata",
+    ],
+)
+def test_storage_identity_rejects_malformed_or_inconsistent_configuration_without_leaking(tmp_path, capsys, damage):
+    state = stored_supabase(tmp_path)
+    path = tmp_path / "releases" / state["release"] / "runtime.env"
+    text = path.read_text()
+    environment = json.loads(text.split("=", 1)[1])
+    environment["LOGFIRE_TOKEN"] = "private-canary"
+    if damage == "envelope":
+        path.write_text(json.dumps(environment))
+    elif damage == "extra_line":
+        path.write_text(text + "OTHER=private-canary\n")
+    elif damage == "malformed":
+        path.write_text("HUB_CONFIG_JSON={private-canary\n")
+    elif damage == "duplicate":
+        path.write_text('HUB_CONFIG_JSON={"HUB_BOT_TOKEN":"private-canary","HUB_BOT_TOKEN":"duplicate"}\n')
+    elif damage == "oversized":
+        path.write_text("private-canary" * deployment.MAX_CONFIGURATION_SIZE)
+    elif damage == "non_utf8":
+        path.write_bytes(b"private-canary\xff")
+    elif damage in {"fifo", "directory"}:
+        path.unlink()
+        os.mkfifo(path, 0o600) if damage == "fifo" else path.mkdir(mode=0o700)
+    elif damage == "metadata":
+        state["image"] = "private-canary"
+    else:
+        if damage == "nested":
+            environment["HUB_CONFIG_JSON"] = "private-canary"
+        elif damage == "nonstrings":
+            environment["LOGFIRE_TOKEN"] = {"private-canary": 1}
+        elif damage == "backend":
+            environment.update(HUB_STORAGE_BACKEND="edgedb", HUB_EDGEDB_DSN="private-canary")
+        elif damage == "schema":
+            environment["HUB_SUPABASE_SCHEMA"] = "other_api"
+        path.write_text("HUB_CONFIG_JSON=" + json.dumps(environment) + "\n")
+    with pytest.raises(deployment.DeploymentError, match="Invalid protected release configuration") as caught:
+        deployment.Deployer(tmp_path).storage_identity(state)
+    assert "private-canary" not in str(caught.value)
+    assert capsys.readouterr() == ("", "")
 
 
 @pytest.mark.parametrize("image", ["elsewhere/bot:latest", "msu-hub-bot:latest", "$(touch /tmp/pwned)"])
@@ -161,6 +302,10 @@ def test_failed_manual_rollback_restores_current_release(tmp_path):
 def test_manual_rollback_cannot_resume_a_different_database_writer(tmp_path, previous_backend, current_backend):
     previous = {"release": "old", **({"storage_backend": previous_backend} if previous_backend else {})}
     current = {"release": "current", "storage_backend": current_backend}
+    if previous_backend == "supabase":
+        previous = stored_supabase(tmp_path)
+    if current_backend == "supabase":
+        current = stored_supabase(tmp_path)
     deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
     deployment.write_private(tmp_path / "current.json", json.dumps(current))
     deployer = deployment.Deployer(tmp_path)
@@ -173,11 +318,35 @@ def test_manual_rollback_cannot_resume_a_different_database_writer(tmp_path, pre
     assert deployer.read_state("previous.json") == previous
 
 
+@pytest.mark.parametrize("same_namespace", [False, True])
+def test_manual_rollback_checks_namespace_even_when_historical_metadata_omits_it(tmp_path, same_namespace):
+    previous = stored_supabase(
+        tmp_path, schema="msu_hub_api" if same_namespace else "hub_api", historical=True, omit_schema=not same_namespace
+    )
+    current = stored_supabase(tmp_path, number=2)
+    deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
+    deployment.write_private(tmp_path / "current.json", json.dumps(current))
+    deployer = deployment.Deployer(tmp_path)
+    restored = []
+    deployer.restore = restored.append
+    if same_namespace:
+        deployer.deploy({"action": "rollback"})
+        assert restored == [previous]
+        assert deployer.read_state("current.json") == previous
+        assert deployer.read_state("previous.json") == current
+    else:
+        with pytest.raises(deployment.DeploymentError, match="Supabase schema; reconcile data"):
+            deployer.deploy({"action": "rollback"})
+        assert not restored
+        assert deployer.read_state("current.json") == current
+        assert deployer.read_state("previous.json") == previous
+
+
 @pytest.mark.parametrize("same_backend", [False, True])
 def test_failed_supabase_release_stops_before_backend_guard_or_safe_restore(tmp_path, same_backend):
     previous = {"release": "old"}
     if same_backend:
-        previous["storage_backend"] = "supabase"
+        previous = stored_supabase(tmp_path)
     deployment.write_private(tmp_path / "current.json", json.dumps(previous))
     deployer = deployment.Deployer(tmp_path)
     events = []
@@ -202,11 +371,13 @@ def test_failed_supabase_release_stops_before_backend_guard_or_safe_restore(tmp_
     release = next((tmp_path / "releases").iterdir())
     assert (release / "runtime.env").exists() and (release / "release.json").exists()
     assert json.loads((release / "release.json").read_text())["storage_backend"] == "supabase"
+    assert json.loads((release / "release.json").read_text())["supabase_schema"] == "msu_hub_api"
 
 
-def backend_transition_deployer(tmp_path):
+def backend_transition_deployer(tmp_path, namespace=False):
     deployment.write_private(tmp_path / "previous.json", json.dumps({"release": "older"}))
-    deployment.write_private(tmp_path / "current.json", json.dumps({"release": "old"}))
+    previous = stored_supabase(tmp_path, schema="hub_api", historical=True, omit_schema=True) if namespace else {"release": "old"}
+    deployment.write_private(tmp_path / "current.json", json.dumps(previous))
     deployer = deployment.Deployer(tmp_path)
     deployer.run = lambda *args, **kwargs: ""
     deployer.receive_image = lambda *args: None
@@ -219,8 +390,9 @@ def backend_transition_deployer(tmp_path):
 
 
 @pytest.mark.parametrize("followup", [{"action": "rollback"}, payload(), supabase_payload()])
-def test_failed_backend_transition_blocks_later_release_requests(tmp_path, followup):
-    deployer = backend_transition_deployer(tmp_path)
+@pytest.mark.parametrize("namespace", [False, True])
+def test_failed_storage_transition_blocks_later_release_requests(tmp_path, followup, namespace):
+    deployer = backend_transition_deployer(tmp_path, namespace)
 
     def fail():
         raise deployment.DeploymentError("unhealthy")
@@ -238,8 +410,10 @@ def test_failed_backend_transition_blocks_later_release_requests(tmp_path, follo
     assert events == []
 
 
-def test_backend_transition_marker_precedes_candidate_and_survives_interruption(tmp_path):
-    deployer = backend_transition_deployer(tmp_path)
+@pytest.mark.parametrize("namespace", [False, True])
+def test_storage_transition_marker_precedes_candidate_and_survives_interruption(tmp_path, namespace):
+    deployer = backend_transition_deployer(tmp_path, namespace)
+    previous = deployer.read_state("current.json")
     marker = tmp_path / "storage-transition.json"
 
     class Interrupted(BaseException):
@@ -247,7 +421,7 @@ def test_backend_transition_marker_precedes_candidate_and_survives_interruption(
 
     def start(state, action, *args, **kwargs):
         if action == "up":
-            assert json.loads(marker.read_text()) == {"previous": {"release": "old"}, "candidate": state}
+            assert json.loads(marker.read_text()) == {"previous": previous, "candidate": state}
             assert marker.stat().st_mode & 0o777 == 0o600
             assert "HUB_" not in marker.read_text()
             raise Interrupted
@@ -260,8 +434,9 @@ def test_backend_transition_marker_precedes_candidate_and_survives_interruption(
 
 
 @pytest.mark.parametrize("failed_record", ["previous.json", "current.json"])
-def test_backend_transition_stays_blocked_when_release_publication_fails(tmp_path, monkeypatch, failed_record):
-    deployer = backend_transition_deployer(tmp_path)
+@pytest.mark.parametrize("namespace", [False, True])
+def test_storage_transition_stays_blocked_when_release_publication_fails(tmp_path, monkeypatch, failed_record, namespace):
+    deployer = backend_transition_deployer(tmp_path, namespace)
     original = deployment.write_private
 
     def publish(path, data):
@@ -277,8 +452,29 @@ def test_backend_transition_stays_blocked_when_release_publication_fails(tmp_pat
         deployment.Deployer(tmp_path).deploy(supabase_payload())
 
 
-def test_successful_backend_transition_clears_marker_after_publishing_both_states(tmp_path, monkeypatch):
-    deployer = backend_transition_deployer(tmp_path)
+def test_namespace_transition_does_not_stop_the_poller_if_the_guard_cannot_be_saved(tmp_path, monkeypatch):
+    deployer = backend_transition_deployer(tmp_path, namespace=True)
+    original = deployment.write_private
+    stops = []
+    deployer.stop_legacy = lambda: stops.append("legacy")
+    deployer.stop_replacement = lambda: stops.append("replacement")
+
+    def publish(path, data):
+        if path == tmp_path / "storage-transition.json":
+            raise OSError("synthetic guard publication failure")
+        original(path, data)
+
+    monkeypatch.setattr(deployment, "write_private", publish)
+    with pytest.raises(OSError, match="guard publication"):
+        deployer.deploy(supabase_payload())
+    assert not stops
+    assert deployer.storage_identity(deployer.read_state("current.json")) == ("supabase", "hub_api")
+
+
+@pytest.mark.parametrize("namespace", [False, True])
+def test_successful_storage_transition_clears_marker_after_publishing_both_states(tmp_path, monkeypatch, namespace):
+    deployer = backend_transition_deployer(tmp_path, namespace)
+    previous = deployer.read_state("current.json")
     marker = tmp_path / "storage-transition.json"
     published = []
     original = deployment.write_private
@@ -294,11 +490,12 @@ def test_successful_backend_transition_clears_marker_after_publishing_both_state
     assert published == ["previous.json", "current.json"]
     assert not marker.exists()
     assert deployer.read_state("current.json")["storage_backend"] == "supabase"
-    assert deployer.read_state("previous.json") == {"release": "old"}
+    assert deployer.read_state("previous.json") == previous
 
 
-def test_marker_removal_failure_keeps_future_requests_blocked(tmp_path, monkeypatch):
-    deployer = backend_transition_deployer(tmp_path)
+@pytest.mark.parametrize("namespace", [False, True])
+def test_marker_removal_failure_keeps_future_requests_blocked(tmp_path, monkeypatch, namespace):
+    deployer = backend_transition_deployer(tmp_path, namespace)
     marker = tmp_path / "storage-transition.json"
     original = Path.unlink
 
