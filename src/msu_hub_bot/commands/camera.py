@@ -1,10 +1,11 @@
 import io
-import tempfile
+import logging
+import subprocess
 from contextlib import suppress
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Optional
 
-import cv2
 from cachetools import TTLCache
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, InputMediaPhoto
@@ -16,21 +17,66 @@ from msu_hub_bot.telegram.files import input_file
 from msu_hub_bot.utils import bytes_io
 
 
-def capture() -> cv2.VideoCapture:
-    return cv2.VideoCapture("http://cam.mnc.ru/axis-cgi/mjpg/video.cgi?camera=1")
+CAMERA_URL = "http://cam.mnc.ru/axis-cgi/mjpg/video.cgi?camera=1"
+CAMERA_TIMEOUT = 10
+CAMERA_MAX_BYTES = 4 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
+
+def camera_frame(source: str) -> bytes | None:
+    """Read one frame with native I/O, process and JPEG output limits."""
+    try:
+        with TemporaryDirectory(prefix="hub-camera-") as directory:
+            output = Path(directory) / "frame.jpg"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-y",
+                    "-rw_timeout",
+                    "5000000",
+                    "-i",
+                    source,
+                    "-an",
+                    "-sn",
+                    "-dn",
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    "2",
+                    "-fs",
+                    str(CAMERA_MAX_BYTES),
+                    "-f",
+                    "image2",
+                    str(output),
+                ],
+                check=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=CAMERA_TIMEOUT,
+            )
+            # FFmpeg's -fs can exceed its limit by a packet; cap the bytes we read.
+            if not 0 < output.stat().st_size <= CAMERA_MAX_BYTES:
+                logger.warning("Camera snapshot has invalid size")
+                return None
+            return output.read_bytes()
+    except subprocess.TimeoutExpired:
+        # subprocess.run kills and reaps the child before the workspace is removed.
+        logger.warning("Camera snapshot exceeded its deadline")
+    except OSError, subprocess.CalledProcessError:
+        # Native errors may contain source URLs; do not export their diagnostics.
+        logger.warning("Camera snapshot failed")
+    return None
 
 
 def camera(name: str) -> Optional[bytes]:
     if name == "msu":
-        ret, frame = capture().read()
-
-        if not ret:
-            ret, frame = capture().read()
-
-        if ret:
-            t = Path(tempfile.gettempdir()) / Path(tempfile.mktemp(suffix=".jpg"))
-            cv2.imwrite(str(t), frame)
-            return t.read_bytes()
+        for _ in range(2):
+            if frame := camera_frame(CAMERA_URL):
+                return frame
 
     return None
 
