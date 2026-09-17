@@ -204,6 +204,134 @@ def test_failed_supabase_release_stops_before_backend_guard_or_safe_restore(tmp_
     assert json.loads((release / "release.json").read_text())["storage_backend"] == "supabase"
 
 
+def backend_transition_deployer(tmp_path):
+    deployment.write_private(tmp_path / "previous.json", json.dumps({"release": "older"}))
+    deployment.write_private(tmp_path / "current.json", json.dumps({"release": "old"}))
+    deployer = deployment.Deployer(tmp_path)
+    deployer.run = lambda *args, **kwargs: ""
+    deployer.receive_image = lambda *args: None
+    deployer.compose = lambda *args, **kwargs: None
+    deployer.stop_legacy = lambda: None
+    deployer.stop_replacement = lambda: None
+    deployer.record_container_failure = lambda: None
+    deployer.wait_healthy = lambda: None
+    return deployer
+
+
+@pytest.mark.parametrize("followup", [{"action": "rollback"}, payload(), supabase_payload()])
+def test_failed_backend_transition_blocks_later_release_requests(tmp_path, followup):
+    deployer = backend_transition_deployer(tmp_path)
+
+    def fail():
+        raise deployment.DeploymentError("unhealthy")
+
+    deployer.wait_healthy = fail
+    with pytest.raises(deployment.DeploymentError, match="Reconcile data"):
+        deployer.deploy(supabase_payload())
+
+    later = deployment.Deployer(tmp_path)
+    events = []
+    later.run = lambda *args, **kwargs: events.append("docker")
+    later.restore = lambda *args: events.append("restore")
+    with pytest.raises(deployment.DeploymentError, match="Storage transition requires administrative recovery"):
+        later.deploy(followup)
+    assert events == []
+
+
+def test_backend_transition_marker_precedes_candidate_and_survives_interruption(tmp_path):
+    deployer = backend_transition_deployer(tmp_path)
+    marker = tmp_path / "storage-transition.json"
+
+    class Interrupted(BaseException):
+        pass
+
+    def start(state, action, *args, **kwargs):
+        if action == "up":
+            assert json.loads(marker.read_text()) == {"previous": {"release": "old"}, "candidate": state}
+            assert marker.stat().st_mode & 0o777 == 0o600
+            assert "HUB_" not in marker.read_text()
+            raise Interrupted
+
+    deployer.compose = start
+    with pytest.raises(Interrupted):
+        deployer.deploy(supabase_payload())
+    with pytest.raises(deployment.DeploymentError, match="administrative recovery"):
+        deployment.Deployer(tmp_path).deploy({"action": "rollback"})
+
+
+@pytest.mark.parametrize("failed_record", ["previous.json", "current.json"])
+def test_backend_transition_stays_blocked_when_release_publication_fails(tmp_path, monkeypatch, failed_record):
+    deployer = backend_transition_deployer(tmp_path)
+    original = deployment.write_private
+
+    def publish(path, data):
+        if path == tmp_path / failed_record:
+            raise OSError("synthetic state publication failure")
+        original(path, data)
+
+    monkeypatch.setattr(deployment, "write_private", publish)
+    with pytest.raises(OSError, match="state publication"):
+        deployer.deploy(supabase_payload())
+    assert (tmp_path / "storage-transition.json").exists()
+    with pytest.raises(deployment.DeploymentError, match="administrative recovery"):
+        deployment.Deployer(tmp_path).deploy(supabase_payload())
+
+
+def test_successful_backend_transition_clears_marker_after_publishing_both_states(tmp_path, monkeypatch):
+    deployer = backend_transition_deployer(tmp_path)
+    marker = tmp_path / "storage-transition.json"
+    published = []
+    original = deployment.write_private
+
+    def publish(path, data):
+        if path in (tmp_path / "previous.json", tmp_path / "current.json"):
+            assert marker.exists()
+            published.append(path.name)
+        original(path, data)
+
+    monkeypatch.setattr(deployment, "write_private", publish)
+    deployer.deploy(supabase_payload())
+    assert published == ["previous.json", "current.json"]
+    assert not marker.exists()
+    assert deployer.read_state("current.json")["storage_backend"] == "supabase"
+    assert deployer.read_state("previous.json") == {"release": "old"}
+
+
+def test_marker_removal_failure_keeps_future_requests_blocked(tmp_path, monkeypatch):
+    deployer = backend_transition_deployer(tmp_path)
+    marker = tmp_path / "storage-transition.json"
+    original = Path.unlink
+
+    def unlink(path, *args, **kwargs):
+        if path == marker:
+            raise OSError("synthetic marker removal failure")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    with pytest.raises(OSError, match="marker removal"):
+        deployer.deploy(supabase_payload())
+    assert marker.exists()
+    assert deployer.read_state("current.json")["storage_backend"] == "supabase"
+    with pytest.raises(deployment.DeploymentError, match="administrative recovery"):
+        deployment.Deployer(tmp_path).deploy({"action": "rollback"})
+
+
+@pytest.mark.parametrize("broken_marker", ["invalid_json", "dangling_symlink"])
+def test_storage_transition_marker_blocks_without_parsing_or_docker_work(tmp_path, broken_marker):
+    marker = tmp_path / "storage-transition.json"
+    if broken_marker == "dangling_symlink":
+        marker.symlink_to(tmp_path / "missing.json")
+    else:
+        marker.write_text("not JSON")
+    deployer = deployment.Deployer(tmp_path)
+    events = []
+    deployer.run = lambda *args, **kwargs: events.append("docker")
+    with pytest.raises(deployment.DeploymentError, match="administrative recovery"):
+        deployer.deploy(supabase_payload())
+    assert events == []
+    assert not (tmp_path / "releases").exists()
+
+
 def make_archive(path, *, foreign_tag=False, traversal=False, contains_env=False, runtime_env=None):
     state = payload()
     config = {

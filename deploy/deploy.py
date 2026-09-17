@@ -131,13 +131,24 @@ def validate_archive(path, state):
             raise DeploymentError("Invalid image layers")
 
 
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def write_private(path, data):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as f:
         f.write(data)
         os.fchmod(f.fileno(), 0o600)
+        f.flush()
+        os.fsync(f.fileno())
         staging = Path(f.name)
     staging.replace(path)
+    sync_directory(path.parent)
 
 
 def compose_document(image, env_path):
@@ -301,6 +312,9 @@ for path in Path('/proc').iterdir():
 
     def deploy(self, payload, stream=None):
         validate_payload(payload)
+        transition = self.root / "storage-transition.json"
+        if transition.exists() or transition.is_symlink():
+            raise DeploymentError("Storage transition requires administrative recovery before deploy or rollback")
         if payload["action"] == "rollback":
             previous, current = self.read_state("previous.json"), self.read_state("current.json")
             if not previous or previous.get("empty") or not current:
@@ -352,6 +366,11 @@ for path in Path('/proc').iterdir():
         if previous is None:
             legacy = self.inspect(LEGACY)
             previous = {"legacy": True, "restart_policy": legacy["HostConfig"]["RestartPolicy"]["Name"]} if legacy else {"empty": True}
+        changing_backend = not previous.get("empty") and previous.get("storage_backend", "edgedb") != state["storage_backend"]
+        if changing_backend:
+            # A candidate can write before health succeeds. Preserve the fence
+            # across process interruption and failed release-state publication.
+            write_private(transition, json.dumps({"previous": previous, "candidate": state}))
         report("Preflight passed; stopping the current poller")
         try:
             self.stop_legacy()
@@ -363,7 +382,7 @@ for path in Path('/proc').iterdir():
                 self.record_container_failure()
             except Exception:
                 pass
-            if not previous.get("empty") and previous.get("storage_backend", "edgedb") != state["storage_backend"]:
+            if changing_backend:
                 self.stop_replacement()
                 raise DeploymentError(
                     "Release failed after a storage-backend change; poller stopped. Reconcile data before restoring either release"
@@ -374,6 +393,9 @@ for path in Path('/proc').iterdir():
             raise DeploymentError("Release failed and was rolled back") from None
         write_private(self.root / "previous.json", json.dumps(previous))
         write_private(self.root / "current.json", json.dumps(state))
+        if changing_backend:
+            transition.unlink()
+            sync_directory(self.root)
         report("Deployed " + payload["revision"] + " " + payload["image"])
         try:
             self.prune_releases()
