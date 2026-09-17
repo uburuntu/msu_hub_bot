@@ -69,11 +69,11 @@ Build and image-validation steps receive no project token. See the
 
 ## Database configuration
 
-`HUB_STORAGE_BACKEND` selects `edgedb` or `supabase`; its default is `edgedb`.
+`HUB_STORAGE_BACKEND` defaults to `supabase`, the only supported application backend.
 Redis remains required for topic conversations, scheduled deletions and game
-scores. Keep its namespace and database unchanged when switching durable storage.
+scores. Keep its namespace and database unchanged during application upgrades.
 
-EdgeDB requires `HUB_EDGEDB_DSN` and the configured TLS trust. Supabase requires
+Supabase requires
 `HUB_SUPABASE_URL`, a publishable `HUB_SUPABASE_KEY`, and a dedicated Auth account
 in `HUB_SUPABASE_EMAIL` / `HUB_SUPABASE_PASSWORD`. `HUB_SUPABASE_SCHEMA` defaults
 to `msu_hub_api`. The server must authorize that principal for the bot; readiness
@@ -121,13 +121,12 @@ Older generated release directories and unused application images are cleaned
 up after a successful deployment. Shared database containers and other
 applications are outside this cleanup.
 
-Changing database backends requires a separate write freeze, protected export,
-import and reconciliation. A failed release after such a change is stopped,
-and the wrapper preserves both releases instead of resuming the old database
-writer. Manual rollback across backends is also refused. Older release records
-without a backend field mean EdgeDB. Reconcile post-cutover writes before an
-administrator deliberately restores either backend; image rollback cannot copy
-those writes. Automatic rollback requires matching backend and API namespace.
+Application rollback requires the same Supabase API namespace and compatible
+configuration. The wrapper recognizes retired backend identities in historical
+release records to prevent resuming a different database writer. Those records
+are not permission to restore a retired backend. Recovery uses verified
+PostgreSQL backups and a compatible Supabase release; image rollback cannot
+copy or reverse database writes.
 
 Before starting a release that changes backend or Supabase API schema, the wrapper records a private
 `storage-transition.json` recovery marker. It removes the marker only after the
@@ -183,7 +182,7 @@ reset may have removed some keys and can be repeated while polling stays
 stopped. Then deploy or roll back normally and verify one healthy poller.
 
 The command reads only `HUB_NAME` and `HUB_REDIS_*` from the deployment envelope
-or environment. It opens only Redis: no Telegram requests, EdgeDB connection or
+or environment. It opens only Redis: no Telegram requests, Supabase connection or
 schema migration. `legacy` matches the namespace's chat/user FSM state/data;
 `v3` matches its `fsm3` topic FSM state/data. Settings, delayed deletions,
 GeoGuess scores and other namespaces remain intact. Never use `FLUSHDB` for

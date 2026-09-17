@@ -63,7 +63,6 @@ def _wire(
     *,
     profile: bool = False,
     message_body: bool = False,
-    legacy: bool = False,
 ) -> JsonValue:
     if isinstance(value, datetime):
         return int(value.timestamp())
@@ -74,7 +73,7 @@ def _wire(
         date = value.get("date")
         timestamp = date.timestamp() if isinstance(date, datetime) else date
         expired = cutoff is not None and isinstance(timestamp, (int, float)) and timestamp <= cutoff.timestamp()
-        if is_message and not legacy and (not message_body or expired):
+        if is_message and (not message_body or expired):
             # Every body has one independently expiring normalized owner. Raw
             # receipts and nested messages keep references even before expiry.
             references = {key: _wire(value[key], cutoff) for key in _MESSAGE_REFERENCES if key in value}
@@ -84,14 +83,14 @@ def _wire(
                     references[key] = {name: entity[name] for name in ("id", "type") if name in entity}
             return references
         return {
-            key: _wire(item, cutoff, profile=profile, legacy=legacy)
+            key: _wire(item, cutoff, profile=profile)
             # Incoming LinkPreviewOptions can contain unresolved client defaults
             # for absent fields. They are configuration, not received JSON.
             for key, item in value.items()
             if not isinstance(item, Default) and not (profile and key == "pinned_message")
         }
     if isinstance(value, (tuple, list)):
-        return [_wire(item, cutoff, profile=profile, legacy=legacy) for item in value]
+        return [_wire(item, cutoff, profile=profile) for item in value]
     # Pydantic checks extras as well as the known Telegram fields before storage.
     return cast(JsonValue, value)
 
@@ -102,7 +101,6 @@ def _payload(
     *,
     profile: bool = False,
     message_body: bool = False,
-    legacy: bool = False,
 ) -> dict[str, JsonValue]:
     return _JSON_OBJECT.validate_python(
         _wire(
@@ -110,7 +108,6 @@ def _payload(
             cutoff,
             profile=profile,
             message_body=message_body,
-            legacy=legacy,
         )
     )
 
@@ -276,7 +273,6 @@ def archive_observation(
         kind=kind,
         handled=handled,
         data=_payload(update, cutoff),
-        legacy_data=_payload(update, legacy=True),
         users=list(users.values()),
         chats=list(chats.values()),
         memberships=list(memberships.values()),

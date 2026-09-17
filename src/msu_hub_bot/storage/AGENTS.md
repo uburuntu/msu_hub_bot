@@ -1,7 +1,7 @@
 # Persistence boundary
 
 - [base.py](base.py) defines the repository contract; [models.py](models.py) owns typed records, sparse observations and patches. Backend adapters contain queries and transport details.
-- Preserve the explicit [EdgeDB adapter](edgedb.py) for recovery compatibility. Each backend owns its queries; do not translate arbitrary query strings between backends.
+- [supabase.py](supabase.py) is the application backend. Preserve its versioned RPC contract; recovery artifact imports stay in administrative tools.
 - Supabase calls use the authenticated, principal-gated RPC surface in [dbschema/postgres](../../../dbschema/postgres/); keep privileged credentials and administrative migration operations outside runtime adapters.
 - Preserve chat/user identity, metadata settings, timestamps and subscription cursors when changing persistence.
 - Check actual query result shapes and missing-record behavior; type annotations alone do not establish those contracts.

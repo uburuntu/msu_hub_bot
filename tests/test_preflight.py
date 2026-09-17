@@ -22,9 +22,6 @@ def boundaries(monkeypatch):
         redis_port=6379,
         redis_password="",
         redis_db=0,
-        edgedb_dsn="edgedb://database.invalid",
-        edgedb_tls_ca="",
-        edgedb_tls_security="strict",
         bot_token="123456789:" + "a" * 35,
         proxy="",
     )

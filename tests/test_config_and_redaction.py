@@ -14,7 +14,7 @@ from msu_hub_bot.settings import MissingIntegration, Settings, load_runtime_envi
 
 
 def test_required_configuration_and_optional_providers(monkeypatch):
-    for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", "HUB_EDGEDB_DSN"):
+    for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", "HUB_SUPABASE_PASSWORD"):
         monkeypatch.delenv(key, raising=False)
     config = Settings()
     with pytest.raises(ValueError, match="HUB_BOT_TOKEN"):
@@ -38,13 +38,20 @@ def supabase_settings(**changes):
     return Settings(**values)
 
 
-def test_selected_backend_requires_only_its_own_credentials():
-    supabase_settings(edgedb_dsn="").validate_core()
-    Settings(bot_token="synthetic", redis_host="redis.invalid", edgedb_dsn="edgedb://database.invalid").validate_core()
+def test_required_storage_credentials():
+    supabase_settings().validate_core()
+    assert Settings().storage_backend == "supabase"
     with pytest.raises(ValueError, match="HUB_SUPABASE_PASSWORD"):
         supabase_settings(supabase_password="").validate_core()
     with pytest.raises(ValueError, match="HUB_REDIS_HOST"):
         supabase_settings(redis_host="").validate_core()
+
+
+@pytest.mark.parametrize("backend", ["edgedb", "unsupported-backend-canary"])
+def test_unsupported_storage_backends_fail_closed(backend):
+    with pytest.raises(ValueError) as caught:
+        supabase_settings(storage_backend=backend)
+    assert "unsupported-backend-canary" not in str(caught.value)
 
 
 @pytest.mark.parametrize(
@@ -70,26 +77,18 @@ def test_supabase_credentials_are_redacted(monkeypatch):
         assert value not in redact(value)
 
 
-@pytest.mark.parametrize("backend", ["edgedb", "supabase"])
-def test_repository_factory_allocates_only_selected_backend(monkeypatch, backend):
+def test_repository_factory_passes_configuration_and_telemetry(monkeypatch):
     from unittest.mock import Mock
 
     from msu_hub_bot.storage import factory
 
-    legacy, modern = Mock(), Mock()
-    monkeypatch.setattr(factory, "EdgeDBRepository", legacy)
-    monkeypatch.setattr(factory, "SupabaseRepository", modern)
-    config = supabase_settings(storage_backend=backend)
+    repository = Mock()
+    monkeypatch.setattr(factory, "SupabaseRepository", repository)
+    config = supabase_settings()
     sentinel = object()
     chosen = factory.create_repository(config, telemetry=sentinel)
-    if backend == "supabase":
-        modern.assert_called_once_with(config, telemetry=sentinel)
-        legacy.assert_not_called()
-        assert chosen is modern.return_value
-    else:
-        legacy.assert_called_once_with(config=config)
-        modern.assert_not_called()
-        assert chosen is legacy.return_value
+    repository.assert_called_once_with(config, telemetry=sentinel)
+    assert chosen is repository.return_value
 
 
 def test_json_collections_and_deployment_roundtrip(monkeypatch):

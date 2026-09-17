@@ -109,9 +109,7 @@ def test_editing_an_expired_top_level_message_never_renews_body_retention():
     assert row.messages == [] and row.kind == "edited_message"
     assert "EXPIRED_EDIT_BODY_CANARY" not in repr(row.model_dump())
     assert row.data["edited_message"]["edit_date"] == int(NOW.timestamp())
-    assert row.legacy_data["edited_message"]["text"] == "EXPIRED_EDIT_BODY_CANARY"
     assert "EXPIRED_EDIT_BODY_CANARY" not in repr(row)
-    assert "legacy_data" not in row.model_dump(mode="json")
 
 
 def test_import_retention_time_is_independent_from_historical_receipt_time():
@@ -182,7 +180,6 @@ def test_channel_origin_keeps_provenance_without_creating_a_message_body():
     assert {item.message_id for item in row.messages} == {1}
     assert row.messages[0].data["forward_origin"] == origin
     assert reference_payload({"forward_origin": origin})["forward_origin"] == origin
-    assert row.legacy_data["message"]["forward_origin"] == origin
     assert next(item for item in row.chats if item.chat_id == -1002).observed_at == NOW - timedelta(days=1)
 
 
@@ -226,7 +223,6 @@ def test_link_preview_preserves_received_values_and_omits_unresolved_client_defa
     source = message(link_preview_options=options)
     row = archive_observation(Update(update_id=12, message=source), True, received_at=NOW)
     assert row.messages[0].data["link_preview_options"] == options
-    assert row.legacy_data["message"]["link_preview_options"] == options
     assert "Default(" not in row.model_dump_json()
 
 

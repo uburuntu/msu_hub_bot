@@ -53,18 +53,12 @@ def validate_environment(values, *, historical=False):
             or "\0" in value
         ):
             raise DeploymentError("Invalid runtime configuration")
-    backend = values.get("HUB_STORAGE_BACKEND", "edgedb")
-    if backend not in {"edgedb", "supabase"}:
+    if values.get("HUB_STORAGE_BACKEND", "supabase") != "supabase":
         raise DeploymentError("Invalid storage backend")
-    if backend == "supabase":
-        schema = values.get("HUB_SUPABASE_SCHEMA", "hub_api" if historical else "")
-        if not SCHEMA_RE.fullmatch(schema):
-            raise DeploymentError("Invalid or missing Supabase schema")
-    database_fields = (
-        ("HUB_EDGEDB_DSN",)
-        if backend == "edgedb"
-        else ("HUB_SUPABASE_URL", "HUB_SUPABASE_KEY", "HUB_SUPABASE_EMAIL", "HUB_SUPABASE_PASSWORD")
-    )
+    schema = values.get("HUB_SUPABASE_SCHEMA", "hub_api" if historical else "")
+    if not SCHEMA_RE.fullmatch(schema):
+        raise DeploymentError("Invalid or missing Supabase schema")
+    database_fields = ("HUB_SUPABASE_URL", "HUB_SUPABASE_KEY", "HUB_SUPABASE_EMAIL", "HUB_SUPABASE_PASSWORD")
     if not all(values.get(key) for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", *database_fields)):
         raise DeploymentError("Missing core runtime settings")
 
@@ -231,6 +225,7 @@ class Deployer:
         return json.loads(path.read_text()) if path.exists() else None
 
     def storage_identity(self, state):
+        # Recognize retired release metadata only to block unsafe cross-database rollback.
         backend = state.get("storage_backend", "edgedb") if isinstance(state, dict) else None
         if not isinstance(backend, str) or backend not in {"edgedb", "supabase"}:
             raise DeploymentError("Invalid stored storage backend")
@@ -256,7 +251,7 @@ class Deployer:
             environment = json.loads(text[len(prefix) : -1], object_pairs_hook=unique_object)
             validate_environment(environment, historical="supabase_schema" not in state)
             schema = environment.get("HUB_SUPABASE_SCHEMA", "hub_api")
-            if environment.get("HUB_STORAGE_BACKEND", "edgedb") != backend or state.get("supabase_schema", schema) != schema:
+            if environment.get("HUB_STORAGE_BACKEND", "supabase") != backend or state.get("supabase_schema", schema) != schema:
                 raise ValueError("Inconsistent storage identity")
             return backend, schema
         except (OSError, ValueError, DeploymentError):
@@ -405,11 +400,10 @@ for path in Path('/proc').iterdir():
         write_private(directory / "compose.json", json.dumps(compose_document(payload["image"], directory / "runtime.env"), indent=2))
         state = {
             "release": release,
-            "storage_backend": environment.get("HUB_STORAGE_BACKEND", "edgedb"),
+            "storage_backend": "supabase",
             **{key: payload[key] for key in ("revision", "image", "archive_sha256", "archive_size")},
         }
-        if state["storage_backend"] == "supabase":
-            state["supabase_schema"] = environment["HUB_SUPABASE_SCHEMA"]
+        state["supabase_schema"] = environment["HUB_SUPABASE_SCHEMA"]
         write_private(directory / "release.json", json.dumps(state))
         self.receive_image(payload, directory, stream)
         report("Image received; checking configuration and connections")

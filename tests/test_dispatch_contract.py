@@ -168,8 +168,7 @@ async def test_inline_tyan_callback_is_acknowledged_without_chat_preferences():
         await bot.session.close()
 
 
-@pytest.mark.parametrize("backend", ["edgedb", "supabase"])
-async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(monkeypatch, backend):
+async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(monkeypatch):
     from msu_hub_bot import app
 
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
@@ -188,8 +187,6 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
         Settings(
             bot_token="123456789:" + "a" * 35,
             redis_host="localhost",
-            edgedb_dsn="edgedb://localhost/msu_hub",
-            storage_backend=backend,
             supabase_url="http://supabase.invalid",
             supabase_key="synthetic-publishable-key",
             supabase_email="bot@example.invalid",
@@ -221,5 +218,5 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
     db.load_settings.assert_awaited_once()
     payload = sink.serialized()
     assert "settings.load" in payload and "archive.write" in payload and "ignored" in payload
-    assert backend in payload
+    assert "supabase" in payload
     assert private_text not in payload

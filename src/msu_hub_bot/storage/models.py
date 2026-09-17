@@ -124,8 +124,6 @@ class ArchivedUpdate(DatabaseModel):
     kind: str
     handled: bool
     data: dict[str, JsonValue]
-    # Only the retained backend can store bodies outside normalized message rows.
-    legacy_data: dict[str, JsonValue] | None = Field(default=None, exclude=True, repr=False)
     users: list[UserObservation] = Field(default_factory=list)
     chats: list[ChatObservation] = Field(default_factory=list)
     memberships: list[MembershipObservation] = Field(default_factory=list)

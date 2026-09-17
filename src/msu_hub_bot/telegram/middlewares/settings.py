@@ -68,7 +68,7 @@ class SettingsMiddleware(BaseMiddleware):
         *,
         cache_size: int = 128,
         telemetry: Telemetry | None = None,
-        backend: Backend = Backend.EDGEDB,
+        backend: Backend = Backend.SUPABASE,
     ) -> None:
         if cache_size < 1:
             raise ValueError("Preference cache size must be positive")

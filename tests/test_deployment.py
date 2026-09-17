@@ -18,7 +18,16 @@ def payload():
         "action": "deploy",
         "image": "sha256:" + "a" * 64,
         "revision": "b" * 40,
-        "environment": {"HUB_BOT_TOKEN": "fake", "HUB_REDIS_HOST": "localhost", "HUB_EDGEDB_DSN": "fake"},
+        "environment": {
+            "HUB_BOT_TOKEN": "fake",
+            "HUB_REDIS_HOST": "localhost",
+            "HUB_STORAGE_BACKEND": "supabase",
+            "HUB_SUPABASE_URL": "http://database.invalid:8000",
+            "HUB_SUPABASE_KEY": "synthetic-publishable-key",
+            "HUB_SUPABASE_EMAIL": "bot@example.invalid",
+            "HUB_SUPABASE_PASSWORD": "synthetic-password",
+            "HUB_SUPABASE_SCHEMA": "msu_hub_api",
+        },
         "archive_sha256": "a" * 64,
         "archive_size": 100,
     }
@@ -26,15 +35,7 @@ def payload():
 
 def supabase_payload(schema="msu_hub_api"):
     request = payload()
-    request["environment"].pop("HUB_EDGEDB_DSN")
-    request["environment"].update(
-        HUB_STORAGE_BACKEND="supabase",
-        HUB_SUPABASE_URL="http://database.invalid:8000",
-        HUB_SUPABASE_KEY="synthetic-publishable-key",
-        HUB_SUPABASE_EMAIL="bot@example.invalid",
-        HUB_SUPABASE_PASSWORD="synthetic-password",
-        HUB_SUPABASE_SCHEMA=schema,
-    )
+    request["environment"]["HUB_SUPABASE_SCHEMA"] = schema
     return request
 
 
@@ -208,7 +209,7 @@ def test_compose_only_manages_the_bot_and_literal_configuration(tmp_path):
     assert document["services"]["bot"]["pull_policy"] == "never"
 
 
-def test_failed_cutover_restores_legacy_after_stopping_replacement(tmp_path):
+def test_failed_supabase_cutover_never_resumes_a_retired_database_writer(tmp_path):
     class Fake(deployment.Deployer):
         def __init__(self):
             super().__init__(tmp_path)
@@ -244,9 +245,9 @@ def test_failed_cutover_restores_legacy_after_stopping_replacement(tmp_path):
             self.events.append("start_legacy")
 
     fake = Fake()
-    with pytest.raises(deployment.DeploymentError, match="rolled back"):
+    with pytest.raises(deployment.DeploymentError, match="storage identity change"):
         fake.deploy(payload())
-    assert fake.events == ["config", "run", "stop_legacy", "stop_replacement", "up", "stop_replacement", "start_legacy"]
+    assert fake.events == ["config", "run", "stop_legacy", "stop_replacement", "up", "stop_replacement"]
     assert not (tmp_path / "current.json").exists()
     runtime = next((tmp_path / "releases").glob("*/runtime.env"))
     assert runtime.stat().st_mode & 0o777 == 0o600
@@ -575,7 +576,8 @@ def test_image_archive_boundary(tmp_path, bad):
             deployment.validate_archive(path, state)
 
 
-def test_interrupted_upload_removes_partial_image(tmp_path):
+def test_interrupted_upload_removes_partial_image(tmp_path, monkeypatch):
+    monkeypatch.setattr(deployment.shutil, "disk_usage", lambda path: type("Usage", (), {"free": 10 * 1024**3})())
     deployer = deployment.Deployer(tmp_path)
     with pytest.raises(deployment.DeploymentError, match="interrupted"):
         deployer.receive_image(payload(), tmp_path, io.BytesIO(b"partial"))

@@ -26,7 +26,7 @@ class UpdatesMiddleware(BaseMiddleware):
         concurrency: int = 100,
         pending_limit: int = 10_000,
         telemetry: Telemetry | None = None,
-        backend: Backend = Backend.EDGEDB,
+        backend: Backend = Backend.SUPABASE,
     ) -> None:
         if concurrency < 1 or pending_limit < 0:
             raise ValueError("Archive concurrency must be positive and pending limit nonnegative")

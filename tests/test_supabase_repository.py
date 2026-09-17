@@ -4,7 +4,7 @@ import asyncio
 import json
 import traceback
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -16,6 +16,7 @@ from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportM
 
 from msu_hub_bot.storage import supabase as module
 from msu_hub_bot.storage.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, UserObservation, VkPatch
+from msu_hub_bot.storage.observations import archive_observation
 from msu_hub_bot.telegram.middlewares.settings import SettingsMiddleware
 from msu_hub_bot.telegram.middlewares.updates import UpdatesMiddleware
 from msu_hub_bot.telegram.runtime import AdmissionMiddleware, Supervisor
@@ -209,23 +210,23 @@ async def test_middleware_and_api_telemetry_have_distinct_owners(configured, mon
     assert CANARY not in sink.serialized()
 
 
-async def test_legacy_archive_payload_never_enters_supabase_request(configured):
+async def test_expired_message_body_never_enters_archive_request(configured):
     repo, session = configured([Response(token()), Response(None, status=204, raw=b"")])
-    update = ArchivedUpdate(
-        update_id=1,
-        kind="message",
-        handled=True,
-        data={"message": {"message_id": 1}},
-        legacy_data={"message": {"message_id": 1, "text": CANARY}},
+    update = archive_observation(
+        Update(
+            update_id=1,
+            message=Message(message_id=1, date=NOW - timedelta(days=31), chat=Chat(id=-100, type="supergroup"), text=CANARY),
+        ),
+        True,
+        received_at=NOW,
     )
     try:
         await repo.archive_update(update)
         payload = session.calls[-1][1]["json"]["p_update"]
-        assert "legacy_data" not in payload
+        assert payload["data"]["message"]["message_id"] == 1
+        assert payload["messages"] == []
         assert CANARY not in json.dumps(payload)
         assert CANARY not in repr(update)
-        assert "legacy_data" not in update.model_dump()
-        assert update.legacy_data["message"]["text"] == CANARY
     finally:
         await repo.close()
 

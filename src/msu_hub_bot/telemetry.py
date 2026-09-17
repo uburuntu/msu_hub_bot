@@ -69,7 +69,6 @@ class Provider(StrEnum):
 
 class Backend(StrEnum):
     REDIS = "redis"
-    EDGEDB = "edgedb"
     SUPABASE = "supabase"
     NATIVE = "native"
 
@@ -377,7 +376,7 @@ class Telemetry:
             return
         try:
             valid = self.config.valid()
-        except (TypeError, ValueError, AttributeError):
+        except TypeError, ValueError, AttributeError:
             valid = False
         if not valid:
             logger.warning("Telemetry configuration is invalid; export remains disabled")

@@ -10,13 +10,11 @@ from msu_hub_bot.settings import Settings
 from telegram_helpers import RecordingSession
 
 
-@pytest.fixture(params=["edgedb", "supabase"])
-def app_settings(request):
+@pytest.fixture
+def app_settings():
     return Settings(
         bot_token="123456789:" + "a" * 35,
         redis_host="localhost",
-        edgedb_dsn="edgedb://localhost/msu_hub",
-        storage_backend=request.param,
         supabase_url="http://supabase.invalid",
         supabase_key="synthetic-publishable-key",
         supabase_email="bot@example.invalid",

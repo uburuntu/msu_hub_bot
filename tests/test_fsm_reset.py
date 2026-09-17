@@ -18,7 +18,7 @@ def test_reset_config_requires_only_redis_and_preserves_envelope_precedence():
                 "HUB_REDIS_DB": "3",
                 "HUB_REDIS_PASSWORD": "synthetic-secret",
                 "HUB_WIT_TOKENS": "not valid provider JSON",
-                "HUB_EDGEDB_DSN": "",
+                "HUB_SUPABASE_PASSWORD": "",
                 "HUB_BOT_TOKEN": "",
                 "LOGFIRE_TOKEN": "ignored-write-canary",
             }
@@ -151,7 +151,7 @@ Redis.__init__ = forbidden
 from msu_hub_bot import fsm_reset
 assert "msu_hub_bot.app" not in sys.modules
 assert "msu_hub_bot.settings" not in sys.modules
-assert "edgedb" not in sys.modules
+assert "msu_hub_bot.storage.supabase" not in sys.modules
 try:
     fsm_reset.main(["--help"])
 except SystemExit as result:
