@@ -16,7 +16,7 @@ from aiogram.types import Message, Update
 
 from common.db.observations import archive_observation
 
-SCHEMA = Path(__file__).parents[1] / "dbschema/postgres/001_bot_storage.sql"
+SCHEMAS = sorted((Path(__file__).parents[1] / "dbschema/postgres").glob("*.sql"))
 PRINCIPAL = "00000000-0000-0000-0000-000000000001"
 STRANGER = "00000000-0000-0000-0000-000000000002"
 
@@ -75,7 +75,8 @@ def postgres():
         CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
         $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     """)
-    db.run(SCHEMA.read_text())
+    for schema in SCHEMAS:
+        db.run(schema.read_text())
     return db
 
 
@@ -173,6 +174,31 @@ def test_administrative_copy_json_null_metadata_survives(db, tmp_path):
     records[0]["metadata"] = None
     target.run(batch_script("users", records, manifest))
     assert db.run("SELECT metadata='null'::jsonb AND metadata IS NOT NULL FROM hub_private.users;").stdout.strip() == "t"
+
+
+def test_private_observation_helper_reuses_a_receipt_and_fixed_retention_instant(db):
+    as_of = datetime(2024, 6, 1, tzinfo=UTC)
+    stamp = as_of.isoformat()
+    receipt = str(UUID(int=71))
+    payload = archive(71, messages=[{
+        "chat_id": -101, "message_id": 10, "sent_at": (as_of - timedelta(days=1)).isoformat(),
+        "data": {"text": "One normalized body"},
+    }])
+    db.run(f"""
+        INSERT INTO hub_private.updates(id,created,data,handled,bot_id,is_legacy)
+        VALUES ('{receipt}','{stamp}','{{"original":true}}',false,999,true);
+    """)
+    args = f"{literal(payload)},999,'{receipt}','{stamp}','{stamp}'"
+    for _ in range(2):
+        db.run(f"SELECT hub_private.observe_archive({args});")
+    assert db.value("SELECT count(*) FROM hub_private.updates;") == 1
+    assert db.value("SELECT data FROM hub_private.updates;") == {"original": True}
+    assert db.value("SELECT count(*) FROM hub_private.messages;") == 1
+    assert db.value("SELECT to_jsonb(source_update_id) FROM hub_private.messages;") == receipt
+    assert db.value("SELECT jsonb_agg(version ORDER BY version) FROM hub_private.schema_migrations;") == [1, 2]
+    assert db.rpc("health") == {"schema_version": 1, "bot_id": 999}
+    assert db.run(f"SELECT hub_private.observe_archive({args});", principal=PRINCIPAL, check=False).returncode
+    assert db.run(f"SET ROLE anon; SELECT hub_private.observe_archive({args});", check=False).returncode
 
 
 def test_principal_gate_covers_every_api_and_private_tables(db):
