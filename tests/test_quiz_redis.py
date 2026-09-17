@@ -10,23 +10,28 @@ from uuid import uuid4
 import pytest
 from redis.asyncio import Redis
 
-from msu_hub_bot.commands import geoguess as game
+from msu_hub_bot.commands import chess, geoguess
 from msu_hub_bot.telegram.runtime import Supervisor
 from msu_hub_bot.telegram.storage import RedisStorage
 
 pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
 
 
+@pytest.fixture(params=[geoguess, chess], ids=["geoguess", "chess"])
+def game(request):
+    return request.param
+
+
 @pytest.fixture
-async def scores(monkeypatch):
+async def scores(monkeypatch, game):
     url = os.environ.get("HUB_TEST_REDIS_URL")
     if not url:
-        pytest.skip("Set HUB_TEST_REDIS_URL for real GeoGuess Redis contracts")
+        pytest.skip("Set HUB_TEST_REDIS_URL for real quiz Redis contracts")
     target = urlsplit(url)
     if target.scheme != "redis" or target.hostname not in {"127.0.0.1", "::1", "localhost"}:
-        pytest.fail("GeoGuess Redis contracts require a loopback Redis endpoint")
+        pytest.fail("Quiz Redis contracts require a loopback Redis endpoint")
     client = Redis.from_url(url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
-    namespace = f"hub_test_geoguess:{uuid4().hex}:"
+    namespace = f"hub_test_quiz:{uuid4().hex}:"
     original_key = game.score_key
     keys = set()
 
@@ -53,7 +58,7 @@ async def scores(monkeypatch):
             await client.aclose()
 
 
-async def test_daily_scores_floor_at_zero_and_refresh_player_labels(scores):
+async def test_daily_scores_floor_at_zero_and_refresh_player_labels(scores, game):
     await game.save_scores(
         101,
         [(201, "Игрок <один> 🧭", "synthetic_one", 1), (202, "Игрок два", None, -1)],
@@ -79,7 +84,7 @@ async def test_daily_scores_floor_at_zero_and_refresh_player_labels(scores):
     assert await scores.client.hget(key + ":usernames", "201") == ""
 
 
-async def test_concurrent_rounds_and_duplicate_replays_preserve_every_score(scores):
+async def test_concurrent_rounds_and_duplicate_replays_preserve_every_score(scores, game):
     await asyncio.gather(
         *(
             game.save_scores(101, [(201, "Synthetic player", None, 1)], scores.storage, scores.day, round_token=f"round-{index % 12}")
@@ -91,7 +96,7 @@ async def test_concurrent_rounds_and_duplicate_replays_preserve_every_score(scor
     assert await scores.client.scard(key + ":rounds") == 12
 
 
-async def test_response_lost_after_commit_can_be_replayed_without_double_scoring(scores, monkeypatch):
+async def test_response_lost_after_commit_can_be_replayed_without_double_scoring(scores, game, monkeypatch):
     original_eval = scores.client.eval
 
     async def lose_response(*args, **kwargs):
@@ -108,7 +113,7 @@ async def test_response_lost_after_commit_can_be_replayed_without_double_scoring
     assert await scores.client.scard(key + ":rounds") == 1
 
 
-async def test_chat_and_day_records_are_independent_and_all_expire_together(scores):
+async def test_chat_and_day_records_are_independent_and_all_expire_together(scores, game):
     tomorrow = scores.day + timedelta(days=1)
     for chat_id, day, token in [
         (101, scores.day, "first"),
@@ -125,7 +130,7 @@ async def test_chat_and_day_records_are_independent_and_all_expire_together(scor
             assert await scores.client.expiretime(key + suffix) == expiry
 
 
-async def test_round_without_players_creates_no_score_records(scores):
+async def test_round_without_players_creates_no_score_records(scores, game):
     await game.save_scores(101, [], scores.storage, scores.day, round_token="empty-round")
     key = scores.key(101, scores.day)
     assert await scores.client.exists(key, key + ":names", key + ":usernames", key + ":rounds") == 0
