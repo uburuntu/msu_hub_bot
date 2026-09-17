@@ -206,7 +206,8 @@ class EdgeDBRepository:
         values = entry.model_dump()
         fields = _assignments(values, _DIRECTORY_TYPES)
         return _required(DirectoryRecord, await self.client.query_single_json(
-            f"select (insert msu_hub::EcosystemChat {{{fields}}}) {{{_DIRECTORY}}};", **values,
+            f"select (insert msu_hub::EcosystemChat {{{fields}}} unless conflict on .chat_id "
+            f"else (select msu_hub::EcosystemChat)) {{{_DIRECTORY}}};", **values,
         ))
 
     async def patch_directory(self, chat_id: int, changes: DirectoryPatch) -> DirectoryRecord | None:

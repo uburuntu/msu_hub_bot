@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from common.db.edgedb import EdgeDBRepository
-from common.db.models import ArchivedUpdate, ChatObservation, DirectoryPatch, VkPatch
+from common.db.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, VkPatch
 
 NOW = datetime(2026, 9, 17, tzinfo=UTC)
 
@@ -93,6 +93,13 @@ async def test_directory_patch_distinguishes_clear_from_omitted_and_returns_reco
     assert parameters == {"chat_id": -1001, "username_alias": None}
     assert "username_alias := <optional str>$username_alias" in query
     assert "members :=" not in query
+
+
+async def test_directory_create_preserves_existing_entry_when_adds_race():
+    client = JsonClient(directory_row(name="Existing directory name"))
+    entry = await EdgeDBRepository(client=client).create_directory(DirectoryCreate(chat_id=-1001, name="Racing add"))
+    assert entry.name == "Existing directory name"
+    assert "unless conflict on .chat_id else (select msu_hub::EcosystemChat)" in client.calls[0][0]
 
 
 @pytest.mark.parametrize("metadata", [None, "{}", [1, {"nested": True}], 7, False])
