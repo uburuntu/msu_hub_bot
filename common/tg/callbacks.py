@@ -35,7 +35,7 @@ class CallbackCommandBase:
             key = cls.cache_key(key)
         elif isinstance(key, CallbackQuery):
             if not isinstance(key.message, Message):
-                raise ValueError('A callback lock requires an accessible message')
+                raise ValueError("A callback lock requires an accessible message")
             key = (key.message.chat.id, key.message.message_id, key.from_user.id)
         elif isinstance(key, Chat):
             key = (key.id,)

@@ -19,14 +19,14 @@ class Like(CallbackCommandBase):
     @classmethod
     def keyboard(cls, count: int = 0) -> InlineKeyboardMarkup:
         keyboard = InlineKeyboardBuilder().row(
-            InlineKeyboardButton(text=f'{count} ❤️', callback_data=LikeCallback(count=count).pack()),
+            InlineKeyboardButton(text=f"{count} ❤️", callback_data=LikeCallback(count=count).pack()),
         )
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
     async def process(cls, _message: Message, meta: MetaInfo) -> Message | bool | None:
         target = meta.reply()
-        msg = await target.reply(hbold('Мне нравится'), reply_markup=cls.keyboard())
+        msg = await target.reply(hbold("Мне нравится"), reply_markup=cls.keyboard())
         return msg
 
     @classmethod
@@ -42,10 +42,10 @@ class Like(CallbackCommandBase):
         else:
             if not message.reply_markup:
                 return await query.answer("Эта кнопка уже недоступна.")
-            count = int(message.reply_markup.inline_keyboard[0][0].text.partition(' ')[0]) + 1
+            count = int(message.reply_markup.inline_keyboard[0][0].text.partition(" ")[0]) + 1
             cls.cache[key] = count
 
-        await query.answer(text=f'Лайк №{count} 👍🏻')
+        await query.answer(text=f"Лайк №{count} 👍🏻")
 
         lock = cls.lock(key)
 
@@ -53,5 +53,5 @@ class Like(CallbackCommandBase):
             return True
 
         async with lock:
-            await asyncio.sleep(2.)
+            await asyncio.sleep(2.0)
             return await message.edit_reply_markup(reply_markup=cls.keyboard(cls.cache.get(key, count)))

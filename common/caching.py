@@ -5,7 +5,7 @@ from typing import TypeVar, cast
 
 from aiocache import cached
 
-_F = TypeVar('_F', bound=Callable[..., Awaitable[object]])
+_F = TypeVar("_F", bound=Callable[..., Awaitable[object]])
 
 
 def cached_async(*, ttl: int, noself: bool = False) -> Callable[[_F], _F]:

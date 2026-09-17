@@ -6,19 +6,19 @@ class ExternalServiceError(Exception):
 
 class BadRequestError(ExternalServiceError):
     def __init__(self):
-        super().__init__('Не удалось выполнить запрос')
+        super().__init__("Не удалось выполнить запрос")
 
 
 class NotFoundError(ExternalServiceError):
     def __init__(self):
-        super().__init__('Ничего не удалось найти')
+        super().__init__("Ничего не удалось найти")
 
 
 class CantFindFaceError(ExternalServiceError):
     def __init__(self):
-        super().__init__('Не удалось найти лицо')
+        super().__init__("Не удалось найти лицо")
 
 
 class BadExpressionError(ExternalServiceError):
     def __init__(self):
-        super().__init__('Генератор не принимает запросы на острые и чувствительные темы')
+        super().__init__("Генератор не принимает запросы на острые и чувствительные темы")

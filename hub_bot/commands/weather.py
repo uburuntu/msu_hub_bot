@@ -16,8 +16,7 @@ from aiogram.utils.markdown import hbold, hitalic, hcode
 
 from common.tg.context import bot_for
 from common.tg.files import input_file
-from common.externals.owm import WeatherForecast, WeatherReading, weather, id_to_emoji, weather_map, \
-    coordinates_to_xy, geocoding
+from common.externals.owm import WeatherForecast, WeatherReading, weather, id_to_emoji, weather_map, coordinates_to_xy, geocoding
 from common.tg.callbacks import CallbackCommandBase
 from common.tg.filters import MetaInfo
 
@@ -34,47 +33,46 @@ def parse_response(forecast: WeatherForecast, location_name: str) -> str:
     periods = [period for period in forecast.periods if period.dt >= curr.dt]
 
     def pretty_date(d: datetime.date) -> str:
-        month_names = ('января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-                       'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря')
-        weekday_names = ('понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье')
-        return f'{d.day} {month_names[d.month - 1]}, {weekday_names[d.weekday()]}'
+        month_names = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")
+        weekday_names = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+        return f"{d.day} {month_names[d.month - 1]}, {weekday_names[d.weekday()]}"
 
     def condition(reading: WeatherReading) -> str:
         if not reading.weather:
-            return hitalic('без описания')
+            return hitalic("без описания")
         weather_type = reading.weather[0]
-        return hitalic(f'{id_to_emoji(weather_type.id)} {weather_type.description}')
+        return hitalic(f"{id_to_emoji(weather_type.id)} {weather_type.description}")
 
     def temp(t: float) -> str:
-        return hitalic(f'{int(t)}°C')
+        return hitalic(f"{int(t)}°C")
 
     def line_period(period: WeatherReading) -> str:
         local = period.dt.astimezone(timezone)
-        label = local.strftime('%H:%M' if local.date() == today else '%d.%m %H:%M')
-        return f'{hbold(label)}: {temp(period.temp)} | ощущается как {temp(period.feels_like)}, {condition(period)}'
+        label = local.strftime("%H:%M" if local.date() == today else "%d.%m %H:%M")
+        return f"{hbold(label)}: {temp(period.temp)} | ощущается как {temp(period.feels_like)}, {condition(period)}"
 
     def line_range(description: str, readings: list[WeatherReading]) -> str:
         start, end = temp(min(reading.temp for reading in readings)), temp(max(reading.temp for reading in readings))
-        temp_text = f'от {start} до {end}' if start != end else f'{start}'
-        return f'{hbold(description)}: {temp_text}'
+        temp_text = f"от {start} до {end}" if start != end else f"{start}"
+        return f"{hbold(description)}: {temp_text}"
 
     lines = [
-        f'{hbold("Погода")}: {html.quote(location_name)}, {pretty_date(today)}',
-        '',
-        f'{hbold("Сейчас")}: {temp(curr.temp)} | ощущается как {temp(curr.feels_like)}, {condition(curr)}',
+        f"{hbold('Погода')}: {html.quote(location_name)}, {pretty_date(today)}",
+        "",
+        f"{hbold('Сейчас')}: {temp(curr.temp)} | ощущается как {temp(curr.feels_like)}, {condition(curr)}",
     ]
     if periods:
-        lines.extend(['', hbold('Прогноз с шагом 3 часа'), *(line_period(period) for period in periods[:3])])
+        lines.extend(["", hbold("Прогноз с шагом 3 часа"), *(line_period(period) for period in periods[:3])])
         ranges = []
-        for day, label in ((today, 'До конца дня'), (today + datetime.timedelta(days=1), 'Завтра')):
+        for day, label in ((today, "До конца дня"), (today + datetime.timedelta(days=1), "Завтра")):
             readings = [period for period in periods if period.dt.astimezone(timezone).date() == day]
             if readings:
                 ranges.append(line_range(label, readings))
         if ranges:
-            lines.extend(['', *ranges, hitalic('Диапазоны — по точкам трёхчасового прогноза.')])
+            lines.extend(["", *ranges, hitalic("Диапазоны — по точкам трёхчасового прогноза.")])
     else:
-        lines.extend(['', 'Прогноз пока недоступен.'])
-    return '\n'.join(lines)
+        lines.extend(["", "Прогноз пока недоступен."])
+    return "\n".join(lines)
 
 
 class WeatherCallback(CallbackData, prefix="weather"):
@@ -93,7 +91,7 @@ class Weather(CallbackCommandBase):
     @classmethod
     def keyboard(cls, coordinates: Tuple[float, float]) -> InlineKeyboardMarkup:
         keyboard = InlineKeyboardBuilder().row(
-            InlineKeyboardButton(text='🔄 Обновить', callback_data=WeatherCallback(lat=coordinates[0], lon=coordinates[1]).pack()),
+            InlineKeyboardButton(text="🔄 Обновить", callback_data=WeatherCallback(lat=coordinates[0], lon=coordinates[1]).pack()),
         )
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
@@ -105,7 +103,7 @@ class Weather(CallbackCommandBase):
         if text:
             result = await geocoding(text)
             if not result:
-                return await target.reply('Не удалось найти место. Уточните название или пришлите геопозицию.')
+                return await target.reply("Не удалось найти место. Уточните название или пришлите геопозицию.")
             coordinates, location_name = result
 
         elif loc := chat.location or target.venue:
@@ -117,7 +115,7 @@ class Weather(CallbackCommandBase):
             location_name = None
 
         else:
-            coordinates, location_name = cls.Moscow, 'Москва'
+            coordinates, location_name = cls.Moscow, "Москва"
 
         response = await weather(coordinates, location_name)
         if response is None:
@@ -157,7 +155,7 @@ class Weather(CallbackCommandBase):
             if message_id is None:
                 return True
             now = time.monotonic()
-            if now - cls.location_refreshes.get(key, float('-inf')) < cls.location_refresh_interval:
+            if now - cls.location_refreshes.get(key, float("-inf")) < cls.location_refresh_interval:
                 return True
 
             location, location_name = message.location, None
@@ -177,8 +175,13 @@ class Weather(CallbackCommandBase):
 
                 with suppress(TelegramBadRequest):
                     text = parse_response(*response)
-                    return await bot_for(message).edit_message_text(text, chat_id=message.chat.id, message_id=message_id,
-                                                               reply_markup=cls.keyboard(coordinates), disable_web_page_preview=True)
+                    return await bot_for(message).edit_message_text(
+                        text,
+                        chat_id=message.chat.id,
+                        message_id=message_id,
+                        reply_markup=cls.keyboard(coordinates),
+                        disable_web_page_preview=True,
+                    )
             finally:
                 # Include provider/edit latency in the interval between completed refreshes.
                 if key in cls.replies:
@@ -190,14 +193,16 @@ class Weather(CallbackCommandBase):
     async def process_cb(cls, query: CallbackQuery, callback_data: WeatherCallback) -> Message | bool | None:
         try:
             coordinates = float(callback_data.lat), float(callback_data.lon)
-            if not all(math.isfinite(value) for value in coordinates) or not (-90 <= coordinates[0] <= 90 and -180 <= coordinates[1] <= 180):
+            if not all(math.isfinite(value) for value in coordinates) or not (
+                -90 <= coordinates[0] <= 90 and -180 <= coordinates[1] <= 180
+            ):
                 raise ValueError
         except (KeyError, TypeError, ValueError):
-            return await query.answer('Не удалось прочитать координаты. Пришлите геопозицию заново.', show_alert=True)
+            return await query.answer("Не удалось прочитать координаты. Пришлите геопозицию заново.", show_alert=True)
         if not isinstance(query.message, Message):
-            return await query.answer('Сообщение с погодой больше недоступно.', show_alert=True)
+            return await query.answer("Сообщение с погодой больше недоступно.", show_alert=True)
 
-        await query.answer(text='✅', cache_time=2 * 60)
+        await query.answer(text="✅", cache_time=2 * 60)
 
         response = await weather(coordinates, None)
         if response is None:
@@ -226,9 +231,15 @@ class WeatherMap(CallbackCommandBase):
     @classmethod
     def keyboard(cls, coordinates: Tuple[float, float], zoom: int) -> InlineKeyboardMarkup:
         keyboard = InlineKeyboardBuilder().row(
-            InlineKeyboardButton(text='➕', callback_data=WeatherMapCallback(action="zoom_in", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()),
-            InlineKeyboardButton(text='🔄', callback_data=WeatherMapCallback(action="update", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()),
-            InlineKeyboardButton(text='➖', callback_data=WeatherMapCallback(action="zoom_out", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()),
+            InlineKeyboardButton(
+                text="➕", callback_data=WeatherMapCallback(action="zoom_in", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()
+            ),
+            InlineKeyboardButton(
+                text="🔄", callback_data=WeatherMapCallback(action="update", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()
+            ),
+            InlineKeyboardButton(
+                text="➖", callback_data=WeatherMapCallback(action="zoom_out", lat=coordinates[0], lon=coordinates[1], zoom=zoom).pack()
+            ),
         )
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
@@ -259,9 +270,11 @@ class WeatherMap(CallbackCommandBase):
         else:
             file = input_file(copy(await weather_map(x, y, zoom)), "weather-map.png")
 
-        text = f'{hbold("Latitude")}: {hcode(coordinates[0])}\n' \
-               f'{hbold("Longitude")}: {hcode(coordinates[1])}\n' \
-               f'{hbold("Zoom Level")}: {hcode(zoom)}'
+        text = (
+            f"{hbold('Latitude')}: {hcode(coordinates[0])}\n"
+            f"{hbold('Longitude')}: {hcode(coordinates[1])}\n"
+            f"{hbold('Zoom Level')}: {hcode(zoom)}"
+        )
 
         result = await message.reply_photo(file, caption=text, reply_markup=cls.keyboard(coordinates, zoom))
 
@@ -278,9 +291,9 @@ class WeatherMap(CallbackCommandBase):
         action, zoom = callback_data.action, int(callback_data.zoom)
         coordinates = float(callback_data.lat), float(callback_data.lon)
 
-        if action == 'zoom_in':
+        if action == "zoom_in":
             zoom += 1
-        elif action == 'zoom_out':
+        elif action == "zoom_out":
             zoom -= 1
 
         zoom_l, zoom_r = 1, 18
@@ -298,11 +311,13 @@ class WeatherMap(CallbackCommandBase):
         else:
             file = input_file(copy(await weather_map(x, y, zoom)), "weather-map.png")
 
-        await query.answer(text='✅', cache_time=1)
+        await query.answer(text="✅", cache_time=1)
 
-        text = f'{hbold("Latitude")}: {hcode(coordinates[0])}\n' \
-               f'{hbold("Longitude")}: {hcode(coordinates[1])}\n' \
-               f'{hbold("Zoom Level")}: {hcode(zoom)}'
+        text = (
+            f"{hbold('Latitude')}: {hcode(coordinates[0])}\n"
+            f"{hbold('Longitude')}: {hcode(coordinates[1])}\n"
+            f"{hbold('Zoom Level')}: {hcode(zoom)}"
+        )
 
         result = None
         with suppress(TelegramBadRequest):

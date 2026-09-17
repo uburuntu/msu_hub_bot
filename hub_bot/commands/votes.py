@@ -24,17 +24,17 @@ async def process_votes(_message: Message, meta: MetaInfo) -> Message | bool | N
         else:
             name = target.from_user.full_name if target.from_user else target.chat.full_name
 
-        text = f'{name}: {one_liner(text)}'
+        text = f"{name}: {one_liner(text)}"
 
     else:
-        text = 'Голосование'
+        text = "Голосование"
 
-    options = ['👍🏻', '👎🏻']
+    options = ["👍🏻", "👎🏻"]
     if args:
         options = [a[:100] for a in args][:10]
 
     return await target.reply_poll(
-        question=shorten(text, width=140, placeholder=' [...] '),
-        options=[InputPollOption(text=option) for option in options + ['🤔']],
+        question=shorten(text, width=140, placeholder=" [...] "),
+        options=[InputPollOption(text=option) for option in options + ["🤔"]],
         is_anonymous=False,
     )

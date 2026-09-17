@@ -23,29 +23,29 @@ class MinecraftCallback(CallbackData, prefix="minecraft", sep="$"):
 class MinecraftStatus(CallbackCommandBase):
     callback_data = MinecraftCallback
 
-    server_url = 'minecraft.msut.me'
+    server_url = "minecraft.msut.me"
     screenshots = random_cycle(
-        'https://i.imgur.com/AA3fgbf.png',
-        'https://i.imgur.com/46hDyUg.png',
-        'https://i.imgur.com/MJLh8p5.png',
-        'https://i.imgur.com/6TJSTPf.png',
-        'https://i.imgur.com/1bi3Aki.png',
-        'https://i.imgur.com/cz3pJyf.png',
-        'https://i.imgur.com/eN5uYW8.png',
-        'https://i.imgur.com/PRZpGY0.png',
-        'https://i.imgur.com/31Q32G0.png',
-        'https://i.imgur.com/AdB5KwK.png',
-        'https://i.imgur.com/c6XCbU3.png',
+        "https://i.imgur.com/AA3fgbf.png",
+        "https://i.imgur.com/46hDyUg.png",
+        "https://i.imgur.com/MJLh8p5.png",
+        "https://i.imgur.com/6TJSTPf.png",
+        "https://i.imgur.com/1bi3Aki.png",
+        "https://i.imgur.com/cz3pJyf.png",
+        "https://i.imgur.com/eN5uYW8.png",
+        "https://i.imgur.com/PRZpGY0.png",
+        "https://i.imgur.com/31Q32G0.png",
+        "https://i.imgur.com/AdB5KwK.png",
+        "https://i.imgur.com/c6XCbU3.png",
     )
 
     @classmethod
     def keyboard(cls, url: str) -> InlineKeyboardMarkup:
         keyboard = InlineKeyboardBuilder().row(
-            InlineKeyboardButton(text='🔄 Обновить', callback_data=MinecraftCallback(url=url).pack()),
+            InlineKeyboardButton(text="🔄 Обновить", callback_data=MinecraftCallback(url=url).pack()),
         )
         if url == cls.server_url:
             keyboard.add(
-                InlineKeyboardButton(text='🗒 Подробнее', url='https://vk.com/wall13628232_1332'),
+                InlineKeyboardButton(text="🗒 Подробнее", url="https://vk.com/wall13628232_1332"),
             )
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
@@ -55,7 +55,7 @@ class MinecraftStatus(CallbackCommandBase):
 
         target, _ = meta.extract_text()
         if urls := extract_urls(target, include_text_link=False):
-            url = str(urls[0][0].with_path(''))[len('https://'):]
+            url = str(urls[0][0].with_path(""))[len("https://") :]
 
         text = await cls.mc_status(url)
         return await target.reply(text, reply_markup=cls.keyboard(url))
@@ -65,7 +65,7 @@ class MinecraftStatus(CallbackCommandBase):
         message = query.message
         if not isinstance(message, Message):
             return await query.answer("Эта кнопка уже недоступна.")
-        await query.answer(text='✅', cache_time=30)
+        await query.answer(text="✅", cache_time=30)
 
         url = callback_data.url
         text = await cls.mc_status(url)
@@ -83,28 +83,28 @@ class MinecraftStatus(CallbackCommandBase):
         except (asyncio.TimeoutError, ConnectionError, socket.gaierror):
             status = None
 
-        text = ''
+        text = ""
         if url == cls.server_url:
             text += hide_link(next(cls.screenshots))
-            text += hbold('Minecraft сервер МГУ | @minecraft_msu 🏰') + '\n\n'
+            text += hbold("Minecraft сервер МГУ | @minecraft_msu 🏰") + "\n\n"
         else:
-            text += hbold('Minecraft сервер') + '\n\n'
+            text += hbold("Minecraft сервер") + "\n\n"
 
-        text += hbold('Адрес') + f': {url}\n\n'
+        text += hbold("Адрес") + f": {url}\n\n"
 
         if status:
             if status.players.online:
-                text += '👥 ' + hbold('Игроков') + f' ({status.players.online} / {status.players.max})'
+                text += "👥 " + hbold("Игроков") + f" ({status.players.online} / {status.players.max})"
                 if status.players.sample:
-                    text += ':\n— ' + '\n— '.join(p.name for p in status.players.sample[:10])
-                text += '\n\n'
+                    text += ":\n— " + "\n— ".join(p.name for p in status.players.sample[:10])
+                text += "\n\n"
             else:
-                text += f'👥 Сейчас на сервере нет игроков\n\n'
+                text += f"👥 Сейчас на сервере нет игроков\n\n"
 
-            text += hbold('Версия') + f': {status.version.name}\n'
-            text += hbold('Пинг') + f': {int(status.latency)} мс\n'
+            text += hbold("Версия") + f": {status.version.name}\n"
+            text += hbold("Пинг") + f": {int(status.latency)} мс\n"
 
         else:
-            text += 'Сервер сейчас ' + hbold('оффлайн') + ' 😴\n'
+            text += "Сервер сейчас " + hbold("оффлайн") + " 😴\n"
 
         return text

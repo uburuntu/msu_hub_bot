@@ -51,7 +51,11 @@ class Settings(BaseModel):
             if self._chat_id is None:
                 raise RuntimeError("Chat preferences have no persistence identity")
             snapshot = _JSON_SETTINGS.validate_python(self.model_dump())
-            changes = {key: value for key, value in snapshot.items() if force or key not in self._saved_snapshot or value != self._saved_snapshot[key]}
+            changes = {
+                key: value
+                for key, value in snapshot.items()
+                if force or key not in self._saved_snapshot or value != self._saved_snapshot[key]
+            }
             await db.patch_settings(self._chat_id, changes)
             self._saved_snapshot = snapshot
         return self
@@ -59,7 +63,12 @@ class Settings(BaseModel):
 
 class SettingsMiddleware(BaseMiddleware):
     def __init__(
-        self, db: BotRepository, *, cache_size: int = 128, telemetry: Telemetry | None = None, backend: Backend = Backend.EDGEDB,
+        self,
+        db: BotRepository,
+        *,
+        cache_size: int = 128,
+        telemetry: Telemetry | None = None,
+        backend: Backend = Backend.EDGEDB,
     ) -> None:
         if cache_size < 1:
             raise ValueError("Preference cache size must be positive")

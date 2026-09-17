@@ -1,4 +1,5 @@
 """Random geotagged Commons photos. No media downloads or local cache."""
+
 import asyncio
 import math
 import os
@@ -16,8 +17,8 @@ from cachetools import TTLCache
 from common.externals.exceptions import ExternalServiceError
 
 # Labels only, never a list of allowed photo locations. ISO countries and territories.
-COUNTRIES = {code.lower(): Locale('ru').territories[code] for code in pytz.country_names}
-GEOCODER_URL = os.environ.get('GEOGUESS_GEOCODER_URL', 'https://nominatim.openstreetmap.org/reverse')
+COUNTRIES = {code.lower(): Locale("ru").territories[code] for code in pytz.country_names}
+GEOCODER_URL = os.environ.get("GEOGUESS_GEOCODER_URL", "https://nominatim.openstreetmap.org/reverse")
 _geocoder_lock = None
 _geocoder_next = 0.0
 _geocoder_cache = TTLCache(maxsize=1024, ttl=86400)
@@ -35,14 +36,14 @@ class PlainText(HTMLParser):
 def plain(value: str, limit: int) -> str:
     parser = PlainText()
     parser.feed(value)
-    return ' '.join(' '.join(parser.parts).split())[:limit]
+    return " ".join(" ".join(parser.parts).split())[:limit]
 
 
 def safe_url(value, hosts):
     if not isinstance(value, str):
         return False
     parsed = urlsplit(value)
-    return parsed.scheme == 'https' and parsed.netloc in hosts
+    return parsed.scheme == "https" and parsed.netloc in hosts
 
 
 @dataclass(frozen=True)
@@ -65,44 +66,56 @@ class Candidate:
 
 def candidates(data):
     photos = []
-    query = data.get('query') if isinstance(data, dict) else None
-    pages = query.get('pages') if isinstance(query, dict) else None
+    query = data.get("query") if isinstance(data, dict) else None
+    pages = query.get("pages") if isinstance(query, dict) else None
     if not isinstance(pages, dict):
         return photos
     for page in pages.values():
         try:
-            info = page['imageinfo'][0]
-            metadata = info['extmetadata']
+            info = page["imageinfo"][0]
+            metadata = info["extmetadata"]
+
             def value(key: str) -> str:
-                result = metadata[key]['value']
+                result = metadata[key]["value"]
                 if not isinstance(result, str):
-                    raise ValueError('Expected textual photo metadata')
+                    raise ValueError("Expected textual photo metadata")
                 return result
-            width, height = info['width'], info['height']
-            if (info['mime'] != 'image/jpeg' or type(width) is not int or type(height) is not int
-                    or min(width, height) < 600):
+
+            width, height = info["width"], info["height"]
+            if info["mime"] != "image/jpeg" or type(width) is not int or type(height) is not int or min(width, height) < 600:
                 continue
-            latitude, longitude = float(value('GPSLatitude')), float(value('GPSLongitude'))
+            latitude, longitude = float(value("GPSLatitude")), float(value("GPSLongitude"))
             if not (math.isfinite(latitude) and math.isfinite(longitude) and -90 <= latitude <= 90 and -180 <= longitude <= 180):
                 continue
-            url = info.get('thumburl', info.get('url'))
-            if 'thumburl' in info and 'thumbwidth' in info and 'thumbheight' in info:
-                width, height = info['thumbwidth'], info['thumbheight']
+            url = info.get("thumburl", info.get("url"))
+            if "thumburl" in info and "thumbwidth" in info and "thumbheight" in info:
+                width, height = info["thumbwidth"], info["thumbheight"]
             # Use original dimensions when thumbnail dimensions are unavailable.
-            if (type(width) is not int or type(height) is not int or min(width, height) <= 0
-                    or width + height > 10000 or max(width, height) > 20 * min(width, height)):
+            if (
+                type(width) is not int
+                or type(height) is not int
+                or min(width, height) <= 0
+                or width + height > 10000
+                or max(width, height) > 20 * min(width, height)
+            ):
                 continue
-            license_url = value('LicenseUrl').replace('http://', 'https://', 1)
-            if not safe_url(url, {'upload.wikimedia.org', 'thumb.wikimedia.org'}):
+            license_url = value("LicenseUrl").replace("http://", "https://", 1)
+            if not safe_url(url, {"upload.wikimedia.org", "thumb.wikimedia.org"}):
                 continue
-            if not safe_url(license_url, {'creativecommons.org'}):
+            if not safe_url(license_url, {"creativecommons.org"}):
                 continue
-            pageid = int(page['pageid'])
-            author = plain(value('Artist'), 90)
-            license_name = plain(value('LicenseShortName'), 40)
+            pageid = int(page["pageid"])
+            author = plain(value("Artist"), 90)
+            license_name = plain(value("LicenseShortName"), 40)
             if not author or not license_name or pageid <= 0:
                 continue
-            photos.append(Candidate(Photo('', '', url, f'https://commons.wikimedia.org/?curid={pageid}', author, license_name, license_url), latitude, longitude))
+            photos.append(
+                Candidate(
+                    Photo("", "", url, f"https://commons.wikimedia.org/?curid={pageid}", author, license_name, license_url),
+                    latitude,
+                    longitude,
+                )
+            )
         except (KeyError, IndexError, TypeError, ValueError):
             continue
     return photos
@@ -111,10 +124,10 @@ def candidates(data):
 async def request_json(session, url, params):
     async with session.get(url, params=params, allow_redirects=False) as response:
         if response.status != 200:
-            raise ExternalServiceError('Источник сейчас недоступен.')
+            raise ExternalServiceError("Источник сейчас недоступен.")
         data = await response.json()
         if not isinstance(data, dict):
-            raise ExternalServiceError('Источник вернул ошибку.')
+            raise ExternalServiceError("Источник вернул ошибку.")
         return data
 
 
@@ -123,16 +136,16 @@ class UnknownLocation(ExternalServiceError):
 
 
 def location(data):
-    address = data.get('address') if isinstance(data, dict) else None
+    address = data.get("address") if isinstance(data, dict) else None
     if not isinstance(address, dict):
-        raise UnknownLocation('Не удалось определить страну фотографии.')
-    code = address.get('country_code')
-    country = address.get('country')
+        raise UnknownLocation("Не удалось определить страну фотографии.")
+    code = address.get("country_code")
+    country = address.get("country")
     if not isinstance(code, str) or code.lower() not in COUNTRIES or not isinstance(country, str) or not country.strip():
-        raise UnknownLocation('Не удалось определить страну фотографии.')
-    city = next((address[key] for key in ('city', 'town', 'village', 'municipality', 'county', 'state') if address.get(key)), '')
+        raise UnknownLocation("Не удалось определить страну фотографии.")
+    city = next((address[key] for key in ("city", "town", "village", "municipality", "county", "state") if address.get(key)), "")
     if not isinstance(city, str):
-        raise UnknownLocation('Не удалось определить страну фотографии.')
+        raise UnknownLocation("Не удалось определить страну фотографии.")
     return COUNTRIES[code.lower()], plain(city, 100)
 
 
@@ -148,10 +161,18 @@ async def reverse_location(session, latitude, longitude):
             return _geocoder_cache[key]
         await asyncio.sleep(max(0, _geocoder_next - time.monotonic()))
         _geocoder_next = time.monotonic() + 1.1
-        data = await request_json(session, GEOCODER_URL, {
-            'format': 'jsonv2', 'lat': latitude, 'lon': longitude,
-            'zoom': 10, 'addressdetails': 1, 'accept-language': 'ru',
-        })
+        data = await request_json(
+            session,
+            GEOCODER_URL,
+            {
+                "format": "jsonv2",
+                "lat": latitude,
+                "lon": longitude,
+                "zoom": 10,
+                "addressdetails": 1,
+                "accept-language": "ru",
+            },
+        )
         result = location(data)
         _geocoder_cache[key] = result
         return result
@@ -161,19 +182,26 @@ async def fetch_photo():
     # Sample the entire Commons file namespace, then keep usable geotagged photos.
     # No city list, country filter, geographic radius or search-result ranking.
     params = {
-        'action': 'query', 'generator': 'random', 'grnnamespace': 6, 'grnlimit': 30,
-        'prop': 'imageinfo', 'iiprop': 'url|extmetadata|mime|size',
-        'iiextmetadatafilter': 'Artist|LicenseShortName|LicenseUrl|GPSLatitude|GPSLongitude',
-        'iiurlwidth': 960, 'format': 'json', 'maxage': 0, 'smaxage': 0,
+        "action": "query",
+        "generator": "random",
+        "grnnamespace": 6,
+        "grnlimit": 30,
+        "prop": "imageinfo",
+        "iiprop": "url|extmetadata|mime|size",
+        "iiextmetadatafilter": "Artist|LicenseShortName|LicenseUrl|GPSLatitude|GPSLongitude",
+        "iiurlwidth": 960,
+        "format": "json",
+        "maxage": 0,
+        "smaxage": 0,
     }
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=8),
-        headers={'User-Agent': 'MSUHubBot-Geoguess/1.0 (https://github.com/uburuntu/msu_hub_bot)'},
+        headers={"User-Agent": "MSUHubBot-Geoguess/1.0 (https://github.com/uburuntu/msu_hub_bot)"},
     ) as session:
-        data = await request_json(session, 'https://commons.wikimedia.org/w/api.php', params)
+        data = await request_json(session, "https://commons.wikimedia.org/w/api.php", params)
         photos = candidates(data)
         if not photos:
-            raise ExternalServiceError('Подходящего фото не нашлось.')
+            raise ExternalServiceError("Подходящего фото не нашлось.")
         random.shuffle(photos)
         for candidate in photos[:4]:
             try:
@@ -182,7 +210,7 @@ async def fetch_photo():
                 continue
             photo = candidate.photo
             return Photo(country, city, photo.url, photo.source, photo.author, photo.license, photo.license_url)
-        raise ExternalServiceError('Нет фото с определённой страной.')
+        raise ExternalServiceError("Нет фото с определённой страной.")
 
 
 async def random_photo() -> Photo:
@@ -190,4 +218,4 @@ async def random_photo() -> Photo:
         # Includes geocoder queue time; caller also limits photo delivery to 10 s.
         return await asyncio.wait_for(fetch_photo(), timeout=8)
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, AttributeError) as exc:
-        raise ExternalServiceError('Не удалось получить фото. Попробуй позже.') from exc
+        raise ExternalServiceError("Не удалось получить фото. Попробуй позже.") from exc

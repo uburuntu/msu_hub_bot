@@ -14,7 +14,11 @@ from hub_bot.events import EcosystemManager
 
 
 async def process_create_infra_chat(
-    message: Message, bot: BotWrapper, db: BotRepository, events_chat_id: int, em: EcosystemManager,
+    message: Message,
+    bot: BotWrapper,
+    db: BotRepository,
+    events_chat_id: int,
+    em: EcosystemManager,
 ) -> Message | bool | None:
     if message.chat.type == ChatType.PRIVATE or await db.get_directory(message.chat.id) is not None:
         return True
@@ -26,19 +30,25 @@ async def process_create_infra_chat(
         await message.delete()
     if not me.can_promote_members:
         return None
-    await db.create_directory(DirectoryCreate(
-        chat_id=message.chat.id,
-        name=message.chat.full_name,
-        section=EcosystemManager.ChatGroup.other.name,
-        members=await bot.get_chat_member_count(message.chat.id),
-    ))
+    await db.create_directory(
+        DirectoryCreate(
+            chat_id=message.chat.id,
+            name=message.chat.full_name,
+            section=EcosystemManager.ChatGroup.other.name,
+            members=await bot.get_chat_member_count(message.chat.id),
+        )
+    )
     em.invalidate_directory()
     event = f"❇️ {sender_mention(message)} добавил в экосистему новый чат: {await chat_link(message.chat, True)}."
     return await bot.send_message(events_chat_id, event) if events_chat_id else None
 
 
 async def process_delete_infra_chat(
-    message: Message, bot: BotWrapper, db: BotRepository, events_chat_id: int, em: EcosystemManager,
+    message: Message,
+    bot: BotWrapper,
+    db: BotRepository,
+    events_chat_id: int,
+    em: EcosystemManager,
 ) -> Message | bool | None:
     if message.chat.type == ChatType.PRIVATE or await db.get_directory(message.chat.id) is None:
         return True

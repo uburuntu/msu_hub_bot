@@ -53,7 +53,7 @@ def credit(photo: Photo) -> str:
 
 
 def score_key(chat_id: int) -> str:
-    return f'msu_hub:geoguess:{chat_id}:scores'
+    return f"msu_hub:geoguess:{chat_id}:scores"
 
 
 async def save_scores(chat_id: int, winners: list[tuple[int, str]], redis: RedisStorage) -> None:
@@ -63,7 +63,7 @@ async def save_scores(chat_id: int, winners: list[tuple[int, str]], redis: Redis
     async with client.pipeline(transaction=True) as pipe:
         for user_id, name in winners:
             pipe.zincrby(score_key(chat_id), 1, str(user_id))
-            pipe.hset(score_key(chat_id) + ':names', str(user_id), name)
+            pipe.hset(score_key(chat_id) + ":names", str(user_id), name)
         await pipe.execute()
 
 
@@ -80,9 +80,9 @@ class Geoguess:
     async def process(cls, message: Message) -> Message | None:
         chat_id = message.chat.id
         if chat_id in cls.rounds:
-            return await _send(message.reply('Подождите, прошлое задание еще не окончено!'))
+            return await _send(message.reply("Подождите, прошлое задание еще не окончено!"))
         if len(cls.rounds) >= MAX_ROUNDS:
-            return await _send(message.reply('Сейчас слишком много игр. Попробуй немного позже.'))
+            return await _send(message.reply("Сейчас слишком много игр. Попробуй немного позже."))
         round_ = Round(secrets.token_hex(6))
         cls.rounds[chat_id] = round_
         started = False
@@ -93,7 +93,7 @@ class Geoguess:
         except (ExternalServiceError, TelegramAPIError, asyncio.TimeoutError):
             if cls.rounds.get(chat_id) is round_:
                 cls.rounds.pop(chat_id, None)
-            await _send(message.reply('Ошибка, попробуйте еще раз'))
+            await _send(message.reply("Ошибка, попробуйте еще раз"))
         finally:
             if not started and cls.rounds.get(chat_id) is round_:
                 cls.rounds.pop(chat_id, None)
@@ -106,50 +106,62 @@ class Geoguess:
         options = random.sample(sorted(set(COUNTRIES.values()) - {photo.country}), 3) + [photo.country]
         random.shuffle(options)
         keyboard = InlineKeyboardBuilder()
-        keyboard.add(*[
-            InlineKeyboardButton(text=country, callback_data=GeoguessCallback(round=round_.token, choice=str(i)).pack())
-            for i, country in enumerate(options)
-        ])
+        keyboard.add(
+            *[
+                InlineKeyboardButton(text=country, callback_data=GeoguessCallback(round=round_.token, choice=str(i)).pack())
+                for i, country in enumerate(options)
+            ]
+        )
         keyboard.adjust(2)
-        keyboard.row(InlineKeyboardButton(text='Завершить задание', callback_data=GeoguessCallback(round=round_.token, choice="finish").pack()))
+        keyboard.row(
+            InlineKeyboardButton(text="Завершить задание", callback_data=GeoguessCallback(round=round_.token, choice="finish").pack())
+        )
         round_.photo, round_.options = photo, options
-        round_.message = await _send(message.reply_photo(
-            photo.url,
-            reply_markup=keyboard.as_markup(),
-        ))
+        round_.message = await _send(
+            message.reply_photo(
+                photo.url,
+                reply_markup=keyboard.as_markup(),
+            )
+        )
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: GeoguessCallback, redis: RedisStorage, supervisor: Supervisor) -> bool | None:
+    async def process_cb(
+        cls, query: CallbackQuery, callback_data: GeoguessCallback, redis: RedisStorage, supervisor: Supervisor
+    ) -> bool | None:
         if not isinstance(query.message, Message):
-            return await _send(query.answer('Этот раунд недоступен.'))
+            return await _send(query.answer("Этот раунд недоступен."))
         message = query.message
         round_ = cls.rounds.get(message.chat.id)
-        if (round_ is None or round_.message is None or round_.closed
-                or round_.token != callback_data.round
-                or round_.message.message_id != query.message.message_id):
-            return await _send(query.answer('Раунд завершён. Начни новый: /geoguess', show_alert=True))
-        if callback_data.choice == 'finish':
+        if (
+            round_ is None
+            or round_.message is None
+            or round_.closed
+            or round_.token != callback_data.round
+            or round_.message.message_id != query.message.message_id
+        ):
+            return await _send(query.answer("Раунд завершён. Начни новый: /geoguess", show_alert=True))
+        if callback_data.choice == "finish":
             # Close before any await, so two clicks cannot award points twice.
             round_.closed = True
             round_.task = supervisor.create_job(lambda: cls.finish(message.chat.id, round_, redis))
-            await _send(query.answer('Задание завершено!'))
+            await _send(query.answer("Задание завершено!"))
             # The supervisor owns completion even if the callback worker stops.
             await asyncio.shield(round_.task)
             return None
         user_id = query.from_user.id
         if user_id in round_.votes:
-            return await _send(query.answer('Твой ответ уже принят. Изменить его нельзя.', show_alert=True))
+            return await _send(query.answer("Твой ответ уже принят. Изменить его нельзя.", show_alert=True))
         try:
             choice = int(callback_data.choice)
             if not 0 <= choice < len(round_.options):
                 raise ValueError
         except (KeyError, ValueError):
-            return await _send(query.answer('Неизвестный вариант.'))
+            return await _send(query.answer("Неизвестный вариант."))
         # No await between checking and recording: simultaneous clicks cannot vote twice.
         round_.votes[user_id] = (choice, query.from_user.full_name[:40])
         round_.usernames[user_id] = query.from_user.username
         try:
-            await _send(query.answer('Ответ принят! Результат — в конце раунда.'))
+            await _send(query.answer("Ответ принят! Результат — в конце раунда."))
         finally:
             await cls.update_board(round_)
         return None
@@ -159,39 +171,39 @@ class Geoguess:
         if round_.message is None:
             return
         async with round_.board_lock:
-            lines = ['🏁 Голосование завершено.' if round_.closed else '🗳 Кто что выбрал:']
+            lines = ["🏁 Голосование завершено." if round_.closed else "🗳 Кто что выбрал:"]
             for index, country in enumerate(round_.options):
                 names = [name for choice, name in round_.votes.values() if choice == index]
-                lines.append(f'\n{escape(country)} ({len(names)}):')
+                lines.append(f"\n{escape(country)} ({len(names)}):")
                 lines.extend(escape(name) for name in names)
                 if not names:
-                    lines.append('пока никто')
-            chunks = ['']
+                    lines.append("пока никто")
+            chunks = [""]
             for line in lines:
                 if len(chunks[-1]) + len(line) + 1 > 3000:
-                    chunks.append('')
-                chunks[-1] += line + '\n'
+                    chunks.append("")
+                chunks[-1] += line + "\n"
             try:
                 for i, text in enumerate(chunks):
                     boards = ([round_.board] if round_.board is not None else []) + round_.board_more
                     if i >= len(boards):
-                        board = await _send(round_.message.reply(text, parse_mode='HTML'))
+                        board = await _send(round_.message.reply(text, parse_mode="HTML"))
                         if i == 0:
                             round_.board = board
                         else:
                             round_.board_more.append(board)
                         round_.board_texts.append(text)
                     elif round_.board_texts[i] != text:
-                        await _send(boards[i].edit_text(text, parse_mode='HTML'))
+                        await _send(boards[i].edit_text(text, parse_mode="HTML"))
                         round_.board_texts[i] = text
                 # A shorter final heading can occasionally reduce the number of pages.
                 boards = ([round_.board] if round_.board is not None else []) + round_.board_more
                 for i in range(len(chunks), len(boards)):
-                    if round_.board_texts[i] != 'Список ответов выше.':
-                        await _send(boards[i].edit_text('Список ответов выше.'))
-                        round_.board_texts[i] = 'Список ответов выше.'
+                    if round_.board_texts[i] != "Список ответов выше.":
+                        await _send(boards[i].edit_text("Список ответов выше."))
+                        round_.board_texts[i] = "Список ответов выше."
             except (TelegramAPIError, asyncio.TimeoutError):
-                logger.warning('Geoguess vote board update failed')
+                logger.warning("Geoguess vote board update failed")
 
     @classmethod
     async def finish(cls, chat_id: int, round_: Round, redis: RedisStorage) -> None:
@@ -207,46 +219,47 @@ class Geoguess:
                 await asyncio.wait_for(save_scores(chat_id, winners, redis), timeout=5)
             except Exception:
                 scored = False
-                logger.exception('Geoguess score update failed')
-            place = ', '.join(part for part in (photo.city, photo.country) if part)
+                logger.exception("Geoguess score update failed")
+            place = ", ".join(part for part in (photo.city, photo.country) if part)
             result = (
-                f'🌍 На снимке — <b>{escape(place)}</b>.\n\n'
+                f"🌍 На снимке — <b>{escape(place)}</b>.\n\n"
                 f'{credit(photo)}\n<a href="{photo.source}">Источник фотографии</a>\n'
                 'Геоданные: <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>\n\n'
             )
             if winners:
                 mentions = [
-                    '@' + escape(round_.usernames[uid] or '') if round_.usernames.get(uid)
+                    "@" + escape(round_.usernames[uid] or "")
+                    if round_.usernames.get(uid)
                     else f'<a href="tg://user?id={uid}">{escape(name)}</a>'
                     for uid, name in winners
                 ]
-                heading = f'Угадали {len(winners)} из {len(round_.votes)}'
-                points = 'Каждому +1 очко.' if scored else 'Не удалось подтвердить запись очков.'
-                listing = ', '.join(mentions)
+                heading = f"Угадали {len(winners)} из {len(round_.votes)}"
+                points = "Каждому +1 очко." if scored else "Не удалось подтвердить запись очков."
+                listing = ", ".join(mentions)
                 # Long winner lists are sent separately; never omit participants.
                 if len(result + heading + listing + points) < 950:
-                    result += f'{heading}: {listing}.\n{points}'
+                    result += f"{heading}: {listing}.\n{points}"
                     winner_messages = []
                 else:
-                    result += f'{heading}.\n{points}\nПобедители — в сообщении ниже.'
-                    winner_messages = ['🏆 Победители:\n']
+                    result += f"{heading}.\n{points}\nПобедители — в сообщении ниже."
+                    winner_messages = ["🏆 Победители:\n"]
                     for mention in mentions:
                         if len(winner_messages[-1]) + len(mention) + 1 > 3000:
-                            winner_messages.append('🏆 Победители (продолжение):\n')
-                        winner_messages[-1] += mention + '\n'
+                            winner_messages.append("🏆 Победители (продолжение):\n")
+                        winner_messages[-1] += mention + "\n"
             else:
                 winner_messages = []
-                result += 'Никто не угадал 😄' if round_.votes else 'В этот раз никто не ответил.'
+                result += "Никто не угадал 😄" if round_.votes else "В этот раз никто не ответил."
             try:
-                await _send(round_.message.edit_caption(caption=result, parse_mode='HTML', reply_markup=None))
+                await _send(round_.message.edit_caption(caption=result, parse_mode="HTML", reply_markup=None))
             except (TelegramAPIError, asyncio.TimeoutError):
-                await _send(round_.message.reply(result, parse_mode='HTML', disable_web_page_preview=True))
+                await _send(round_.message.reply(result, parse_mode="HTML", disable_web_page_preview=True))
             for text in winner_messages:
-                await _send(round_.message.reply(text, parse_mode='HTML', disable_web_page_preview=True))
+                await _send(round_.message.reply(text, parse_mode="HTML", disable_web_page_preview=True))
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception('Geoguess round could not be completed')
+            logger.exception("Geoguess round could not be completed")
         finally:
             if cls.rounds.get(chat_id) is round_:
                 cls.rounds.pop(chat_id, None)
@@ -259,18 +272,18 @@ class Geoguess:
             scores = await cast(Awaitable[list[tuple[str, float]]], client.zrevrange(score_key(message.chat.id), 0, 9, withscores=True))
             rows: list[str] = []
             for user_id, score in scores:
-                name = await cast(Awaitable[str | None], client.hget(score_key(message.chat.id) + ':names', user_id))
+                name = await cast(Awaitable[str | None], client.hget(score_key(message.chat.id) + ":names", user_id))
                 if isinstance(name, bytes):
-                    name = name.decode('utf-8', errors='replace')
-                rows.append(f'{len(rows) + 1}. {escape(str(name or "Игрок")[:40])} — {int(score)}')
+                    name = name.decode("utf-8", errors="replace")
+                rows.append(f"{len(rows) + 1}. {escape(str(name or 'Игрок')[:40])} — {int(score)}")
             return rows
 
         try:
             rows = await asyncio.wait_for(read(), timeout=5)
         except Exception:
-            return await _send(message.reply('Рейтинг сейчас недоступен.'))
-        text = '🏆 Рейтинг чата\n\n' + ('\n'.join(rows) if rows else 'Пока нет очков. Начни /geoguess')
-        return await _send(message.reply(text, parse_mode='HTML'))
+            return await _send(message.reply("Рейтинг сейчас недоступен."))
+        text = "🏆 Рейтинг чата\n\n" + ("\n".join(rows) if rows else "Пока нет очков. Начни /geoguess")
+        return await _send(message.reply(text, parse_mode="HTML"))
 
     @classmethod
     async def shutdown(cls) -> None:

@@ -14,7 +14,7 @@ from typing import Generic, Iterator, Callable, Hashable, Iterable, List, Option
 import pendulum
 from PIL import Image
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def attributes(it: Iterable, name: str):
@@ -39,17 +39,17 @@ def bytes_io(data: AnyStr, filename: str = None) -> io.BytesIO:
     return file
 
 
-def image_bytes_io(image: Image.Image, filename: str = 'image', ext: str = 'jpeg') -> io.BytesIO:
+def image_bytes_io(image: Image.Image, filename: str = "image", ext: str = "jpeg") -> io.BytesIO:
     file = FakeBytesIO()
     image.save(file, format=ext)
-    file.name = f'{filename}.{ext}'
+    file.name = f"{filename}.{ext}"
     file.seek(0)
     return file
 
 
-def prettify_number(n: int, sep: str = '’') -> str:
+def prettify_number(n: int, sep: str = "’") -> str:
     s = str(n)[::-1]
-    return sep.join(s[i:i + 3] for i in range(0, len(s), 3))[::-1]
+    return sep.join(s[i : i + 3] for i in range(0, len(s), 3))[::-1]
 
 
 def prettify_duration(seconds: int) -> str:
@@ -58,11 +58,11 @@ def prettify_duration(seconds: int) -> str:
 
 
 def prettify_bytes(size: float) -> str:
-    for unit in ('Б', 'Кб', 'Мб', 'Гб', 'Тб'):
+    for unit in ("Б", "Кб", "Мб", "Гб", "Тб"):
         if size < 1024.0:
             break
         size /= 1024.0
-    return f'{size:.0f} {unit}' if unit in ('Б', 'Кб') else f'{size:.1f} {unit}'
+    return f"{size:.0f} {unit}" if unit in ("Б", "Кб") else f"{size:.1f} {unit}"
 
 
 def megabytes(size: float) -> float:
@@ -71,16 +71,16 @@ def megabytes(size: float) -> float:
 
 
 def one_liner(s: str, cut_len: int = None) -> str:
-    s = s.replace('\n', ' ')
-    while '  ' in s:
-        s = s.replace('  ', ' ')
+    s = s.replace("\n", " ")
+    while "  " in s:
+        s = s.replace("  ", " ")
     return s[:cut_len] if cut_len else s
 
 
 def strip_blank_rows(s: str) -> str:
-    text = '\n'.join(map(str.strip, s.split('\n')))
-    while '\n\n\n' in text:
-        text = text.replace('\n\n\n', '\n\n')
+    text = "\n".join(map(str.strip, s.split("\n")))
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
     return text
 
 
@@ -96,14 +96,14 @@ def chunks(iterable, size=10):
         yield list(chain([first], islice(iterator, size - 1)))
 
 
-def parse_int(s: str, default: int = None, bound_l: int = float('-inf'), bound_r: int = float('inf')) -> Optional[int]:
+def parse_int(s: str, default: int = None, bound_l: int = float("-inf"), bound_r: int = float("inf")) -> Optional[int]:
     if not s.isdigit():
         return default
 
     return min(max(int(s), bound_l), bound_r)
 
 
-def shorten(text: str, width: int = 32, placeholder: str = '...') -> str:
+def shorten(text: str, width: int = 32, placeholder: str = "...") -> str:
     if len(text) <= width:
         return text
 
@@ -120,14 +120,14 @@ def outdated(dt: datetime, curr_dt: datetime = None):
     return curr_dt > dt
 
 
-def unique_by(a: Iterable[T], key: Callable[[T], Hashable] = itemgetter('id')) -> List[T]:
+def unique_by(a: Iterable[T], key: Callable[[T], Hashable] = itemgetter("id")) -> List[T]:
     return list({key(i): i for i in a}.values())
 
 
 def percent_chance(percent: float) -> bool:
-    if percent < 0. or percent > 100.:
-        raise ValueError(f'`percent` should be between 0. an 100., not {percent}')
-    chance = percent / 100.
+    if percent < 0.0 or percent > 100.0:
+        raise ValueError(f"`percent` should be between 0. an 100., not {percent}")
+    chance = percent / 100.0
     return random.random() < chance
 
 
@@ -157,7 +157,7 @@ class PriorityQueue(Generic[T]):
         return heapq.heappop(self._data)[1]
 
 
-def retry(exception=Exception, retries_count=5, sleep_for=0.):
+def retry(exception=Exception, retries_count=5, sleep_for=0.0):
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
@@ -211,11 +211,11 @@ def cut_long_text_yield(text: str, soft_max_len: int = 4000, hard_max_len: int =
         return
 
     for i in range(len(text) - 1):
-        if text[i] == '\n':
+        if text[i] == "\n":
             nl_anchor = i + 1
-        if text[i] == '.' and text[i + 1] == ' ':
+        if text[i] == "." and text[i + 1] == " ":
             dot_anchor = i + 2
-        if text[i] == ' ':
+        if text[i] == " ":
             space_anchor = i
 
         if i - last_cut > soft_max_len:
@@ -245,16 +245,16 @@ def cut_long_text(text: str, soft_max_len: int = 4000, hard_max_len: int = 4096)
 
 def clear_html(text: str) -> str:
     """Clear text from HTML tags"""
-    text = re.sub(r'<br>', '\n', text)
-    text = re.sub(r'&nbsp;', ' ', text)
-    text = re.sub(r'&quot;', '"', text)
-    text = re.sub(r'&#47;', '/', text)
+    text = re.sub(r"<br>", "\n", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&quot;", '"', text)
+    text = re.sub(r"&#47;", "/", text)
 
-    text = re.sub(r'<.*?>', '', text)
+    text = re.sub(r"<.*?>", "", text)
     return text
 
 
-re_filename = re.compile(r'(?u)[^-\w.]')
+re_filename = re.compile(r"(?u)[^-\w.]")
 
 
 def valid_filename(s: str, length: int = None) -> str:
@@ -266,13 +266,13 @@ def valid_filename(s: str, length: int = None) -> str:
     >>> valid_filename("john's portrait in 2004.jpg")
     'johns_portrait_in_2004.jpg'
     """
-    s = str(s).strip().replace(' ', '_')
-    s = re_filename.sub('', s)
+    s = str(s).strip().replace(" ", "_")
+    s = re_filename.sub("", s)
     return s if s is None else s[:length]
 
 
 class RandomizerForDay:
-    tz = pendulum.timezone('Europe/Moscow')
+    tz = pendulum.timezone("Europe/Moscow")
     until_ts = 0
 
     @classmethod

@@ -1,4 +1,3 @@
-
 import asyncio
 import datetime
 from textwrap import dedent
@@ -22,7 +21,7 @@ class Stats(CallbackCommandBase):
     @classmethod
     def keyboard(cls) -> InlineKeyboardMarkup:
         keyboard = InlineKeyboardBuilder().row(
-            InlineKeyboardButton(text='🔄 Обновить', callback_data=StatsCallback(action='update').pack()),
+            InlineKeyboardButton(text="🔄 Обновить", callback_data=StatsCallback(action="update").pack()),
         )
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
@@ -49,8 +48,8 @@ class Stats(CallbackCommandBase):
     async def process_cb(cls, query: CallbackQuery, db: BotRepository) -> Message | bool | None:
         message = query.message
         if not isinstance(message, Message):
-            return await query.answer('Эта кнопка уже недоступна.')
-        await query.answer('✅', cache_time=1)
+            return await query.answer("Эта кнопка уже недоступна.")
+        await query.answer("✅", cache_time=1)
 
         lock = cls.lock(message)
 
@@ -59,6 +58,6 @@ class Stats(CallbackCommandBase):
 
         async with lock:
             await message.edit_text(await cls.text(db), reply_markup=cls.keyboard())
-            await asyncio.sleep(1.)
+            await asyncio.sleep(1.0)
 
         return True

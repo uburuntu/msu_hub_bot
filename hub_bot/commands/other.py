@@ -4,7 +4,17 @@ from contextlib import suppress
 from aiogram import html
 from aiogram.exceptions import TelegramBadRequest
 import transliterate
-from aiogram.types import Message, User, Chat, MessageId, MessageOriginUser, MessageOriginChat, MessageOriginChannel, MessageOriginHiddenUser, ReplyParameters
+from aiogram.types import (
+    Message,
+    User,
+    Chat,
+    MessageId,
+    MessageOriginUser,
+    MessageOriginChat,
+    MessageOriginChannel,
+    MessageOriginHiddenUser,
+    ReplyParameters,
+)
 from aiogram.utils.markdown import hcode, hbold, hpre, hlink
 
 from common.tg.filters import MetaInfo
@@ -20,13 +30,20 @@ async def process_me(message: Message, meta: MetaInfo) -> Message | bool | None:
     with suppress(TelegramBadRequest):
         await message.delete()
 
-    return await message.answer(f'{username_link(message.from_user) if message.from_user else await chat_link(message.chat)} {html.quote(text)}')
+    return await message.answer(
+        f"{username_link(message.from_user) if message.from_user else await chat_link(message.chat)} {html.quote(text)}"
+    )
 
 
 async def process_copy(message: Message) -> MessageId:
     target = message.reply_to_message or message
-    return await bot_for(message).copy_message(message.chat.id, target.chat.id, target.message_id, message_thread_id=message.message_thread_id,
-                                reply_parameters=ReplyParameters(message_id=message.message_id))
+    return await bot_for(message).copy_message(
+        message.chat.id,
+        target.chat.id,
+        target.message_id,
+        message_thread_id=message.message_thread_id,
+        reply_parameters=ReplyParameters(message_id=message.message_id),
+    )
 
 
 async def process_transliterate(_message: Message, meta: MetaInfo) -> Message | bool | None:
@@ -34,15 +51,15 @@ async def process_transliterate(_message: Message, meta: MetaInfo) -> Message | 
     if not text:
         return True
 
-    lang = transliterate.detect_language(text, heavy_check=True) or 'ru'
+    lang = transliterate.detect_language(text, heavy_check=True) or "ru"
     text = transliterate.translit(text, lang)
 
     return await target.reply(html.quote(text))
 
 
 async def process_punto(_message: Message, meta: MetaInfo) -> Message | bool | None:
-    ru_tab = 'ЁёАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюя'
-    en_tab = '~`F<DULT:PBQRKVYJGHCNEA{WXIO}SM">Zf,dult;pbqrkvyjghcnea[wxio]sm\'.z'
+    ru_tab = "ЁёАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюя"
+    en_tab = "~`F<DULT:PBQRKVYJGHCNEA{WXIO}SM\">Zf,dult;pbqrkvyjghcnea[wxio]sm'.z"
     ru_en = str.maketrans(ru_tab, en_tab)
     en_ru = str.maketrans(en_tab, ru_tab)
 
@@ -51,10 +68,10 @@ async def process_punto(_message: Message, meta: MetaInfo) -> Message | bool | N
         return True
 
     lang = transliterate.detect_language(text, heavy_check=True)
-    if lang not in ('en', 'ru'):
-        lang = 'en'
+    if lang not in ("en", "ru"):
+        lang = "en"
 
-    if lang == 'ru':
+    if lang == "ru":
         return await target.reply(html.quote(text.translate(ru_en)))
 
     text = text.translate(en_ru)
@@ -62,7 +79,7 @@ async def process_punto(_message: Message, meta: MetaInfo) -> Message | bool | N
 
 
 async def process_id(message: Message) -> Message | bool | None:
-    text = ''
+    text = ""
 
     for target in (message.reply_to_message, message):
         if target:
@@ -80,7 +97,7 @@ async def process_id(message: Message) -> Message | bool | None:
                 id_: str | int
                 if isinstance(t, str):
                     name = t
-                    id_ = '🤷🏻‍♂️'
+                    id_ = "🤷🏻‍♂️"
                     url = None
                 elif isinstance(t, User):
                     name = t.full_name
@@ -93,8 +110,8 @@ async def process_id(message: Message) -> Message | bool | None:
                 else:
                     continue
 
-                link = f", ({hlink('🔗', url)})" if url else ''
-                text += f'{hbold(name)}{link}:\n└ {hcode(id_)}\n\n'
+                link = f", ({hlink('🔗', url)})" if url else ""
+                text += f"{hbold(name)}{link}:\n└ {hcode(id_)}\n\n"
 
     return await message.reply(text, disable_notification=True, disable_web_page_preview=True)
 
@@ -114,37 +131,37 @@ async def process_html(_message: Message, meta: MetaInfo) -> Message | bool | No
 
 
 async def process_file_id(message: Message, meta: MetaInfo) -> None:
-    t, *file_ids = re.split(r'\s', meta.text)
+    t, *file_ids = re.split(r"\s", meta.text)
 
-    if t == 'photo':
+    if t == "photo":
         for file_id in file_ids:
             await message.reply_photo(file_id)
 
-    elif t == 'audio':
+    elif t == "audio":
         for file_id in file_ids:
             await message.reply_audio(file_id)
 
-    elif t == 'document':
+    elif t == "document":
         for file_id in file_ids:
             await message.reply_document(file_id)
 
-    elif t == 'video':
+    elif t == "video":
         for file_id in file_ids:
             await message.reply_video(file_id)
 
-    elif t == 'animation':
+    elif t == "animation":
         for file_id in file_ids:
             await message.reply_animation(file_id)
 
-    elif t == 'sticker':
+    elif t == "sticker":
         for file_id in file_ids:
             await message.reply_sticker(file_id)
 
-    elif t == 'video_note':
+    elif t == "video_note":
         for file_id in file_ids:
             await message.reply_video_note(file_id)
 
-    elif t == 'voice':
+    elif t == "voice":
         for file_id in file_ids:
             await message.reply_voice(file_id)
 

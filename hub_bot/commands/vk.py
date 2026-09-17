@@ -59,10 +59,19 @@ async def process_vk_wall(message: Message, bot: BotWrapper, db: BotRepository, 
     with_header = bool(int(args[4])) if len(args) > 4 else None
     is_suspended = bool(int(args[5])) if len(args) > 5 else None
     description = args[6] if len(args) > 6 else None
-    changes = VkPatch.model_validate({key: value for key, value in {
-        "last_post_id": last_post_id, "with_reposts": with_reposts, "with_header": with_header,
-        "is_suspended": is_suspended, "description": description,
-    }.items() if value is not None})
+    changes = VkPatch.model_validate(
+        {
+            key: value
+            for key, value in {
+                "last_post_id": last_post_id,
+                "with_reposts": with_reposts,
+                "with_header": with_header,
+                "is_suspended": is_suspended,
+                "description": description,
+            }.items()
+            if value is not None
+        }
+    )
     config = await db.upsert_vk_subscription(owner_id, chat_id, changes)
     if is_suspended:
         return await message.reply("ℹ️ Выгрузка стены заморожена")

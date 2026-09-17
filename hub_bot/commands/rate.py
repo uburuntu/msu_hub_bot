@@ -19,7 +19,7 @@ class Rate(CallbackCommandBase):
     @classmethod
     async def process(cls, _message: Message, meta: MetaInfo) -> Message:
         target = meta.reply()
-        msg = await target.reply(hbold('🤔'), reply_markup=cls.keyboard())
+        msg = await target.reply(hbold("🤔"), reply_markup=cls.keyboard())
         return msg
 
     @classmethod
@@ -32,8 +32,8 @@ class Rate(CallbackCommandBase):
 
         message = query.message
         if not isinstance(message, Message):
-            return await query.answer('Эта кнопка уже недоступна.')
-        is_up = callback_data.is_up == '+'
+            return await query.answer("Эта кнопка уже недоступна.")
+        is_up = callback_data.is_up == "+"
 
         key = cls.cache_key(message)
         if key in cls.cache:
@@ -50,7 +50,7 @@ class Rate(CallbackCommandBase):
                 down += 1
             cls.cache[key] = [up, down]
 
-        await query.answer(text=f'{up} 👍🏻' if is_up else f'{down} 👎🏻', cache_time=cls.cache_time_long)
+        await query.answer(text=f"{up} 👍🏻" if is_up else f"{down} 👎🏻", cache_time=cls.cache_time_long)
 
         lock = cls.lock(key)
 
@@ -58,5 +58,5 @@ class Rate(CallbackCommandBase):
             return True
 
         async with lock:
-            await asyncio.sleep(1.)
+            await asyncio.sleep(1.0)
             return await message.edit_reply_markup(reply_markup=cls.keyboard(*cls.cache.get(key, [up, down])))

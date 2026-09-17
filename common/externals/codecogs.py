@@ -5,13 +5,13 @@ import aiohttp
 
 
 class Codecogs:
-    api_url = 'https://latex.codecogs.com/'
+    api_url = "https://latex.codecogs.com/"
 
     @cached_property
     def session(self) -> aiohttp.ClientSession:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:81.0) Gecko/20100101 Firefox/81.0',
-            'referrer': 'https://www.codecogs.com/latex/eqneditor.php?lang=en-en',
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:81.0) Gecko/20100101 Firefox/81.0",
+            "referrer": "https://www.codecogs.com/latex/eqneditor.php?lang=en-en",
         }
         return aiohttp.ClientSession(headers=headers)
 
@@ -20,7 +20,7 @@ class Codecogs:
 
     @classmethod
     def url(cls, code: str) -> str:
-        return cls.api_url + r'png.latex?\dpi{500}' + quote(code)
+        return cls.api_url + r"png.latex?\dpi{500}" + quote(code)
 
     async def request(self, code: str) -> bytes:
         async with self.session.get(self.url(code)) as response:

@@ -19,12 +19,12 @@ class HelpCallback(CallbackData, prefix="help"):
 
 class HelpMessage(CallbackCommandBase):
     callback_data = HelpCallback
-    compressed_text = '📝 Команды и возможности бота'
+    compressed_text = "📝 Команды и возможности бота"
 
     @classmethod
     def keyboard(cls) -> InlineKeyboardMarkup:
         keyboard = InlineKeyboardBuilder().add(
-            InlineKeyboardButton(text='⏬ Развернуть помощь', callback_data=HelpCallback(action='open').pack())
+            InlineKeyboardButton(text="⏬ Развернуть помощь", callback_data=HelpCallback(action="open").pack())
         )
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
@@ -40,12 +40,12 @@ class HelpMessage(CallbackCommandBase):
     async def process_cb(cls, query: CallbackQuery, callback_data: HelpCallback, supervisor: Supervisor) -> bool:
         message = query.message
         if not isinstance(message, Message):
-            return await query.answer('Эта кнопка уже недоступна.')
+            return await query.answer("Эта кнопка уже недоступна.")
         action = callback_data.action
 
-        await query.answer(text='✅', cache_time=1 * 60)
+        await query.answer(text="✅", cache_time=1 * 60)
 
-        if action == 'open':
+        if action == "open":
             with suppress(TelegramBadRequest):
                 result = await message.edit_text(cmd_help, disable_web_page_preview=True)
                 if isinstance(result, Message):
@@ -55,6 +55,6 @@ class HelpMessage(CallbackCommandBase):
 
     @classmethod
     async def edit(cls, message: Message) -> None:
-        await asyncio.sleep(60.)
+        await asyncio.sleep(60.0)
         with suppress(TelegramBadRequest):
             await message.edit_text(cls.compressed_text, reply_markup=cls.keyboard(), disable_web_page_preview=True)

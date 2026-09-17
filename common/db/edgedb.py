@@ -18,8 +18,15 @@ import edgedb
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from common.db.models import (
-    ArchivedUpdate, ChatObservation, ChatRecord, DirectoryCreate, DirectoryPatch,
-    DirectoryRecord, UsageStats, VkPatch, VkSubscription,
+    ArchivedUpdate,
+    ChatObservation,
+    ChatRecord,
+    DirectoryCreate,
+    DirectoryPatch,
+    DirectoryRecord,
+    UsageStats,
+    VkPatch,
+    VkSubscription,
 )
 from msu_hub_bot.settings import Settings, settings
 
@@ -32,7 +39,10 @@ class _Executor(Protocol):
 class _Transaction(_Executor, Protocol):
     async def __aenter__(self) -> Self: ...
     async def __aexit__(
-        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None,
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
     ) -> bool | None: ...
 
 
@@ -48,15 +58,30 @@ _DIRECTORY = "id, created, chat_id, name, section, is_hidden, username_alias, me
 _VK = "id, created, owner_id, chat_id, last_post_id, with_reposts, with_header, is_suspended, description"
 _CHAT_TYPES = {"chat_id": "int64", "type": "str", "title": "str", "username": "str", "first_name": "str", "last_name": "str"}
 _USER_TYPES = {
-    "user_id": "int64", "is_bot": "bool", "first_name": "str", "last_name": "str", "username": "str", "language_code": "str",
+    "user_id": "int64",
+    "is_bot": "bool",
+    "first_name": "str",
+    "last_name": "str",
+    "username": "str",
+    "language_code": "str",
 }
 _DIRECTORY_TYPES = {
-    "chat_id": "int64", "name": "str", "section": "str", "is_hidden": "bool", "username_alias": "str",
-    "members": "int32", "pinned_message_id": "int32",
+    "chat_id": "int64",
+    "name": "str",
+    "section": "str",
+    "is_hidden": "bool",
+    "username_alias": "str",
+    "members": "int32",
+    "pinned_message_id": "int32",
 }
 _VK_TYPES = {
-    "owner_id": "int64", "chat_id": "int64", "last_post_id": "int32", "with_reposts": "bool",
-    "with_header": "bool", "is_suspended": "bool", "description": "str",
+    "owner_id": "int64",
+    "chat_id": "int64",
+    "last_post_id": "int32",
+    "with_reposts": "bool",
+    "with_header": "bool",
+    "is_suspended": "bool",
+    "description": "str",
 }
 
 
@@ -108,12 +133,19 @@ def _settings(metadata: JsonValue) -> dict[str, JsonValue]:
 
 class EdgeDBRepository:
     def __init__(self, *, config: Settings = settings, client: _Client | None = None) -> None:
-        self.client = client if client is not None else cast(_Client, edgedb.create_async_client(
-            dsn=config.edgedb_dsn,
-            # The driver's default is None, although its annotation excludes it.
-            tls_ca=config.edgedb_tls_ca or None,  # type: ignore[arg-type]
-            tls_security=config.edgedb_tls_security,
-        ))
+        self.client = (
+            client
+            if client is not None
+            else cast(
+                _Client,
+                edgedb.create_async_client(
+                    dsn=config.edgedb_dsn,
+                    # The driver's default is None, although its annotation excludes it.
+                    tls_ca=config.edgedb_tls_ca or None,  # type: ignore[arg-type]
+                    tls_security=config.edgedb_tls_security,
+                ),
+            )
+        )
 
     async def check(self) -> None:
         if _decode(await self.client.query_single_json("select 1;")) != 1:
@@ -127,8 +159,8 @@ class EdgeDBRepository:
         fields = _assignments(values, _CHAT_TYPES)
         conflict = f"update telegram::Chat set {{{fields}}}" if refresh else "select telegram::Chat"
         raw = await executor.query_single_json(
-            f"select (insert telegram::Chat {{{fields}}} unless conflict on .chat_id "
-            f"else ({conflict})) {{{_CHAT}}};", **values,
+            f"select (insert telegram::Chat {{{fields}}} unless conflict on .chat_id else ({conflict})) {{{_CHAT}}};",
+            **values,
         )
         return _required(ChatRecord, raw)
 
@@ -136,9 +168,13 @@ class EdgeDBRepository:
         return await self._ensure_chat(self.client, chat)
 
     async def _get_chat(self, executor: _Executor, chat_id: int) -> ChatRecord | None:
-        return _record(ChatRecord, await executor.query_single_json(
-            f"select telegram::Chat {{{_CHAT}}} filter .chat_id = <int64>$chat_id limit 1;", chat_id=chat_id,
-        ))
+        return _record(
+            ChatRecord,
+            await executor.query_single_json(
+                f"select telegram::Chat {{{_CHAT}}} filter .chat_id = <int64>$chat_id limit 1;",
+                chat_id=chat_id,
+            ),
+        )
 
     async def get_chat(self, chat_id: int) -> ChatRecord | None:
         return await self._get_chat(self.client, chat_id)
@@ -158,15 +194,17 @@ class EdgeDBRepository:
                 result = _settings(row.metadata)
                 if not changes:
                     continue
-                metadata: dict[str, JsonValue] = dict(row.metadata) if isinstance(row.metadata, dict) else {"_legacy_metadata": row.metadata}
+                metadata: dict[str, JsonValue] = (
+                    dict(row.metadata) if isinstance(row.metadata, dict) else {"_legacy_metadata": row.metadata}
+                )
                 if "settings" in metadata and not isinstance(metadata["settings"], dict):
                     metadata.setdefault("_legacy_settings", metadata["settings"])
                 result.update(changes)
                 metadata["settings"] = result
                 await transaction.query_single_json(
-                    "select (update telegram::Chat filter .chat_id = <int64>$chat_id "
-                    "set {metadata := <json>$metadata}) {id};",
-                    chat_id=chat_id, metadata=json.dumps(metadata, ensure_ascii=False),
+                    "select (update telegram::Chat filter .chat_id = <int64>$chat_id set {metadata := <json>$metadata}) {id};",
+                    chat_id=chat_id,
+                    metadata=json.dumps(metadata, ensure_ascii=False),
                 )
         return result
 
@@ -180,7 +218,8 @@ class EdgeDBRepository:
                     fields = _assignments(values, _USER_TYPES)
                     await transaction.query_single_json(
                         f"select (insert telegram::User {{{fields}}} unless conflict on .user_id "
-                        f"else (update telegram::User set {{{fields}}})) {{id}};", **values,
+                        f"else (update telegram::User set {{{fields}}})) {{id}};",
+                        **values,
                     )
                 for chat in update.chats:
                     await self._ensure_chat(transaction, chat)
@@ -188,7 +227,8 @@ class EdgeDBRepository:
                     "select (insert telegram::BotUpdate {data := <json>$data, handled := <bool>$handled, "
                     "created := <datetime>$created}) {id};",
                     data=json.dumps(update.legacy_data if update.legacy_data is not None else update.data, ensure_ascii=False),
-                    handled=update.handled, created=update.received_at,
+                    handled=update.handled,
+                    created=update.received_at,
                 )
 
     async def statistics(self, since: datetime) -> UsageStats:
@@ -204,32 +244,49 @@ class EdgeDBRepository:
         return _records(DirectoryRecord, await self.client.query_json(f"select msu_hub::EcosystemChat {{{_DIRECTORY}}};"))
 
     async def get_directory(self, chat_id: int) -> DirectoryRecord | None:
-        return _record(DirectoryRecord, await self.client.query_single_json(
-            f"select msu_hub::EcosystemChat {{{_DIRECTORY}}} filter .chat_id = <int64>$chat_id limit 1;", chat_id=chat_id,
-        ))
+        return _record(
+            DirectoryRecord,
+            await self.client.query_single_json(
+                f"select msu_hub::EcosystemChat {{{_DIRECTORY}}} filter .chat_id = <int64>$chat_id limit 1;",
+                chat_id=chat_id,
+            ),
+        )
 
     async def create_directory(self, entry: DirectoryCreate) -> DirectoryRecord:
         values = entry.model_dump()
         fields = _assignments(values, _DIRECTORY_TYPES)
-        return _required(DirectoryRecord, await self.client.query_single_json(
-            f"select (insert msu_hub::EcosystemChat {{{fields}}} unless conflict on .chat_id "
-            f"else (select msu_hub::EcosystemChat)) {{{_DIRECTORY}}};", **values,
-        ))
+        return _required(
+            DirectoryRecord,
+            await self.client.query_single_json(
+                f"select (insert msu_hub::EcosystemChat {{{fields}}} unless conflict on .chat_id "
+                f"else (select msu_hub::EcosystemChat)) {{{_DIRECTORY}}};",
+                **values,
+            ),
+        )
 
     async def patch_directory(self, chat_id: int, changes: DirectoryPatch) -> DirectoryRecord | None:
         values = changes.model_dump(exclude_unset=True)
         if not values:
             return await self.get_directory(chat_id)
         fields = _assignments(values, _DIRECTORY_TYPES)
-        return _record(DirectoryRecord, await self.client.query_single_json(
-            f"select (update msu_hub::EcosystemChat filter .chat_id = <int64>$chat_id set {{{fields}}}) {{{_DIRECTORY}}};",
-            chat_id=chat_id, **values,
-        ))
+        return _record(
+            DirectoryRecord,
+            await self.client.query_single_json(
+                f"select (update msu_hub::EcosystemChat filter .chat_id = <int64>$chat_id set {{{fields}}}) {{{_DIRECTORY}}};",
+                chat_id=chat_id,
+                **values,
+            ),
+        )
 
     async def delete_directory(self, chat_id: int) -> bool:
-        return bool(_decode(await self.client.query_single_json(
-            "select exists (delete msu_hub::EcosystemChat filter .chat_id = <int64>$chat_id);", chat_id=chat_id,
-        )))
+        return bool(
+            _decode(
+                await self.client.query_single_json(
+                    "select exists (delete msu_hub::EcosystemChat filter .chat_id = <int64>$chat_id);",
+                    chat_id=chat_id,
+                )
+            )
+        )
 
     async def list_vk_subscriptions(self) -> list[VkSubscription]:
         return _records(VkSubscription, await self.client.query_json(f"select vk_tg::VkWallPosting {{{_VK}}};"))
@@ -237,14 +294,20 @@ class EdgeDBRepository:
     async def upsert_vk_subscription(self, owner_id: int, chat_id: int, changes: VkPatch) -> VkSubscription:
         values = {"owner_id": owner_id, "chat_id": chat_id, **changes.model_dump(exclude_unset=True)}
         fields = _assignments(values, _VK_TYPES)
-        return _required(VkSubscription, await self.client.query_single_json(
-            f"select (insert vk_tg::VkWallPosting {{{fields}}} unless conflict on ((.owner_id, .chat_id)) "
-            f"else (update vk_tg::VkWallPosting set {{{fields}}})) {{{_VK}}};", **values,
-        ))
+        return _required(
+            VkSubscription,
+            await self.client.query_single_json(
+                f"select (insert vk_tg::VkWallPosting {{{fields}}} unless conflict on ((.owner_id, .chat_id)) "
+                f"else (update vk_tg::VkWallPosting set {{{fields}}})) {{{_VK}}};",
+                **values,
+            ),
+        )
 
     async def advance_vk_cursor(self, owner_id: int, chat_id: int, last_post_id: int) -> None:
         await self.client.query_single_json(
             "select (update vk_tg::VkWallPosting filter .owner_id = <int64>$owner_id and .chat_id = <int64>$chat_id "
             "set {last_post_id := max({.last_post_id, <int32>$last_post_id})}) {id};",
-            owner_id=owner_id, chat_id=chat_id, last_post_id=last_post_id,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            last_post_id=last_post_id,
         )

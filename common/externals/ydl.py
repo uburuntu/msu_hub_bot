@@ -14,12 +14,14 @@ from common.vk.utils import href
 class YDL:
     @classmethod
     def create_ydl(cls) -> YoutubeDL:
-        ydl = YoutubeDL({
-            'quiet': True,
-            'ignorerrors': True,
-            'geo_bypass': True,
-            'youtube_include_dash_manifest': False,
-        })
+        ydl = YoutubeDL(
+            {
+                "quiet": True,
+                "ignorerrors": True,
+                "geo_bypass": True,
+                "youtube_include_dash_manifest": False,
+            }
+        )
         ydl.report_error = lambda *a, **k: None
         ydl.report_warning = lambda *a, **k: None
         return ydl
@@ -37,53 +39,53 @@ class YDL:
             return
 
         links = []
-        extractor = info['extractor'].lower()
+        extractor = info["extractor"].lower()
 
-        if extractor in ('generic', 'yandexmusic'):
+        if extractor in ("generic", "yandexmusic"):
             return
 
-        elif extractor == 'youtube':
-            formats = list(filter(lambda x: 'm3u8' not in x['protocol'], info['formats']))
-            formats = list(filter(lambda x: x['acodec'] != 'none', formats))
-            formats_a = list(filter(lambda x: x['vcodec'] == 'none', formats))
-            format_a = [max(formats_a, key=itemgetter('asr'))] if formats_a else []
-            formats_v = list(filter(lambda x: x['vcodec'] != 'none', formats))
-            info['formats'] = list(chain(formats_v, format_a))
-            for f in info['formats']:
-                url = f.get('fragment_base_url', f['url'])
-                title = f['format'].partition(' - ')[2]
-                width, height = f.get('width'), f.get('height')
+        elif extractor == "youtube":
+            formats = list(filter(lambda x: "m3u8" not in x["protocol"], info["formats"]))
+            formats = list(filter(lambda x: x["acodec"] != "none", formats))
+            formats_a = list(filter(lambda x: x["vcodec"] == "none", formats))
+            format_a = [max(formats_a, key=itemgetter("asr"))] if formats_a else []
+            formats_v = list(filter(lambda x: x["vcodec"] != "none", formats))
+            info["formats"] = list(chain(formats_v, format_a))
+            for f in info["formats"]:
+                url = f.get("fragment_base_url", f["url"])
+                title = f["format"].partition(" - ")[2]
+                width, height = f.get("width"), f.get("height")
                 links.append((url, title, width, height))
 
-        elif extractor == 'vk':
-            formats = list(filter(lambda x: x['format_id'].startswith('cache'), info['formats']))
-            info['formats'] = formats
-            for f in sorted(info['formats'], key=lambda x: x.get('height', 0) or 0, reverse=True):
-                url = f['url']
-                title = f['format'].partition(' - ')[2]
-                width, height = f.get('width'), f.get('height')
+        elif extractor == "vk":
+            formats = list(filter(lambda x: x["format_id"].startswith("cache"), info["formats"]))
+            info["formats"] = formats
+            for f in sorted(info["formats"], key=lambda x: x.get("height", 0) or 0, reverse=True):
+                url = f["url"]
+                title = f["format"].partition(" - ")[2]
+                width, height = f.get("width"), f.get("height")
                 links.append((url, title, width, height))
 
         else:
-            if 'formats' in info:
-                formats = list(filter(lambda x: 'm3u8' not in x['protocol'], info['formats']))
-                info['formats'] = formats
-                for f in info['formats']:
-                    url = f['url']
-                    title = f['format'].partition(' - ')[2]
-                    width, height = f.get('width'), f.get('height')
+            if "formats" in info:
+                formats = list(filter(lambda x: "m3u8" not in x["protocol"], info["formats"]))
+                info["formats"] = formats
+                for f in info["formats"]:
+                    url = f["url"]
+                    title = f["format"].partition(" - ")[2]
+                    width, height = f.get("width"), f.get("height")
                     links.append((url, title, width, height))
             else:
-                if 'url' not in info:
+                if "url" not in info:
                     return
-                url, title = info['url'], info['title']
-                width, height = info.get('width'), info.get('height')
+                url, title = info["url"], info["title"]
+                width, height = info.get("width"), info.get("height")
                 links.append((url, title, width, height))
 
         if len(links) == 0:
             return
 
-        title = info.get('title', 'Video')
+        title = info.get("title", "Video")
         links, preview = cls.post_process_links(links)
         return title, links, preview
 
@@ -96,11 +98,14 @@ class YDL:
     def post_process_links(cls, links):
         headers = {url: requests.head(url).headers for url, *_ in links}
 
-        links_sizes = [int(h.get('Content-Length', 0)) for h in headers.values()]
+        links_sizes = [int(h.get("Content-Length", 0)) for h in headers.values()]
         temp = sorted(zip(links_sizes, links), key=itemgetter(0), reverse=True)
 
-        previews = [(url, width, height) for size, (url, title, width, height) in temp
-                    if size < megabytes(20) and headers[url].get('Content-Type') == 'video/mp4']
+        previews = [
+            (url, width, height)
+            for size, (url, title, width, height) in temp
+            if size < megabytes(20) and headers[url].get("Content-Type") == "video/mp4"
+        ]
 
         return [x for _, x in temp], previews[0] if previews else None
 
@@ -112,9 +117,9 @@ class YDL:
             return None
 
         title, links, preview = result
-        text = '🎞 '
+        text = "🎞 "
         if preview:
-            text = href(preview[0], '📺') + ' '
-        text += href(url, title) + '\n\n— ' + ', '.join(href(url, title) for url, title, _, _ in links)
+            text = href(preview[0], "📺") + " "
+        text += href(url, title) + "\n\n— " + ", ".join(href(url, title) for url, title, _, _ in links)
 
         return text, preview
