@@ -1,8 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from aiogram.types import CallbackQuery, Chat, ChatFullInfo, Message, Update, User
 
-from common.db.observations import archive_observation, chat_observation
+from common.db.observations import archive_observation, chat_observation, reference_payload
 
 NOW = datetime(2026, 9, 17, tzinfo=UTC)
 
@@ -44,6 +45,7 @@ def test_archive_extracts_reply_forward_entity_and_membership_users():
     assert row.messages[0].sender_chat_id == -1002
     assert row.data["message"]["from"]["id"] == 10
     assert row.data["message"]["date"] == int(source.date.timestamp())
+    assert "current-body" not in repr(row.data)
     assert "current-body" not in repr([item.profile for item in row.chats + row.users])
 
 
@@ -68,6 +70,67 @@ def test_current_reply_and_normalized_message_remove_expired_nested_body():
     assert row.messages[0].edited_at == NOW - timedelta(seconds=10)
     assert "EXPIRED_REPLY_CANARY" not in repr(row.model_dump())
     assert row.messages[0].data["text"] == "current-body"
+
+
+def test_near_expiry_embedded_body_has_one_owner_and_cannot_survive_in_new_receipts():
+    old = message(message_id=2, date=NOW - timedelta(days=29), text="NEAR_EXPIRY_BODY_CANARY")
+    current = message(reply_to_message=old)
+    update = Update(update_id=5, message=current)
+    before = archive_observation(update, True, received_at=NOW)
+    assert "NEAR_EXPIRY_BODY_CANARY" not in repr(before.data)
+    by_id = {item.message_id: item for item in before.messages}
+    assert "NEAR_EXPIRY_BODY_CANARY" not in repr(by_id[1].data)
+    assert by_id[1].data["reply_to_message"]["message_id"] == 2
+    assert by_id[2].data["text"] == "NEAR_EXPIRY_BODY_CANARY"
+    assert by_id[2].sent_at == NOW - timedelta(days=29)
+    after = archive_observation(update, True, received_at=NOW + timedelta(days=1))
+    assert {item.message_id for item in after.messages} == {1}
+    assert "NEAR_EXPIRY_BODY_CANARY" not in repr(after.model_dump())
+
+
+def test_near_expiry_callback_has_no_receipt_copy_of_message_content():
+    old = message(date=NOW - timedelta(days=29), text="CALLBACK_BODY_CANARY")
+    callback = CallbackQuery(id="test", from_user=user(99), message=old, chat_instance="test", data="non-message-event-data")
+    row = archive_observation(Update(update_id=6, callback_query=callback), True, received_at=NOW)
+    assert "CALLBACK_BODY_CANARY" not in repr(row.data)
+    assert row.messages[0].data["text"] == "CALLBACK_BODY_CANARY"
+    assert row.data["callback_query"]["data"] == "non-message-event-data"
+
+
+def test_editing_an_expired_top_level_message_never_renews_body_retention():
+    old = message(date=NOW - timedelta(days=31), edit_date=int(NOW.timestamp()), text="EXPIRED_EDIT_BODY_CANARY")
+    row = archive_observation(Update(update_id=7, edited_message=old), True, received_at=NOW)
+    assert row.messages == [] and row.kind == "edited_message"
+    assert "EXPIRED_EDIT_BODY_CANARY" not in repr(row.model_dump())
+    assert row.data["edited_message"]["edit_date"] == int(NOW.timestamp())
+    assert row.legacy_data["edited_message"]["text"] == "EXPIRED_EDIT_BODY_CANARY"
+    assert "EXPIRED_EDIT_BODY_CANARY" not in repr(row)
+    assert "legacy_data" not in row.model_dump(mode="json")
+
+
+def test_import_retention_time_is_independent_from_historical_receipt_time():
+    old_time = NOW - timedelta(days=60)
+    old = message(date=old_time, text="OLD_IMPORT_BODY_CANARY")
+    row = archive_observation(Update(update_id=8, message=old), True, received_at=old_time, retention_at=NOW)
+    assert row.received_at == old_time and row.users[0].observed_at == old_time
+    assert row.messages == []
+    assert "OLD_IMPORT_BODY_CANARY" not in repr(row.model_dump())
+
+
+def test_import_reference_transform_preserves_numeric_lexical_values_without_mutating_input():
+    precise = Decimal("12345678901234567890.12345678901234567890")
+    nested = {"message_id": 2, "date": 1, "chat": {"id": -1001, "type": "supergroup"}, "text": "nested-body"}
+    body = {"message_id": 1, "date": 2, "chat": {"id": -1001, "type": "supergroup"}, "text": "root-body",
+        "opaque_numeric": precise, "reply_to_message": nested}
+    envelope = {"update_id": 9, "message": body, "opaque_numeric": precise}
+    receipt = reference_payload(envelope)
+    assert receipt["opaque_numeric"] is precise
+    assert "root-body" not in repr(receipt) and "nested-body" not in repr(receipt)
+    normalized = reference_payload(body, message_body=True)
+    assert normalized["opaque_numeric"] is precise and normalized["text"] == "root-body"
+    assert normalized["reply_to_message"]["message_id"] == 2
+    assert "nested-body" not in repr(normalized)
+    assert envelope["message"]["reply_to_message"]["text"] == "nested-body"
 
 
 def test_chat_profile_omits_pinned_message_and_absent_optional_properties():

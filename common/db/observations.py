@@ -21,10 +21,12 @@ from common.db.models import (
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 _CHAT_FIELDS = ("type", "title", "username", "first_name", "last_name")
 _USER_FIELDS = ("is_bot", "first_name", "last_name", "username", "language_code")
-_MESSAGE_REFERENCES = ("message_id", "date", "message_thread_id", "business_connection_id")
+_MESSAGE_REFERENCES = ("message_id", "date", "edit_date", "message_thread_id", "business_connection_id")
 
 
-def _wire(value: Any, cutoff: datetime | None, *, profile: bool = False) -> JsonValue:
+def _wire(
+    value: Any, cutoff: datetime | None, *, profile: bool = False, message_body: bool = False, legacy: bool = False,
+) -> JsonValue:
     if isinstance(value, datetime):
         return int(value.timestamp())
     if isinstance(value, dict):
@@ -33,23 +35,42 @@ def _wire(value: Any, cutoff: datetime | None, *, profile: bool = False) -> Json
             return None
         date = value.get("date")
         timestamp = date.timestamp() if isinstance(date, datetime) else date
-        if is_message and cutoff is not None and isinstance(timestamp, (int, float)) and timestamp <= cutoff.timestamp():
-            # A fresh callback/reply must not extend the lifetime of old content.
+        expired = cutoff is not None and isinstance(timestamp, (int, float)) and timestamp <= cutoff.timestamp()
+        if is_message and not legacy and (not message_body or expired):
+            # Every body has one independently expiring normalized owner. Raw
+            # receipts and nested messages keep references even before expiry.
             references = {key: _wire(value[key], cutoff) for key in _MESSAGE_REFERENCES if key in value}
             for key in ("chat", "from", "sender_chat"):
                 entity = value.get(key)
                 if isinstance(entity, dict):
                     references[key] = {name: entity[name] for name in ("id", "type") if name in entity}
             return references
-        return {key: _wire(item, cutoff, profile=profile) for key, item in value.items() if not (profile and key == "pinned_message")}
+        return {
+            key: _wire(item, cutoff, profile=profile, legacy=legacy)
+            for key, item in value.items() if not (profile and key == "pinned_message")
+        }
     if isinstance(value, (tuple, list)):
-        return [_wire(item, cutoff, profile=profile) for item in value]
+        return [_wire(item, cutoff, profile=profile, legacy=legacy) for item in value]
     # Pydantic checks extras as well as the known Telegram fields before storage.
     return cast(JsonValue, value)
 
 
-def _payload(value: TelegramObject, cutoff: datetime | None = None, *, profile: bool = False) -> dict[str, JsonValue]:
-    return _JSON_OBJECT.validate_python(_wire(value.model_dump(mode="python", by_alias=True, exclude_none=True), cutoff, profile=profile))
+def _payload(
+    value: TelegramObject, cutoff: datetime | None = None, *, profile: bool = False, message_body: bool = False, legacy: bool = False,
+) -> dict[str, JsonValue]:
+    return _JSON_OBJECT.validate_python(_wire(
+        value.model_dump(mode="python", by_alias=True, exclude_none=True), cutoff,
+        profile=profile, message_body=message_body, legacy=legacy,
+    ))
+
+
+def reference_payload(value: dict[str, Any], *, message_body: bool = False) -> dict[str, Any]:
+    """Replace message copies without coercing opaque JSON numbers during import.
+
+    ``message_body`` retains only the root Message body; nested Message objects
+    remain references. The caller owns original-date eligibility and serialization.
+    """
+    return cast(dict[str, Any], _wire(value, None, message_body=message_body))
 
 
 def chat_observation(chat: Chat | ChatFullInfo, observed_at: datetime | None = None) -> ChatObservation:
@@ -68,9 +89,11 @@ def _user_observation(user: User, observed_at: datetime) -> UserObservation:
     })
 
 
-def archive_observation(update: Update, handled: bool, *, received_at: datetime | None = None) -> ArchivedUpdate:
+def archive_observation(
+    update: Update, handled: bool, *, received_at: datetime | None = None, retention_at: datetime | None = None,
+) -> ArchivedUpdate:
     received_at = received_at or datetime.now(UTC)
-    cutoff = received_at - timedelta(days=30)
+    cutoff = (retention_at or received_at) - timedelta(days=30)
     users: dict[int, UserObservation] = {}
     chats: dict[int, ChatObservation] = {}
     memberships: dict[tuple[int, int], MembershipObservation] = {}
@@ -152,7 +175,7 @@ def archive_observation(update: Update, handled: bool, *, received_at: datetime 
                     sender_chat_id=value.sender_chat.id if value.sender_chat is not None else None,
                     thread_id=value.message_thread_id,
                     reply_to_message_id=value.reply_to_message.message_id if value.reply_to_message else None,
-                    data=_payload(value, cutoff),
+                    data=_payload(value, cutoff, message_body=True),
                 ))
         children: Iterable[object] = ()
         if isinstance(value, TelegramObject):
@@ -171,6 +194,7 @@ def archive_observation(update: Update, handled: bool, *, received_at: datetime 
     kind = next((name for name in type(update).model_fields if name != "update_id" and getattr(update, name) is not None), "unknown")
     return ArchivedUpdate(
         update_id=update.update_id, received_at=received_at, kind=kind, handled=handled, data=_payload(update, cutoff),
+        legacy_data=_payload(update, legacy=True),
         users=list(users.values()), chats=list(chats.values()), memberships=list(memberships.values()),
         topics=list(topics.values()), messages=list(messages.values()),
     )

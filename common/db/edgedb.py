@@ -166,8 +166,8 @@ class EdgeDBRepository:
         return result
 
     async def archive_update(self, update: ArchivedUpdate) -> None:
-        # The legacy schema has no normalized messages/membership/topic tables;
-        # their wire payload remains in the update archive until cutover.
+        # Compatibility/recovery keeps the original wire envelope in the legacy
+        # schema. Supabase alone uses reference receipts and normalized bodies.
         async for transaction in self.client.transaction():
             async with transaction:
                 for user in update.users:
@@ -182,7 +182,8 @@ class EdgeDBRepository:
                 await transaction.query_single_json(
                     "select (insert telegram::BotUpdate {data := <json>$data, handled := <bool>$handled, "
                     "created := <datetime>$created}) {id};",
-                    data=json.dumps(update.data, ensure_ascii=False), handled=update.handled, created=update.received_at,
+                    data=json.dumps(update.legacy_data if update.legacy_data is not None else update.data, ensure_ascii=False),
+                    handled=update.handled, created=update.received_at,
                 )
 
     async def statistics(self, since: datetime) -> UsageStats:

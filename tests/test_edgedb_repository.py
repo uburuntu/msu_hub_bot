@@ -159,6 +159,16 @@ async def test_archival_rolls_back_metadata_and_raw_record_together_on_failure()
     assert "BotUpdate" in client.calls[-1][0]
 
 
+async def test_legacy_archive_preserves_original_envelope_without_serializing_it_to_other_backends():
+    original = {"update_id": 11, "message": {"message_id": 7, "text": "LEGACY_BODY_CANARY"}}
+    update = ArchivedUpdate(update_id=11, kind="message", handled=True,
+        data={"update_id": 11, "message": {"message_id": 7}}, legacy_data=original)
+    assert "LEGACY_BODY_CANARY" not in repr(update) + update.model_dump_json()
+    client = JsonClient({"id": directory_row()["id"]})
+    await EdgeDBRepository(client=client).archive_update(update)
+    assert json.loads(client.calls[0][1]["data"]) == original
+
+
 async def test_invalid_record_error_hides_raw_private_input():
     client = JsonClient({"chat_id": "PRIVATE_RECORD_CANARY"})
     with pytest.raises(RuntimeError, match="invalid record") as caught:
