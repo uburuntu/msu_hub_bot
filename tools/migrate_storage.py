@@ -486,15 +486,15 @@ class Postgres:
         result = decode(
             self.run(f"""
 SELECT json_build_object('database',current_database(),'cluster',system_identifier::text,
-  'version',(SELECT max(version) FROM hub_private.schema_migrations),
-  'principal',EXISTS(SELECT 1 FROM hub_private.principals WHERE enabled AND bot_id={self.bot_id}))
+  'version',(SELECT max(version) FROM msu_hub_private.schema_migrations),
+  'principal',EXISTS(SELECT 1 FROM msu_hub_private.principals WHERE enabled AND bot_id={self.bot_id}))
 FROM pg_control_system();
 """)
         )
         if result != {
             "database": self.config["expected_database"],
             "cluster": self.config["expected_system_identifier"],
-            "version": self.config.get("expected_schema_version", 2),
+            "version": self.config.get("expected_schema_version", 3),
             "principal": True,
         }:
             raise MigrationError("target_identity_mismatch")
@@ -554,7 +554,7 @@ def batch_script(table: str, batch: list[dict[str, Any]], manifest: dict[str, An
         assignments += ",first_seen_at=least(existing.first_seen_at,EXCLUDED.first_seen_at),last_seen_at=EXCLUDED.last_seen_at,profile=EXCLUDED.profile"
         if table == "chats":
             suffix = """
-INSERT INTO hub_private.chat_settings(chat_id,settings,updated_at)
+INSERT INTO msu_hub_private.chat_settings(chat_id,settings,updated_at)
 SELECT (payload->>'chat_id')::bigint,
  CASE WHEN jsonb_typeof(payload->'metadata'->'settings')='object' THEN payload->'metadata'->'settings' ELSE '{}'::jsonb END,
  now() FROM migration_batch
@@ -569,7 +569,7 @@ ON CONFLICT(chat_id) DO UPDATE SET settings=EXCLUDED.settings,updated_at=EXCLUDE
     if table == "updates":
         checks = f"""
 DO $$ BEGIN
- IF EXISTS(SELECT 1 FROM migration_batch b JOIN hub_private.updates u ON u.id=(b.payload->>'id')::uuid
+ IF EXISTS(SELECT 1 FROM migration_batch b JOIN msu_hub_private.updates u ON u.id=(b.payload->>'id')::uuid
            WHERE NOT u.is_legacy OR u.bot_id<>{manifest["bot_id"]}) THEN
    RAISE EXCEPTION 'Migration receipt identity conflict';
  END IF;
@@ -583,9 +583,9 @@ CREATE TEMP TABLE migration_batch(payload jsonb) ON COMMIT DROP;
 COPY migration_batch(payload) FROM STDIN;
 {copied}\\.
 {checks}
-INSERT INTO hub_private.{table} AS existing({columns})
+INSERT INTO msu_hub_private.{table} AS existing({columns})
 SELECT {projection} FROM migration_batch
-CROSS JOIN LATERAL jsonb_populate_record(NULL::hub_private.{table},payload) AS record
+CROSS JOIN LATERAL jsonb_populate_record(NULL::msu_hub_private.{table},payload) AS record
 ON CONFLICT(id) DO UPDATE SET {assignments};
 {suffix}COMMIT;
 """
@@ -639,7 +639,7 @@ def target_query(table: str, schema: dict[str, Any], bot_id: int) -> str:
             expression = name
         expressions.extend(("'" + name + "'", expression))
     condition = f" WHERE bot_id={bot_id} AND is_legacy" if table == "updates" else ""
-    return f"SELECT jsonb_build_object({','.join(expressions)})::text FROM hub_private.{table}{condition} ORDER BY id"
+    return f"SELECT jsonb_build_object({','.join(expressions)})::text FROM msu_hub_private.{table}{condition} ORDER BY id"
 
 
 def compare_rows(expected: Iterable[dict[str, Any]], actual: Iterable[dict[str, Any]], schema: dict[str, Any]) -> dict[str, Any]:
@@ -897,12 +897,12 @@ COPY migration_batch(payload) FROM STDIN;
 {copied}\\.
 DO $$ DECLARE item jsonb; BEGIN
  FOR item IN SELECT payload FROM migration_batch LOOP
-  IF NOT EXISTS(SELECT 1 FROM hub_private.updates WHERE id=(item->>'id')::uuid AND bot_id={bot_id}
+  IF NOT EXISTS(SELECT 1 FROM msu_hub_private.updates WHERE id=(item->>'id')::uuid AND bot_id={bot_id}
                 AND is_legacy AND created=(item->>'received_at')::timestamptz AND handled=(item->>'handled')::boolean) THEN
    RAISE EXCEPTION 'Legacy receipt does not match verified source';
   END IF;
-  PERFORM hub_private.observe_archive(item,{bot_id},(item->>'id')::uuid,(item->>'received_at')::timestamptz,'{utc(as_of)}'::timestamptz);
-  UPDATE hub_private.updates SET data=item->'data',update_id=(item->>'update_id')::bigint,kind=item->>'kind'
+  PERFORM msu_hub_private.observe_archive(item,{bot_id},(item->>'id')::uuid,(item->>'received_at')::timestamptz,'{utc(as_of)}'::timestamptz);
+  UPDATE msu_hub_private.updates SET data=item->'data',update_id=(item->>'update_id')::bigint,kind=item->>'kind'
    WHERE id=(item->>'id')::uuid;
  END LOOP;
 END $$;
@@ -946,10 +946,10 @@ def retention_report(target: Postgres, as_of: str) -> dict[str, Any]:
     return decode_object(
         target.run(f"""
 SELECT jsonb_build_object('as_of','{utc(as_of)}','expired_updates',
- (SELECT count(*) FROM hub_private.updates WHERE bot_id={target.bot_id} AND created<='{utc(as_of)}'::timestamptz-interval '30 days'),
- 'retained_updates',(SELECT count(*) FROM hub_private.updates WHERE bot_id={target.bot_id} AND created>'{utc(as_of)}'::timestamptz-interval '30 days'),
- 'expired_messages',(SELECT count(*) FROM hub_private.messages WHERE bot_id={target.bot_id} AND sent_at<='{utc(as_of)}'::timestamptz-interval '30 days'),
- 'retained_messages',(SELECT count(*) FROM hub_private.messages WHERE bot_id={target.bot_id} AND sent_at>'{utc(as_of)}'::timestamptz-interval '30 days'));
+ (SELECT count(*) FROM msu_hub_private.updates WHERE bot_id={target.bot_id} AND created<='{utc(as_of)}'::timestamptz-interval '30 days'),
+ 'retained_updates',(SELECT count(*) FROM msu_hub_private.updates WHERE bot_id={target.bot_id} AND created>'{utc(as_of)}'::timestamptz-interval '30 days'),
+ 'expired_messages',(SELECT count(*) FROM msu_hub_private.messages WHERE bot_id={target.bot_id} AND sent_at<='{utc(as_of)}'::timestamptz-interval '30 days'),
+ 'retained_messages',(SELECT count(*) FROM msu_hub_private.messages WHERE bot_id={target.bot_id} AND sent_at>'{utc(as_of)}'::timestamptz-interval '30 days'));
 """)
     )
 
@@ -972,13 +972,13 @@ def audit_messages(target: Postgres, directory: Path, manifest: dict[str, Any], 
                 output.write(copy_escape(canonical(payload)) + "\n")
         output.write(f"""\\.
 WITH typed AS (SELECT r.* FROM migration_expected
- CROSS JOIN LATERAL jsonb_populate_record(NULL::hub_private.messages,payload) AS r), ranked AS (
+ CROSS JOIN LATERAL jsonb_populate_record(NULL::msu_hub_private.messages,payload) AS r), ranked AS (
  SELECT *,min(sent_at) OVER(PARTITION BY bot_id,chat_id,message_id,business_connection_id) AS earliest,
  row_number() OVER(PARTITION BY bot_id,chat_id,message_id,business_connection_id
  ORDER BY coalesce(edited_at,sent_at) DESC,observed_at DESC,source_update_id DESC) AS position FROM typed), expected AS (
  SELECT (to_jsonb(r)-ARRAY['position','earliest']::text[]) || jsonb_build_object('sent_at',earliest) AS value,
  bot_id,chat_id,message_id,business_connection_id,data FROM ranked r WHERE position=1), actual AS (
- SELECT * FROM hub_private.messages WHERE bot_id={target.bot_id} AND sent_at>'{report["cutoff"]}'::timestamptz)
+ SELECT * FROM msu_hub_private.messages WHERE bot_id={target.bot_id} AND sent_at>'{report["cutoff"]}'::timestamptz)
 SELECT jsonb_build_object('expected',count(e.bot_id),'actual',count(a.bot_id),
  'missing',count(*) FILTER(WHERE a.bot_id IS NULL),'extra',count(*) FILTER(WHERE e.bot_id IS NULL),
  'key_version_body_mismatches',count(*) FILTER(WHERE e.bot_id IS NOT NULL AND a.bot_id IS NOT NULL AND e.value<>to_jsonb(a)),
@@ -1015,8 +1015,8 @@ def audit_entities(target: Postgres, directory: Path, manifest: dict[str, Any], 
                     output.write(f"{table}\t{int(row[identity])}\n")
         output.write("""\\.
 WITH observed AS (SELECT DISTINCT kind,telegram_id FROM migration_observed), current AS (
- SELECT 'users' AS kind,id,user_id AS telegram_id FROM hub_private.users UNION ALL
- SELECT 'chats',id,chat_id FROM hub_private.chats), extra AS (
+ SELECT 'users' AS kind,id,user_id AS telegram_id FROM msu_hub_private.users UNION ALL
+ SELECT 'chats',id,chat_id FROM msu_hub_private.chats), extra AS (
  SELECT c.* FROM current c LEFT JOIN migration_original o USING(kind,id) WHERE o.id IS NULL)
 SELECT jsonb_build_object('derived_users',(SELECT count(*) FROM extra WHERE kind='users'),
  'derived_chats',(SELECT count(*) FROM extra WHERE kind='chats'),

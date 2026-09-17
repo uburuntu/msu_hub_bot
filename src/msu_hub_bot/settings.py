@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     supabase_key: str = ""
     supabase_email: str = ""
     supabase_password: str = ""
-    supabase_schema: str = "hub_api"
+    supabase_schema: str = "msu_hub_api"
     proxy: str = ""
     cert: str = ""
     pkey: str = ""

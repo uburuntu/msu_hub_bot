@@ -131,7 +131,7 @@ def configured(monkeypatch):
             supabase_key=f"publishable-{CANARY}",
             supabase_email="bot@example.invalid",
             supabase_password=CANARY,
-            supabase_schema="hub_api",
+            supabase_schema="msu_hub_api",
         )
         repo = module.SupabaseRepository(config, **options)
         repositories.append(repo)
@@ -241,7 +241,7 @@ async def test_password_auth_health_reuses_token_and_scopes_requests(configured)
         assert "Authorization" not in auth["headers"]
         _, rpc = session.calls[1]
         assert rpc["headers"]["Authorization"] == "Bearer access-one"
-        assert rpc["headers"]["Content-Profile"] == rpc["headers"]["Accept-Profile"] == "hub_api"
+        assert rpc["headers"]["Content-Profile"] == rpc["headers"]["Accept-Profile"] == "msu_hub_api"
         assert rpc["json"] == {}
         assert all(call[1]["allow_redirects"] is False for call in session.calls)
         assert session.options["trust_env"] is False

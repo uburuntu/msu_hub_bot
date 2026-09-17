@@ -69,7 +69,7 @@ jobs:
           HUB_SUPABASE_KEY: ${{ secrets.HUB_SUPABASE_KEY }}
           HUB_SUPABASE_EMAIL: ${{ secrets.HUB_SUPABASE_EMAIL }}
           HUB_SUPABASE_PASSWORD: ${{ secrets.HUB_SUPABASE_PASSWORD }}
-          HUB_SUPABASE_SCHEMA: ${{ secrets.HUB_SUPABASE_SCHEMA || 'hub_api' }}
+          HUB_SUPABASE_SCHEMA: ${{ secrets.HUB_SUPABASE_SCHEMA || 'msu_hub_api' }}
           HUB_PROXY: ${{ secrets.HUB_PROXY }}
           HUB_CERT: ${{ secrets.HUB_CERT }}
           HUB_PKEY: ${{ secrets.HUB_PKEY }}

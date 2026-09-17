@@ -489,7 +489,7 @@ def test_resume_replays_only_unacknowledged_transaction(tmp_path):
     target.run = scripts.append
     migration.import_data(target, directory, manifest, 1)
     assert scripts[1] == scripts[2]
-    assert sum("hub_private.users AS existing" in script for script in scripts) == 1
+    assert sum("msu_hub_private.users AS existing" in script for script in scripts) == 1
     assert not any("TRUNCATE" in script or "DELETE FROM" in script for script in scripts)
 
 
