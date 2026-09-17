@@ -20,4 +20,5 @@
 - Keep credentials, environment files, chat data, dumps, logs and raw review notes out of public text and artifacts. Never copy private notes verbatim into documentation.
 - Follow [the observability contract](docs/observability.md) for telemetry: shared boundaries own diagnostics, and exported data uses an explicit privacy allowlist.
 - Production uses private image transfer over SSH and one poller per Telegram token. Preserve deployment isolation and rollback; database migration is a separate operation.
+- For routine database changes, follow [database operations](docs/database-operations.md): expand the schema before deploying new writers, coordinate maintenance guards, and preserve the rollback-compatible contract.
 - Follow nested `AGENTS.md` files for local ownership. Keep them short and avoid repeating global rules; implementation notes belong with the relevant maintained contract, not in a growing guidance checklist.
