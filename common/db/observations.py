@@ -7,9 +7,11 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from aiogram.client.default import Default
 from aiogram.types import (
     Chat, ChatFullInfo, ChatMemberUpdated, Message, MessageOriginChannel,
-    MessageOriginChat, MessageOriginUser, TelegramObject, Update, User,
+    MessageOriginChat, MessageOriginUser, MessageReactionCountUpdated,
+    MessageReactionUpdated, TelegramObject, Update, User,
 )
 from pydantic import JsonValue, TypeAdapter
 
@@ -24,13 +26,31 @@ _USER_FIELDS = ("is_bot", "first_name", "last_name", "username", "language_code"
 _MESSAGE_REFERENCES = ("message_id", "date", "edit_date", "message_thread_id", "business_connection_id")
 
 
+def is_message_payload(value: dict[str, Any]) -> bool:
+    """Distinguish bodies from Telegram origins and reaction events.
+
+    These events also carry a chat, message ID and date. Their timestamps
+    describe provenance or a reaction, not an independently stored body.
+    """
+    keys = value.keys()
+    if not {"message_id", "date", "chat"} <= keys:
+        return False
+    # Unknown extra fields may contain a body; keep migration's coverage check
+    # strict instead of assuming that a future shape is a bodyless event.
+    if value.get("type") == "channel" and keys <= MessageOriginChannel.model_fields.keys():
+        return False
+    if {"old_reaction", "new_reaction"} <= keys and keys <= MessageReactionUpdated.model_fields.keys():
+        return False
+    return not ("reactions" in keys and keys <= MessageReactionCountUpdated.model_fields.keys())
+
+
 def _wire(
     value: Any, cutoff: datetime | None, *, profile: bool = False, message_body: bool = False, legacy: bool = False,
 ) -> JsonValue:
     if isinstance(value, datetime):
         return int(value.timestamp())
     if isinstance(value, dict):
-        is_message = "message_id" in value and "date" in value and "chat" in value
+        is_message = is_message_payload(value)
         if is_message and profile:
             return None
         date = value.get("date")
@@ -47,7 +67,9 @@ def _wire(
             return references
         return {
             key: _wire(item, cutoff, profile=profile, legacy=legacy)
-            for key, item in value.items() if not (profile and key == "pinned_message")
+            # Incoming LinkPreviewOptions can contain unresolved client defaults
+            # for absent fields. They are configuration, not received JSON.
+            for key, item in value.items() if not isinstance(item, Default) and not (profile and key == "pinned_message")
         }
     if isinstance(value, (tuple, list)):
         return [_wire(item, cutoff, profile=profile, legacy=legacy) for item in value]

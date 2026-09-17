@@ -743,7 +743,7 @@ def transform_update(row: dict[str, Any], as_of: str) -> dict[str, Any]:
     """Typed identities plus original JSON bodies; never round opaque JSON numbers."""
     from aiogram.types import Update
 
-    from common.db.observations import archive_observation, reference_payload
+    from common.db.observations import archive_observation, is_message_payload, reference_payload
 
     raw = row["data"]
     if not isinstance(raw, dict) or type(raw.get("update_id")) is not int:
@@ -769,7 +769,7 @@ def transform_update(row: dict[str, Any], as_of: str) -> dict[str, Any]:
             raise MigrationError("legacy_traversal_limit")
         if isinstance(value, dict):
             chat = value.get("chat")
-            if "message_id" in value and "date" in value and isinstance(chat, dict):
+            if is_message_payload(value) and isinstance(chat, dict):
                 key = (value.get("business_connection_id") or "", chat.get("id"), value["message_id"])
                 message_sources.setdefault(key, value)
             pending.extend(item for item in value.values() if isinstance(item, (dict, list)))

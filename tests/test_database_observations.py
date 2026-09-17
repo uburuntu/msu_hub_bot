@@ -1,9 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from aiogram.types import CallbackQuery, Chat, ChatFullInfo, Message, Update, User
 
-from common.db.observations import archive_observation, chat_observation, reference_payload
+from common.db.observations import archive_observation, chat_observation, is_message_payload, reference_payload
 
 NOW = datetime(2026, 9, 17, tzinfo=UTC)
 
@@ -166,6 +167,52 @@ def test_chat_profile_omits_pinned_message_and_absent_optional_properties():
     assert "username" not in observation.model_fields_set
     assert "username" not in observation.model_dump(exclude_unset=True)
     assert observation.profile["accent_color_id"] == 1
+
+
+def test_channel_origin_keeps_provenance_without_creating_a_message_body():
+    origin = {
+        "type": "channel", "date": int((NOW - timedelta(days=1)).timestamp()),
+        "chat": {"id": -1002, "type": "channel", "title": "Synthetic source"},
+        "message_id": 42, "author_signature": "Synthetic author",
+    }
+    source = message(forward_origin=origin)
+    row = archive_observation(Update(update_id=10, message=source), True, received_at=NOW)
+    assert {item.message_id for item in row.messages} == {1}
+    assert row.messages[0].data["forward_origin"] == origin
+    assert reference_payload({"forward_origin": origin})["forward_origin"] == origin
+    assert row.legacy_data["message"]["forward_origin"] == origin
+    assert next(item for item in row.chats if item.chat_id == -1002).observed_at == NOW - timedelta(days=1)
+
+
+@pytest.mark.parametrize("kind,event", [
+    ("message_reaction", {"old_reaction": [], "new_reaction": [{"type": "emoji", "emoji": "👍"}],
+                          "user": {"id": 10, "is_bot": False, "first_name": "Synthetic"}}),
+    ("message_reaction_count", {"reactions": [{"type": {"type": "emoji", "emoji": "👍"}, "total_count": 2}]}),
+])
+def test_reaction_receipts_preserve_event_fields_without_inventing_message_bodies(kind, event):
+    data = {"chat": {"id": -1001, "type": "supergroup"}, "message_id": 42,
+            "date": int(NOW.timestamp()), **event}
+    row = archive_observation(Update.model_validate({"update_id": 11, kind: data}), False, received_at=NOW)
+    assert row.kind == kind and row.messages == []
+    assert row.data[kind] == data
+    assert reference_payload({kind: data}) == {kind: data}
+
+
+@pytest.mark.parametrize("extra", [{"type": "channel"}, {"old_reaction": [], "new_reaction": []}, {"reactions": []}])
+def test_unknown_shapes_with_body_fields_still_require_message_coverage(extra):
+    value = {"message_id": 42, "date": int(NOW.timestamp()), "chat": {"id": -1001, "type": "supergroup"},
+             "text": "UNKNOWN_BODY_CANARY", **extra}
+    assert is_message_payload(value)
+    assert "UNKNOWN_BODY_CANARY" not in repr(reference_payload({"unknown": value}))
+
+
+@pytest.mark.parametrize("options", [{}, {"is_disabled": True}, {"is_disabled": False, "show_above_text": False}])
+def test_link_preview_preserves_received_values_and_omits_unresolved_client_defaults(options):
+    source = message(link_preview_options=options)
+    row = archive_observation(Update(update_id=12, message=source), True, received_at=NOW)
+    assert row.messages[0].data["link_preview_options"] == options
+    assert row.legacy_data["message"]["link_preview_options"] == options
+    assert "Default(" not in row.model_dump_json()
 
 
 def test_membership_update_observes_actor_and_subject_separately():

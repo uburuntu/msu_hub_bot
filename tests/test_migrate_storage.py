@@ -680,11 +680,73 @@ def test_normalization_preserves_precise_bodies_and_separates_nested_message_lif
     assert migration.transform_update(message_records()["updates"][2], AS_OF)["messages"] == []
 
 
-def test_eligible_unknown_nested_message_is_reported_not_silently_lost():
+@pytest.mark.parametrize("extra", [{}, {"type": "channel"}, {"old_reaction": [], "new_reaction": []}, {"reactions": []}])
+def test_eligible_unknown_nested_message_is_reported_not_silently_lost(extra):
     row = message_records()["updates"][0]
-    row["data"]["future_message"] = {**row["data"]["message"], "message_id": 88}
+    message = row["data"]["message"]
+    row["data"]["future_message"] = {
+        "chat": message["chat"],
+        "date": message["date"],
+        "message_id": 88,
+        "text": "Synthetic future message",
+        **extra,
+    }
     with pytest.raises(migration.MigrationError, match="eligible_legacy_message_not_extracted"):
         migration.transform_update(row, AS_OF)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_forward_origin_is_preserved_as_a_reference_without_inventing_a_message(nested):
+    row = message_records()["updates"][0]
+    message = row["data"]["message"]
+    if nested:
+        message = message["reply_to_message"]
+    origin = {
+        "type": "channel",
+        "date": message["date"],
+        "chat": {"id": -800, "type": "channel", "title": "Synthetic origin"},
+        "message_id": 900,
+        "author_signature": "Synthetic author",
+    }
+    message["forward_origin"] = origin
+    result = migration.transform_update(row, AS_OF)
+    assert len(result["messages"]) == 2
+    body = next(item["data"] for item in result["messages"] if item["message_id"] == message["message_id"])
+    assert body["forward_origin"] == origin
+    assert all(item["message_id"] != origin["message_id"] for item in result["messages"])
+
+
+@pytest.mark.parametrize("event", ["message_reaction", "message_reaction_count"])
+def test_reaction_events_keep_their_fields_without_inventing_message_bodies(event):
+    row = message_records()["updates"][0]
+    reaction = {
+        "chat": {"id": -800, "type": "supergroup", "title": "Synthetic group"},
+        "message_id": 900,
+        "date": row["data"]["message"]["date"],
+    }
+    if event == "message_reaction":
+        reaction.update(
+            {
+                "user": {"id": 123, "is_bot": False, "first_name": "Synthetic user"},
+                "old_reaction": [],
+                "new_reaction": [{"type": "emoji", "emoji": "👍"}],
+            }
+        )
+    else:
+        reaction["reactions"] = [{"type": {"type": "emoji", "emoji": "👍"}, "total_count": 2}]
+    row["data"] = {"update_id": 321, event: reaction}
+    result = migration.transform_update(row, AS_OF)
+    assert result["messages"] == []
+    assert result["data"] == row["data"]
+
+
+@pytest.mark.parametrize("options", [{}, {"is_disabled": True}, {"is_disabled": False, "prefer_large_media": False}])
+def test_link_preview_library_defaults_do_not_reject_or_change_original_json(options):
+    row = message_records()["updates"][0]
+    row["data"]["message"]["link_preview_options"] = options
+    result = migration.transform_update(row, AS_OF)
+    assert result["messages"][0]["data"]["link_preview_options"] == options
+    assert result["messages"][0]["data"]["opaque"] == Decimal("0.12345678901234567890123456789")
 
 
 def test_nullable_business_identity_and_iso_dates_keep_original_wire_values():
