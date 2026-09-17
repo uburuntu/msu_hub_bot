@@ -107,8 +107,9 @@ class Source:
         self.records = records or source_records()
         self.queries = []
         self.requests = []
+        self.count_requests = []
 
-    def query_single(self, query):
+    def query_single(self, query, **parameters):
         self.queries.append(query)
         if "get_current_database" in query:
             return "source_test"
@@ -116,7 +117,11 @@ class Source:
             return datetime(2026, 9, 17, tzinfo=UTC)
         for table, type_name in migration.TABLES.items():
             if f"count({type_name})" in query:
+                self.count_requests.append((table, parameters))
                 return len(self.records[table])
+            if f"count((SELECT {type_name} " in query:
+                self.count_requests.append((table, parameters))
+                return sum(migration.utc(row["created"]) > migration.utc(parameters["updates_since"]) for row in self.records[table])
         raise AssertionError(query)
 
     def query_json(self, query, **parameters):
@@ -130,14 +135,23 @@ class Source:
                     identifiers = {str(identifier) for identifier in parameters["ids"]}
                     return migration.canonical([row for row in self.records[table] if row["id"] in identifiers])
                 after = str(parameters.get("after", ""))
-                return migration.canonical([{"id": row["id"]} for row in self.records[table] if row["id"] > after][: parameters["limit"]])
+                return migration.canonical(
+                    [
+                        {"id": row["id"]}
+                        for row in self.records[table]
+                        if row["id"] > after
+                        and (
+                            "updates_since" not in parameters or migration.utc(row["created"]) > migration.utc(parameters["updates_since"])
+                        )
+                    ][: parameters["limit"]]
+                )
         raise AssertionError(query)
 
 
-def make_export(directory, records=None):
+def make_export(directory, records=None, *, updates_since=None):
     directory.mkdir(mode=0o700)
     source = Source(records)
-    manifest = migration.export_snapshot(source, directory, 999, 1)
+    manifest = migration.export_snapshot(source, directory, 999, 1, updates_since=updates_since)
     migration.save_json(directory / "manifest.json", manifest)
     return manifest
 
@@ -249,7 +263,8 @@ def test_export_rejects_invalid_identity_pages_before_fetching_full_records(tmp_
     assert len(record_requests) == (1 if change == "repeated_cursor" else 0)
 
 
-def test_export_wraps_every_read_in_one_nonretrying_readonly_transaction(monkeypatch, tmp_path):
+@pytest.mark.parametrize("updates_since", [None, "2026-01-01T00:00:00Z"])
+def test_export_wraps_every_read_in_one_nonretrying_readonly_transaction(monkeypatch, tmp_path, updates_since):
     source = Source()
     transaction_entries = []
     options = {}
@@ -262,9 +277,9 @@ def test_export_wraps_every_read_in_one_nonretrying_readonly_transaction(monkeyp
         def __exit__(self, *args):
             transaction_entries.append("commit")
 
-        def query_single(self, query):
+        def query_single(self, query, **values):
             assert transaction_entries == ["begin"]
-            return source.query_single(query)
+            return source.query_single(query, **values)
 
         def query_json(self, query, **values):
             assert transaction_entries == ["begin"]
@@ -286,9 +301,17 @@ def test_export_wraps_every_read_in_one_nonretrying_readonly_transaction(monkeyp
             transaction_entries.append("close")
 
     monkeypatch.setattr(edgedb, "create_client", lambda **kwargs: Client())
-    migration.export({"connection": {"host": "source.invalid"}, "expected_database": "source_test"}, tmp_path / "snapshot", 999, 1)
+    migration.export(
+        {"connection": {"host": "source.invalid"}, "expected_database": "source_test"},
+        tmp_path / "snapshot",
+        999,
+        1,
+        updates_since=updates_since,
+    )
     assert transaction_entries == ["begin", "commit", "close"]
     assert options == {"transaction": "START TRANSACTION ISOLATION SERIALIZABLE, READ ONLY, DEFERRABLE;", "attempts": 1}
+    assert len(source.count_requests) == (6 if updates_since is not None else 5)
+    assert all(table == "updates" or not values for table, values in source.count_requests)
 
 
 def test_corrupt_or_incomplete_export_is_rejected_before_import(tmp_path):
@@ -298,6 +321,135 @@ def test_corrupt_or_incomplete_export_is_rejected_before_import(tmp_path):
     path.write_text(path.read_text().replace("private-marker", "tampered-marker"))
     with pytest.raises(migration.MigrationError, match="checksum"):
         migration.verify_export(directory)
+
+
+def test_filtered_export_preserves_all_durable_rows_and_strict_timestamp_boundary(tmp_path):
+    records = source_records()
+    base = records["updates"][1]
+    records["updates"] = [
+        {**base, "id": str(UUID(int=5 + index)), "created": stamp}
+        for index, stamp in enumerate(
+            [
+                "2026-08-17T23:59:59.999999Z",
+                "2026-08-18T03:00:00+03:00",
+                "2026-08-18T00:00:00.000001Z",
+                "2026-09-16T00:00:00Z",
+            ]
+        )
+    ]
+    full_path, filtered_path = tmp_path / "full", tmp_path / "filtered"
+    full = make_export(full_path, records)
+    filtered = make_export(filtered_path, records, updates_since="2026-08-18T03:00:00+03:00")
+    assert migration.verify_export(filtered_path) == filtered
+    assert filtered["selection"] == {"updates": {"field": "created", "operator": ">", "value": "2026-08-18T00:00:00.000000Z"}}
+    assert migration.selection_summary(filtered) == {
+        "updates_since": "2026-08-18T00:00:00.000000Z",
+        "source_total": 4,
+        "selected": 2,
+        "excluded": 2,
+    }
+    for table in migration.TABLES.keys() - {"updates"}:
+        assert filtered["tables"][table] == full["tables"][table]
+        assert (filtered_path / (table + ".jsonl")).read_bytes() == (full_path / (table + ".jsonl")).read_bytes()
+    selected = list(migration.rows(filtered_path, "updates", source_schema("updates")))
+    assert [row["id"] for row in selected] == [str(UUID(int=7)), str(UUID(int=8))]
+    assert all(row["data"] == base["data"] for row in selected)
+
+
+def test_filtered_export_can_select_zero_receipts_without_losing_durable_rows(tmp_path):
+    directory = tmp_path / "empty-window"
+    manifest = make_export(directory, updates_since="2026-08-18T00:00:00Z")
+    assert migration.verify_export(directory) == manifest
+    assert manifest["tables"]["updates"]["count"] == 0
+    assert manifest["tables"]["updates"]["source_count"] == manifest["tables"]["updates"]["excluded_count"] == 2
+    assert all(manifest["tables"][table]["count"] for table in migration.TABLES.keys() - {"updates"})
+
+
+@pytest.mark.parametrize("cutoff", ["2027-01-01T00:00:00Z", "2026-01-01", "invalid"])
+def test_invalid_or_future_export_cutoff_fails_before_table_reads(tmp_path, cutoff):
+    source = Source()
+    with pytest.raises((migration.MigrationError, ValueError)):
+        migration.export_snapshot(source, tmp_path, 999, 1, updates_since=cutoff)
+    assert not source.count_requests
+    assert not list(tmp_path.iterdir())
+
+
+def test_source_filter_violation_is_rejected_before_writing_the_page(tmp_path):
+    class UnfilteredSource(Source):
+        def query_json(self, query, **parameters):
+            if "updates_since" in parameters:
+                parameters = {key: value for key, value in parameters.items() if key != "updates_since"}
+            return super().query_json(query, **parameters)
+
+    with pytest.raises(migration.MigrationError, match="source_selection_mismatch"):
+        migration.export_snapshot(UnfilteredSource(), tmp_path, 999, 1, updates_since="2026-08-18T00:00:00Z")
+    assert (tmp_path / "updates.jsonl").read_bytes() == b""
+
+
+@pytest.mark.parametrize("change", ["operator", "future", "missing", "count", "durable", "downgrade"])
+def test_malformed_selection_manifests_are_rejected(tmp_path, change):
+    directory = tmp_path / "export"
+    manifest = make_export(directory, updates_since="2026-01-01T00:00:00Z")
+    if change == "operator":
+        manifest["selection"]["updates"]["operator"] = ">="
+    elif change == "future":
+        manifest["selection"]["updates"]["value"] = "2027-01-01T00:00:00.000000Z"
+    elif change == "missing":
+        del manifest["selection"]
+    elif change == "count":
+        manifest["tables"]["updates"]["excluded_count"] = 1
+    elif change == "durable":
+        manifest["tables"]["users"]["source_count"] += 1
+        manifest["tables"]["users"]["excluded_count"] = 1
+    else:
+        manifest["format"] = 1
+    migration.save_json(directory / "manifest.json", manifest)
+    with pytest.raises(migration.MigrationError, match="manifest_selection"):
+        migration.verify_export(directory)
+
+
+def test_verifier_checks_selected_rows_even_when_their_hashes_match(tmp_path):
+    directory = tmp_path / "export"
+    manifest = make_export(directory, updates_since="2026-01-01T00:00:00Z")
+    schema = source_schema("updates")
+    rows = list(migration.rows(directory, "updates", schema))
+    rows[0]["created"] = "2025-12-31T00:00:00.000000Z"
+    digests = migration.Digests(migration.fields(schema))
+    (directory / "updates.jsonl").write_text("".join(digests.add(row) for row in rows))
+    manifest["tables"]["updates"].update(digests.result())
+    migration.save_json(directory / "manifest.json", manifest)
+    with pytest.raises(migration.MigrationError, match="export_selection_mismatch"):
+        migration.verify_export(directory)
+
+
+def test_original_full_export_format_remains_readable_and_importable(tmp_path):
+    directory = tmp_path / "legacy"
+    manifest = make_export(directory)
+    manifest["format"] = 1
+    del manifest["selection"]
+    for entry in manifest["tables"].values():
+        del entry["source_count"], entry["excluded_count"]
+    migration.save_json(directory / "manifest.json", manifest)
+    assert migration.verify_export(directory) == manifest
+    assert migration.selection_summary(manifest)["excluded"] == 0
+    scripts = []
+    target = SimpleNamespace(fingerprint="test", guard=lambda: None, run=scripts.append)
+    migration.import_data(target, directory, manifest, 1)
+    first_count = len(scripts)
+    migration.import_data(target, directory, manifest, 1)
+    assert len(scripts) == first_count == 6
+
+
+def test_import_resume_rejects_changed_selection_even_with_same_rows_and_export_id(tmp_path):
+    directory = tmp_path / "export"
+    manifest = make_export(directory, updates_since="2026-01-01T00:00:00Z")
+    scripts = []
+    target = SimpleNamespace(fingerprint="test", guard=lambda: None, run=scripts.append)
+    migration.import_data(target, directory, manifest, 1)
+    manifest["selection"]["updates"]["value"] = "2025-12-31T00:00:00.000000Z"
+    with pytest.raises(migration.MigrationError, match="resume_manifest_mismatch"):
+        migration.import_data(target, directory, manifest, 1)
+    assert len(scripts) == 6
 
 
 def test_unknown_actual_scalar_is_exportable_but_import_requires_explicit_mapping():
@@ -425,6 +577,94 @@ def message_records():
         },
     ]
     return records
+
+
+def test_normalization_requires_complete_retention_coverage_and_binds_selection(tmp_path):
+    directory = tmp_path / "export"
+    manifest = make_export(directory, message_records(), updates_since="2026-08-19T00:00:00Z")
+    with pytest.raises(migration.MigrationError, match="export_does_not_cover_retention_window"):
+        migration.prepare_normalization(directory, manifest, AS_OF)
+    assert not list(directory.glob("normalization-*"))
+    covered_as_of = "2026-09-18T00:00:00Z"
+    report = migration.prepare_normalization(directory, manifest, covered_as_of)
+    assert report["counts"]["source_rows"] == report["counts"]["accepted"] == 2
+    assert report["selection"]["source_total"] == 3 and report["selection"]["excluded"] == 1
+    migration.verify_normalization(directory, manifest, covered_as_of)
+    manifest["selection"]["updates"]["value"] = "2026-08-18T00:00:00.000000Z"
+    with pytest.raises(migration.MigrationError, match="normalization_manifest_mismatch"):
+        migration.verify_normalization(directory, manifest, covered_as_of)
+
+
+def test_legacy_full_normalization_report_remains_verifiable(tmp_path):
+    directory = tmp_path / "legacy"
+    manifest = make_export(directory, message_records())
+    manifest["format"] = 1
+    del manifest["selection"]
+    for entry in manifest["tables"].values():
+        del entry["source_count"], entry["excluded_count"]
+    migration.save_json(directory / "manifest.json", manifest)
+    report = migration.prepare_normalization(directory, manifest, AS_OF)
+    report["format"] = 1
+    del report["export_manifest_sha256"], report["selection"]
+    migration.save_json(migration.normalization_path(directory, AS_OF) / "manifest.json", report)
+    assert migration.verify_normalization(directory, manifest, AS_OF)[1] == report
+
+
+@pytest.mark.parametrize("change", ["selection_hash", "retained_only", "normalized"])
+def test_normalization_requires_raw_parity_for_the_identical_selection(tmp_path, change):
+    directory = tmp_path / "export"
+    manifest = make_export(directory, message_records(), updates_since="2026-08-18T00:00:00Z")
+    migration.prepare_normalization(directory, manifest, AS_OF)
+    parity = {"export_id": manifest["export_id"], "exact": True, "export_manifest_sha256": migration.manifest_digest(manifest)}
+    if change == "selection_hash":
+        parity["export_manifest_sha256"] = "0" * 64
+    else:
+        parity[change] = True
+    migration.save_json(directory / "reconciliation-test.json", parity)
+    with pytest.raises(migration.MigrationError, match="verified_raw_parity_required"):
+        migration.normalize(SimpleNamespace(fingerprint="test"), directory, manifest, AS_OF, 1)
+
+
+def test_filtered_normalization_resume_is_bound_to_the_full_manifest(tmp_path):
+    directory = tmp_path / "export"
+    manifest = make_export(directory, message_records(), updates_since="2026-08-18T00:00:00Z")
+    report = migration.prepare_normalization(directory, manifest, AS_OF)
+    migration.save_json(
+        directory / "reconciliation-test.json",
+        {
+            "export_id": manifest["export_id"],
+            "exact": True,
+            "export_manifest_sha256": migration.manifest_digest(manifest),
+        },
+    )
+    migration.save_json(
+        migration.normalization_path(directory, AS_OF) / "applied-test.json",
+        {
+            "completed": 1,
+            "batch_size": 1,
+            "sha256": report["sha256"],
+            "manifest": "0" * 64,
+        },
+    )
+    with pytest.raises(migration.MigrationError, match="normalization_resume_mismatch"):
+        migration.normalize(SimpleNamespace(fingerprint="test", guard=lambda: None), directory, manifest, AS_OF, 1)
+
+
+def test_updates_cutoff_cannot_be_reinterpreted_by_a_nonexport_command(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        migration.sys,
+        "argv",
+        [
+            "migrate_storage",
+            "verify",
+            "--directory",
+            str(tmp_path),
+            "--updates-since",
+            "2026-08-18T00:00:00Z",
+        ],
+    )
+    assert migration.main() == 1
+    assert "updates_since_requires_export" in capsys.readouterr().out
 
 
 def test_normalization_preserves_precise_bodies_and_separates_nested_message_lifetimes():

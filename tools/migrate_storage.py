@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-FORMAT = 1
+FORMAT = 2
 MAX_LINE = 32 * 1024 * 1024
 IDENTIFIER = re.compile(r"[a-z_][a-z_0-9]*\Z")
 TABLES = {
@@ -156,6 +156,55 @@ def normalized_row(row: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any
     return row
 
 
+def manifest_digest(manifest: dict[str, Any]) -> str:
+    return hashlib.sha256(canonical(manifest).encode()).hexdigest()
+
+
+def selection_cutoff(manifest: dict[str, Any]) -> str | None:
+    version = manifest.get("format")
+    if type(version) is not int or version not in {1, FORMAT}:
+        raise MigrationError("manifest_format")
+    if version == 1:
+        if "selection" in manifest:
+            raise MigrationError("legacy_manifest_selection")
+        return None
+    selection = manifest.get("selection")
+    if not isinstance(selection, dict) or set(selection) != {"updates"}:
+        raise MigrationError("manifest_selection")
+    predicate = selection["updates"]
+    if predicate is None:
+        return None
+    if (
+        not isinstance(predicate, dict)
+        or set(predicate) != {"field", "operator", "value"}
+        or predicate["field"] != "created"
+        or predicate["operator"] != ">"
+        or not isinstance(predicate["value"], str)
+    ):
+        raise MigrationError("manifest_selection")
+    cutoff = utc(predicate["value"])
+    if cutoff != predicate["value"] or cutoff > utc(manifest["snapshot_at"]):
+        raise MigrationError("manifest_selection_cutoff")
+    return cutoff
+
+
+def require_retention_coverage(manifest: dict[str, Any], as_of: str) -> None:
+    cutoff = selection_cutoff(manifest)
+    if cutoff is not None and cutoff > utc(datetime.fromisoformat(utc(as_of)) - timedelta(days=30)):
+        raise MigrationError("export_does_not_cover_retention_window")
+
+
+def selection_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    cutoff = selection_cutoff(manifest)
+    entry = manifest["tables"]["updates"]
+    return {
+        "updates_since": cutoff,
+        "source_total": entry.get("source_count", entry["count"]),
+        "selected": entry["count"],
+        "excluded": entry.get("excluded_count", 0),
+    }
+
+
 class Digests:
     def __init__(self, names: Iterable[str]) -> None:
         self.count = 0
@@ -183,33 +232,48 @@ class Digests:
         }
 
 
-def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int) -> dict[str, Any]:
+def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int, *, updates_since: str | None = None) -> dict[str, Any]:
     """The caller supplies one already-entered read-only transaction."""
     schemas = decode(source.query_json(SCHEMA_QUERY))
     by_type = {item["name"]: item for item in schemas}
     if set(by_type) != set(TABLES.values()):
         raise MigrationError("source_type_mismatch")
     snapshot = utc(source.query_single("SELECT datetime_current();"))
+    cutoff = utc(updates_since) if updates_since is not None else None
+    if cutoff is not None and cutoff > snapshot:
+        raise MigrationError("export_cutoff_after_snapshot")
     manifest: dict[str, Any] = {
         "format": FORMAT,
         "export_id": str(uuid4()),
         "bot_id": bot_id,
         "snapshot_at": snapshot,
         "consistency": "single_readonly_transaction",
+        "selection": {"updates": {"field": "created", "operator": ">", "value": cutoff} if cutoff is not None else None},
         "tables": {},
     }
     for table, type_name in TABLES.items():
         schema = by_type[type_name]
         names = fields(schema)
-        count = source.query_single(f"SELECT count({type_name});")
+        total = source.query_single(f"SELECT count({type_name});")
+        selected_cutoff = cutoff if table == "updates" else None
+        selection_values = {"updates_since": datetime.fromisoformat(selected_cutoff)} if selected_cutoff is not None else {}
+        predicates = [".created > <datetime>$updates_since"] if selected_cutoff is not None else []
+        count = (
+            source.query_single(f"SELECT count((SELECT {type_name} FILTER {predicates[0]}));", **selection_values) if predicates else total
+        )
+        if type(total) is not int or type(count) is not int or not 0 <= count <= total:
+            raise MigrationError("source_count_shape")
         print(canonical({"exporting_table": table, "rows": 0, "expected_rows": count}), flush=True)
+        if selected_cutoff is not None:
+            print(canonical({"source_updates": total, "selected_updates": count, "excluded_updates": total - count}), flush=True)
         digest = Digests(names)
         last_progress = time.monotonic()
         with (directory / (table + ".jsonl")).open("x", encoding="utf-8") as output:
             os.chmod(output.name, 0o600)
             while True:
-                condition = " FILTER .id > <uuid>$after" if digest.count else ""
-                values = {"after": UUID(digest.last_id)} if digest.count else {}
+                conditions = [*predicates, *([".id > <uuid>$after"] if digest.count else [])]
+                condition = " FILTER " + " AND ".join(conditions) if conditions else ""
+                values: dict[str, Any] = {**selection_values, **({"after": UUID(digest.last_id)} if digest.count else {})}
                 raw = source.query_json(
                     f"SELECT {type_name} {{ id }}{condition} ORDER BY .id LIMIT <int64>$limit;",
                     limit=batch_size,
@@ -244,6 +308,8 @@ def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int) 
                 normalized = [normalized_row(row, schema) for row in rows]
                 if [row["id"] for row in normalized] != [str(identifier) for identifier in identifiers]:
                     raise MigrationError("source_page_record_mismatch")
+                if selected_cutoff is not None and any(utc(row["created"]) <= selected_cutoff for row in normalized):
+                    raise MigrationError("source_selection_mismatch")
                 for row in normalized:
                     output.write(digest.add(row))
                 if time.monotonic() - last_progress >= 30:
@@ -255,12 +321,12 @@ def export_snapshot(source: Any, directory: Path, bot_id: int, batch_size: int) 
             os.fsync(output.fileno())
         if count != digest.count:
             raise MigrationError("source_count_mismatch")
-        manifest["tables"][table] = {"schema": schema, **digest.result()}
+        manifest["tables"][table] = {"schema": schema, "source_count": total, "excluded_count": total - count, **digest.result()}
         print(canonical({"exported_table": table, "rows": digest.count}), flush=True)
     return manifest
 
 
-def export(config: dict[str, Any], directory: Path, bot_id: int, batch_size: int) -> None:
+def export(config: dict[str, Any], directory: Path, bot_id: int, batch_size: int, *, updates_since: str | None = None) -> None:
     import edgedb
 
     allowed = {"dsn", "host", "port", "database", "user", "password", "tls_security", "tls_ca", "credentials_file"}
@@ -281,7 +347,7 @@ def export(config: dict[str, Any], directory: Path, bot_id: int, batch_size: int
             with transaction:
                 if transaction.query_single("SELECT sys::get_current_database();") != config["expected_database"]:
                     raise MigrationError("source_database_mismatch")
-                manifest = export_snapshot(transaction, directory, bot_id, batch_size)
+                manifest = export_snapshot(transaction, directory, bot_id, batch_size, updates_since=updates_since)
         # No manifest is published until the entire single snapshot has committed.
         save_json(directory / "manifest.json", manifest)
     finally:
@@ -304,7 +370,8 @@ def rows(directory: Path, table: str, schema: dict[str, Any]) -> Iterator[dict[s
 
 def verify_export(directory: Path) -> dict[str, Any]:
     manifest = private_json(directory / "manifest.json")
-    if manifest.get("format") != FORMAT or set(manifest.get("tables", {})) != set(TABLES):
+    cutoff = selection_cutoff(manifest)
+    if set(manifest.get("tables", {})) != set(TABLES) or manifest.get("consistency") != "single_readonly_transaction":
         raise MigrationError("manifest_format")
     UUID(manifest["export_id"])
     utc(manifest["snapshot_at"])
@@ -313,8 +380,23 @@ def verify_export(directory: Path) -> dict[str, Any]:
     for table, entry in manifest["tables"].items():
         if entry["schema"]["name"] != TABLES[table]:
             raise MigrationError("manifest_type_mismatch")
+        if type(entry.get("count")) is not int or entry["count"] < 0:
+            raise MigrationError("manifest_count")
+        if manifest["format"] == FORMAT:
+            if (
+                type(entry.get("source_count")) is not int
+                or type(entry.get("excluded_count")) is not int
+                or not 0 <= entry["count"] <= entry["source_count"]
+                or entry["excluded_count"] != entry["source_count"] - entry["count"]
+                or ((table != "updates" or cutoff is None) and entry["excluded_count"] != 0)
+            ):
+                raise MigrationError("manifest_selection_counts")
+        elif "source_count" in entry or "excluded_count" in entry:
+            raise MigrationError("legacy_manifest_selection")
         digest = Digests(fields(entry["schema"]))
         for row in rows(directory, table, entry["schema"]):
+            if table == "updates" and cutoff is not None and utc(row["created"]) <= cutoff:
+                raise MigrationError("export_selection_mismatch")
             digest.add(row)
         if any(entry[key] != value for key, value in digest.result().items()):
             raise MigrationError("export_checksum_mismatch")
@@ -527,7 +609,7 @@ def import_data(target: Postgres, directory: Path, manifest: dict[str, Any], bat
         import_fields(table, entry["schema"])
     target.guard()
     checkpoint = directory / ("import-" + target.fingerprint + ".json")
-    identity = {"manifest": hashlib.sha256(canonical(manifest).encode()).hexdigest(), "batch_size": batch_size}
+    identity = {"manifest": manifest_digest(manifest), "batch_size": batch_size}
     state: dict[str, Any] = private_json(checkpoint) if checkpoint.exists() and not replay else {**identity, "completed": {}}
     if any(state.get(key) != value for key, value in identity.items()):
         raise MigrationError("resume_manifest_mismatch")
@@ -545,7 +627,7 @@ def import_data(target: Postgres, directory: Path, manifest: dict[str, Any], bat
         print(canonical({"imported_table": table, "source_rows": manifest["tables"][table]["count"]}), flush=True)
 
 
-def target_query(table: str, schema: dict[str, Any], bot_id: int, *, cutoff: str | None = None) -> str:
+def target_query(table: str, schema: dict[str, Any], bot_id: int) -> str:
     import_fields(table, schema)
     expressions: list[str] = []
     for name in fields(schema):
@@ -557,8 +639,6 @@ def target_query(table: str, schema: dict[str, Any], bot_id: int, *, cutoff: str
             expression = name
         expressions.extend(("'" + name + "'", expression))
     condition = f" WHERE bot_id={bot_id} AND is_legacy" if table == "updates" else ""
-    if table == "updates" and cutoff is not None:
-        condition += f" AND created>'{utc(cutoff)}'::timestamptz"
     return f"SELECT jsonb_build_object({','.join(expressions)})::text FROM hub_private.{table}{condition} ORDER BY id"
 
 
@@ -605,8 +685,20 @@ def reconcile(
     as_of: str | None = None,
     retained_only: bool = False,
 ) -> dict[str, Any]:
+    if normalized or retained_only:
+        if as_of is None:
+            raise MigrationError("fixed_retention_instant_required")
+        require_retention_coverage(manifest, as_of)
     target.guard()
-    report: dict[str, Any] = {"export_id": manifest["export_id"], "tables": {}}
+    report: dict[str, Any] = {
+        "export_id": manifest["export_id"],
+        "export_manifest_sha256": manifest_digest(manifest),
+        "selection": selection_summary(manifest),
+        "normalized": normalized,
+        "retained_only": retained_only,
+        "as_of": utc(as_of) if as_of is not None else None,
+        "tables": {},
+    }
     cutoff = utc(datetime.fromisoformat(utc(as_of)) - timedelta(days=30)) if as_of else None
 
     def expected_rows(table: str, schema: dict[str, Any]) -> Iterator[dict[str, Any]]:
@@ -623,7 +715,9 @@ def reconcile(
     for table, entry in manifest["tables"].items():
         report["tables"][table] = compare_rows(
             expected_rows(table, entry["schema"]),
-            target.stream(target_query(table, entry["schema"], manifest["bot_id"], cutoff=cutoff if retained_only else None)),
+            # Expired target receipts must be reported as extras, including
+            # after retention; a target-side cutoff would hide incomplete work.
+            target.stream(target_query(table, entry["schema"], manifest["bot_id"])),
             entry["schema"],
         )
     report["exact"] = all(not item["missing"] and not item["extra"] and not item["field_mismatches"] for item in report["tables"].values())
@@ -719,6 +813,7 @@ def json_lines(path: Path) -> Iterator[dict[str, Any]]:
 
 
 def prepare_normalization(directory: Path, manifest: dict[str, Any], as_of: str) -> dict[str, Any]:
+    require_retention_coverage(manifest, as_of)
     destination = normalization_path(directory, as_of)
     destination.mkdir(mode=0o700)
     digest = hashlib.sha256()
@@ -755,6 +850,8 @@ def prepare_normalization(directory: Path, manifest: dict[str, Any], as_of: str)
     report = {
         "format": FORMAT,
         "export_id": manifest["export_id"],
+        "export_manifest_sha256": manifest_digest(manifest),
+        "selection": selection_summary(manifest),
         "as_of": utc(as_of),
         "cutoff": cutoff,
         "sha256": digest.hexdigest(),
@@ -766,9 +863,17 @@ def prepare_normalization(directory: Path, manifest: dict[str, Any], as_of: str)
 
 
 def verify_normalization(directory: Path, manifest: dict[str, Any], as_of: str) -> tuple[Path, dict[str, Any]]:
+    require_retention_coverage(manifest, as_of)
     destination = normalization_path(directory, as_of)
     report = private_json(destination / "manifest.json")
-    if report.get("format") != FORMAT or report.get("export_id") != manifest["export_id"] or report.get("as_of") != utc(as_of):
+    if (
+        type(report.get("format")) is not int
+        or report["format"] not in {1, FORMAT}
+        or report.get("export_id") != manifest["export_id"]
+        or report.get("as_of") != utc(as_of)
+        or (report["format"] == 1 and manifest["format"] != 1)
+        or (report["format"] == FORMAT and report.get("export_manifest_sha256") != manifest_digest(manifest))
+    ):
         raise MigrationError("normalization_manifest_mismatch")
     digest = hashlib.sha256()
     count = 0
@@ -808,12 +913,24 @@ COMMIT;
 def normalize(target: Postgres, directory: Path, manifest: dict[str, Any], as_of: str, batch_size: int) -> dict[str, Any]:
     destination, report = verify_normalization(directory, manifest, as_of)
     parity = private_json(directory / ("reconciliation-" + target.fingerprint + ".json"))
-    if parity.get("export_id") != manifest["export_id"] or not parity.get("exact"):
+    if (
+        parity.get("export_id") != manifest["export_id"]
+        or not parity.get("exact")
+        or parity.get("normalized", False)
+        or parity.get("retained_only", False)
+        or (
+            (manifest["format"] == FORMAT or "export_manifest_sha256" in parity)
+            and parity.get("export_manifest_sha256") != manifest_digest(manifest)
+        )
+    ):
         raise MigrationError("verified_raw_parity_required")
     target.guard()
     checkpoint = destination / ("applied-" + target.fingerprint + ".json")
-    state = private_json(checkpoint) if checkpoint.exists() else {"completed": 0, "batch_size": batch_size, "sha256": report["sha256"]}
-    if state.get("batch_size") != batch_size or state.get("sha256") != report["sha256"]:
+    identity: dict[str, Any] = {"batch_size": batch_size, "sha256": report["sha256"]}
+    if report["format"] == FORMAT:
+        identity["manifest"] = manifest_digest(manifest)
+    state = private_json(checkpoint) if checkpoint.exists() else {"completed": 0, **identity}
+    if any(state.get(key) != value for key, value in identity.items()):
         raise MigrationError("normalization_resume_mismatch")
     completed = state["completed"]
     for number, batch in enumerate(batches(json_lines(destination / "records.jsonl"), batch_size), 1):
@@ -924,6 +1041,7 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--replay", action="store_true", help="Reapply acknowledged import batches; never delete rows")
     parser.add_argument("--as-of", help="Fixed timezone-aware retention instant for preparation and validation")
+    parser.add_argument("--updates-since", help="Export only receipts created strictly after this fixed timezone-aware instant")
     parser.add_argument("--normalized", action="store_true", help="Compare receipt references after successful normalization")
     parser.add_argument("--retained-only", action="store_true", help="Compare only receipts newer than the fixed 30-day cutoff")
     parser.add_argument("--target-writers-stopped", action="store_true", help="Operator assertion that application writers are stopped")
@@ -931,6 +1049,10 @@ def main() -> int:
     try:
         if not 1 <= args.batch_size <= 1000:
             raise MigrationError("batch_size_range")
+        if args.updates_since is not None:
+            if args.action != "export":
+                raise MigrationError("updates_since_requires_export")
+            utc(args.updates_since)
         if args.action in {"import", "normalize", "reconcile"} and not args.target_writers_stopped:
             raise MigrationError("target_writer_freeze_required")
         if (
@@ -944,12 +1066,17 @@ def main() -> int:
         if args.action == "export":
             if args.source_config is None or args.bot_id is None or not 0 < args.bot_id < 2**63:
                 raise MigrationError("source_and_bot_required")
-            export(private_json(args.source_config), args.directory, args.bot_id, args.batch_size)
+            export(private_json(args.source_config), args.directory, args.bot_id, args.batch_size, updates_since=args.updates_since)
         else:
             manifest = verify_export(args.directory)
+            if args.as_of:
+                require_retention_coverage(manifest, args.as_of)
             if args.action == "prepare-normalization":
                 report = prepare_normalization(args.directory, manifest, args.as_of)
-                print(canonical({"normalization": report["counts"], "rejections": report["rejections"]}), flush=True)
+                print(
+                    canonical({"normalization": report["counts"], "selection": report["selection"], "rejections": report["rejections"]}),
+                    flush=True,
+                )
                 if report["rejections"]:
                     return 2
             elif args.action != "verify":
@@ -960,7 +1087,7 @@ def main() -> int:
                     import_data(target, args.directory, manifest, args.batch_size, replay=args.replay)
                 elif args.action == "normalize":
                     report = normalize(target, args.directory, manifest, args.as_of, args.batch_size)
-                    print(canonical({"normalized": report["counts"]}), flush=True)
+                    print(canonical({"normalized": report["counts"], "selection": selection_summary(manifest)}), flush=True)
                 elif args.action == "retention-report":
                     print(canonical(retention_report(target, args.as_of)), flush=True)
                 elif args.action == "audit-messages":
@@ -976,6 +1103,7 @@ def main() -> int:
                         canonical(
                             {
                                 "reconciled": report["validated"],
+                                "selection": report["selection"],
                                 "derived_entities": report.get("derived_entities", {}),
                                 "tables": {
                                     table: {key: value for key, value in item.items() if key not in {"expected", "actual"}}

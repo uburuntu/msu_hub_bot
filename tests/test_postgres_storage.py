@@ -223,6 +223,54 @@ def test_administrative_normalization_is_replayable_and_hashes_winning_bodies(db
     assert audit_messages(target, directory, manifest, AS_OF)["body_sha256_mismatches"] == 1
 
 
+def test_retained_window_migration_requires_exact_receipts_and_exposes_expired_target_extras(db, tmp_path):
+    from test_migrate_storage import AS_OF, make_export, message_records
+
+    from tools.migrate_storage import (
+        MigrationError,
+        audit_messages,
+        batch_script,
+        import_data,
+        normalize,
+        prepare_normalization,
+        reconcile,
+    )
+
+    directory = tmp_path / "retained-export"
+    records = message_records()
+    manifest = make_export(directory, records, updates_since="2026-08-18T00:00:00Z")
+    target = migration_target(db, directory)
+    import_data(target, directory, manifest, 1)
+    assert db.value("SELECT count(*) FROM hub_private.updates;") == 2
+    report = reconcile(target, directory, manifest)
+    assert report["exact"] and report["validated"]
+    assert report["selection"]["source_total"] == 3
+    assert report["selection"]["selected"] == 2 and report["selection"]["excluded"] == 1
+    assert db.value("SELECT count(*) FROM hub_private.users WHERE created < '2026-08-18';") == 1
+
+    # An expired receipt left by a broader import cannot disappear from parity.
+    target.run(batch_script("updates", [records["updates"][-1]], manifest))
+    report = reconcile(target, directory, manifest)
+    assert report["tables"]["updates"]["extra"] == 1 and not report["validated"]
+    prepared = prepare_normalization(directory, manifest, AS_OF)
+    assert prepared["counts"]["source_rows"] == 2 and not prepared["rejections"]
+    with pytest.raises(MigrationError, match="verified_raw_parity_required"):
+        normalize(target, directory, manifest, AS_OF, 1)
+
+    assert db.value(f"SELECT hub_private.retain_messages(100,'{AS_OF}');")["updates"] == 1
+    assert reconcile(target, directory, manifest)["exact"]
+    normalize(target, directory, manifest, AS_OF, 1)
+    assert reconcile(target, directory, manifest, normalized=True, as_of=AS_OF)["validated"]
+    audited = audit_messages(target, directory, manifest, AS_OF)
+    assert audited["expected"] == audited["actual"] == 2
+    assert all(audited[key] == 0 for key in ("missing", "extra", "key_version_body_mismatches", "body_sha256_mismatches"))
+
+    target.run(batch_script("updates", [records["updates"][-1]], manifest))
+    report = reconcile(target, directory, manifest, normalized=True, retained_only=True, as_of=AS_OF)
+    assert report["tables"]["updates"]["extra"] == 1 and not report["validated"]
+    assert db.value("SELECT count(*) FROM hub_private.users;") == 1
+
+
 def test_administrative_normalization_failure_keeps_receipts_and_observations_atomic(db, tmp_path):
     from test_migrate_storage import AS_OF, make_export, message_records
 
