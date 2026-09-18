@@ -170,9 +170,10 @@ def creation(**changes):
     return {"request_id": str(uuid4()), "text": "30m meeting <&>", "schedule": "in 1h", "timezone": "Europe/Moscow", **changes}
 
 
-async def test_web_telemetry_exports_verified_identity_without_request_contents(rig):
+async def test_web_telemetry_exports_verified_identity_without_request_contents(rig, monkeypatch):
     from telemetry_helpers import Capture, config
 
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     capture = Capture()
     telemetry = Telemetry(config(), transport=capture)
     rig.server.telemetry = telemetry
@@ -184,7 +185,7 @@ async def test_web_telemetry_exports_verified_identity_without_request_contents(
         await telemetry.close()
     spans = [span for span in capture.spans() if span.name == "web.request"]
     assert len(spans) == 1
-    assert any(item.key == "user_id" and item.value.int_value == 42 for item in spans[0].attributes)
+    assert any(item.key == "telegram.user_id" and item.value.int_value == 42 for item in spans[0].attributes)
     serialized = capture.serialized()
     for private in (TOKEN, "Owner <&>", "private-reminder-canary", "Authorization", signed(), "app.example"):
         assert private not in serialized
