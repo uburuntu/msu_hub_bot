@@ -262,8 +262,9 @@ intact. Rendering failures do not stop clocks or prevent scoring.
 
 `/chess_rating` paginates the global ranking. Since the document API is ordered
 by key, ranking requires a complete bounded-time scan; failure returns an
-unavailable response instead of a partial ranking. Chess actions never modify
-the user's active FSM conversation.
+unavailable response instead of a partial ranking. Navigation is bounded to the
+first 10,000 places; the personal rank counts every player. Chess actions never
+modify the user's active FSM conversation.
 
 ### Moving from Redis-backed quizzes
 

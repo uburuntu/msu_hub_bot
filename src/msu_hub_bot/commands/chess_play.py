@@ -61,6 +61,8 @@ class ChessRating:
                 if 0 <= number < board.pages
             ]
             markup = InlineKeyboardMarkup(inline_keyboard=[buttons])
+        if board.total > board.pages * 10:
+            rows.append(f"\nВ списке — первые {board.pages * 10:,} мест; твоё место учитывает всех.".replace(",", " "))
         return Text(*rows), markup
 
     @classmethod
