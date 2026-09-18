@@ -93,10 +93,24 @@ class ReminderService:
     async def create(
         self, *, author_id: int, author_name: str, chat_id: int, thread_id: int | None, source_message_id: int, schedule: Schedule
     ) -> Record[Reminder]:
+        record, _ = await self.create_with_status(
+            author_id=author_id,
+            author_name=author_name,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            source_message_id=source_message_id,
+            schedule=schedule,
+        )
+        return record
+
+    async def create_with_status(
+        self, *, author_id: int, author_name: str, chat_id: int, thread_id: int | None, source_message_id: int, schedule: Schedule
+    ) -> tuple[Record[Reminder], bool]:
+        """Return whether this call created the record, for best-effort acknowledgements."""
         key = self.creation_key(author_id=author_id, chat_id=chat_id, thread_id=thread_id, source_message_id=source_message_id)
         old = await self.get_creation(author_id=author_id, chat_id=chat_id, thread_id=thread_id, source_message_id=source_message_id)
         if old is not None:
-            return old
+            return old, False
         self._future(schedule)
         if not schedule.text.strip():
             raise ReminderError("Добавь, о чём напомнить: /remind in 15m выключить духовку.")
@@ -113,11 +127,12 @@ class ReminderService:
         tx.expect_absent("items", key)
         tx.put(self.items, key, value, parent=destination(chat_id, thread_id), status="pending")
         self._schedule(tx, key, "deliver", value.due_at)
+        created = True
         try:
             await self._commit(tx)
         except Conflict:
-            pass
-        return await self.get(author_id, key, chat_id=chat_id, thread_id=thread_id)
+            created = False
+        return await self.get(author_id, key, chat_id=chat_id, thread_id=thread_id), created
 
     async def list(
         self, author_id: int, *, chat_id: int | None = None, thread_id: int | None = None, after: str | None = None, limit: int = 20
