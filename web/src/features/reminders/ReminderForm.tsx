@@ -40,6 +40,7 @@ export function ReminderForm({
   const [stale, setStale] = useState<Reminder | null>(null);
   const [base, setBase] = useState(item);
   const pending = useRef<CreateReminder | null>(null);
+  const clockOffset = useRef(Date.parse(session.now) - Date.now());
   const textarea = useRef<HTMLTextAreaElement>(null);
   const locked = busy || uncertain;
   const destination = item
@@ -62,7 +63,10 @@ export function ReminderForm({
         when === "date"
           ? `at ${date.replace("T", " ")}`
           : when === "tomorrow"
-            ? tomorrowSchedule(timezone)
+            ? tomorrowSchedule(
+                timezone,
+                new Date(Date.now() + clockOffset.current),
+              )
             : `in ${when}`;
       if (!text.trim()) {
         setError("Напишите, о чём напомнить.");

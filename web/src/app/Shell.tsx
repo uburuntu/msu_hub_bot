@@ -29,7 +29,7 @@ export function Shell({
         К содержимому
       </a>
       <aside className="sidebar">
-        <a className="brand-link" href="/" aria-label="MSU Hub — главная">
+        <a className="brand-link" href="#main" aria-label="MSU Hub — главная">
           <Brand />
         </a>
         <div className="nav-label">ВАШИ ИНСТРУМЕНТЫ</div>
@@ -58,7 +58,7 @@ export function Shell({
         <header className="topbar">
           <a
             className="mobile-brand brand-link"
-            href="/"
+            href="#main"
             aria-label="MSU Hub — главная"
           >
             <Brand />

@@ -26,9 +26,17 @@ export function RemindersPage({
     kind: "cancel" | "retry";
   } | null>(null);
   const [notice, setNotice] = useState("");
+  const [composeOpen, setComposeOpen] = useState(false);
   const clockOffset = useRef(Date.parse(session.now) - Date.now());
   const [now, setNow] = useState(Date.now() + clockOffset.current);
   const form = useRef<HTMLElement>(null);
+  function focusCompose() {
+    form.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    form.current?.querySelector("textarea")?.focus({ preventScroll: true });
+  }
+  useEffect(() => {
+    if (composeOpen) focusCompose();
+  }, [composeOpen]);
   useEffect(() => {
     const timer = window.setInterval(
       () => setNow(Date.now() + clockOffset.current),
@@ -63,13 +71,8 @@ export function RemindersPage({
         <button
           className="button primary new-reminder"
           onClick={() => {
-            form.current?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-            form.current
-              ?.querySelector("textarea")
-              ?.focus({ preventScroll: true });
+            if (composeOpen) focusCompose();
+            else setComposeOpen(true);
           }}
         >
           <Icon name="plus" />
@@ -102,7 +105,7 @@ export function RemindersPage({
       )}
       <div className="reminders-layout">
         <section
-          className="compose-card"
+          className={`compose-card ${composeOpen ? "compose-open" : ""}`}
           ref={form}
           aria-labelledby="compose-heading"
         >
@@ -114,6 +117,14 @@ export function RemindersPage({
               <h2 id="compose-heading">На потом, без потерь</h2>
               <p>Запишите — и возвращайтесь к своим делам.</p>
             </div>
+            <button
+              type="button"
+              className="icon-button close-compose"
+              aria-label="Свернуть форму"
+              onClick={() => setComposeOpen(false)}
+            >
+              <Icon name="close" size={17} />
+            </button>
           </div>
           <ReminderForm
             api={api}
@@ -123,6 +134,7 @@ export function RemindersPage({
               list.update(item);
               setNotice("Готово. Напомним, когда придёт время.");
               setFilter("active");
+              setComposeOpen(false);
             }}
           />
         </section>

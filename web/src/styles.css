@@ -408,6 +408,9 @@ main:focus {
 .compose-heading h2 {
   font-size: 15px;
 }
+.close-compose {
+  display: none;
+}
 .compose-heading p {
   font-size: 10px;
   color: var(--muted);
@@ -1196,6 +1199,25 @@ input[type="datetime-local"] {
   }
 }
 @media (max-width: 620px) {
+  .compose-card {
+    display: none;
+  }
+  .compose-card.compose-open {
+    display: block;
+  }
+  .close-compose {
+    display: grid;
+    margin-left: auto;
+  }
+  .page-heading {
+    flex-wrap: wrap;
+    gap: 18px;
+  }
+  .new-reminder {
+    display: flex;
+    width: 100%;
+    min-height: 44px;
+  }
   .topbar {
     min-height: 73px;
     padding-inline: 20px;
