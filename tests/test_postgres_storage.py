@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -214,43 +212,6 @@ def exercise_reaction_migration(db, migration):
     return True
 
 
-@pytest.fixture(scope="module")
-def postgres():
-    dsn = os.environ.get("HUB_TEST_POSTGRES_DSN")
-    if not dsn:
-        pytest.skip("Set HUB_TEST_POSTGRES_DSN for the real PostgreSQL contract suite")
-    if not shutil.which("psql"):
-        pytest.fail("PostgreSQL contract tests require psql")
-    db = Database(dsn)
-    name = db.run("SELECT current_database();").stdout.strip()
-    if not name.startswith("hub_test_"):
-        pytest.fail("Refusing to initialize a database outside the hub_test_ namespace")
-    if (
-        db.run(
-            "SELECT count(*) FROM pg_namespace WHERE nspname IN ('hub_private','hub_api','msu_hub_private','msu_hub_api','auth');"
-        ).stdout.strip()
-        != "0"
-    ):
-        pytest.fail("PostgreSQL contract tests require an empty disposable database")
-    db.run("""
-        DO $$ BEGIN
-            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF;
-            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated; END IF;
-        END $$;
-        CREATE SCHEMA auth;
-        CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
-        $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
-    """)
-    for schema in SCHEMAS:
-        if schema.name == "003_application_namespaces.sql":
-            db.namespace_upgrade = exercise_namespace_migration(db, schema.read_text())
-        elif schema.name == "004_reactions.sql":
-            db.reaction_upgrade = exercise_reaction_migration(db, schema.read_text())
-        else:
-            db.run(schema.read_text())
-    return db
-
-
 @pytest.mark.parametrize(
     "case",
     [
@@ -276,19 +237,6 @@ def test_namespace_migration_preserves_populated_rows_and_object_identities(post
 
 def test_reaction_migration_is_additive_atomic_and_rejects_the_wrong_predecessor(postgres):
     assert postgres.reaction_upgrade
-
-
-@pytest.fixture
-def db(postgres):
-    # The module fixture refuses existing schemas before installing the test schema.
-    postgres.run("""
-        TRUNCATE msu_hub_private.chat_users,msu_hub_private.chat_topics,msu_hub_private.chat_settings,
-            msu_hub_private.reaction_actors,msu_hub_private.reaction_counts,
-            msu_hub_private.messages,msu_hub_private.updates,msu_hub_private.users,msu_hub_private.chats,
-            msu_hub_private.directory,msu_hub_private.vk_subscriptions,msu_hub_private.mutation_journal,msu_hub_private.principals;
-        INSERT INTO msu_hub_private.principals(auth_user_id,bot_id) VALUES ('00000000-0000-0000-0000-000000000001',999);
-    """)
-    return postgres
 
 
 def archive(update_id=1, **extra):
@@ -543,7 +491,7 @@ def test_private_observation_helper_reuses_a_receipt_and_fixed_retention_instant
     assert db.value("SELECT data FROM msu_hub_private.updates;") == {"original": True}
     assert db.value("SELECT count(*) FROM msu_hub_private.messages;") == 1
     assert db.value("SELECT to_jsonb(source_update_id) FROM msu_hub_private.messages;") == receipt
-    assert db.value("SELECT jsonb_agg(version ORDER BY version) FROM msu_hub_private.schema_migrations;") == [1, 2, 3, 4]
+    assert db.value("SELECT jsonb_agg(version ORDER BY version) FROM msu_hub_private.schema_migrations;") == [1, 2, 3, 4, 5]
     assert db.rpc("health") == {"schema_version": 1, "bot_id": 999}
     assert db.run(f"SELECT msu_hub_private.observe_archive({args});", principal=PRINCIPAL, check=False).returncode
     assert db.run(f"SET ROLE anon; SELECT msu_hub_private.observe_archive({args});", check=False).returncode
