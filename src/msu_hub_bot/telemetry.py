@@ -107,6 +107,7 @@ OPERATIONS = frozenset(
         "database.read",
         "database.write",
         "database.auth",
+        "feature.job",
         "deletion.enqueue",
         "deletion.due",
         "deletion.remove",

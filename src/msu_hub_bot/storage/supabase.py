@@ -313,6 +313,17 @@ class SupabaseRepository:
 
         await self._rpc("health", {}, validate, operation="database.check")
 
+    async def feature_request(self, operation: str, request: dict[str, JsonValue]) -> JsonValue:
+        if operation not in {"health", "get", "list", "commit", "claim_jobs", "job_status"}:
+            raise ValueError("Unknown feature storage operation")
+        return await self._rpc(
+            f"feature_{operation}",
+            {"p_request": request},
+            lambda value: value,
+            operation="database.read" if operation in {"health", "get", "list"} else "database.write",
+            trace=False,
+        )
+
     async def ensure_chat(self, chat: ChatObservation) -> ChatRecord:
         return await self._rpc(
             "ensure_chat", {"p_chat": _observation(chat)}, lambda value: _record(ChatRecord, value), operation="database.write"

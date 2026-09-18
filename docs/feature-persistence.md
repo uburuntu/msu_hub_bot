@@ -1,0 +1,149 @@
+# Feature persistence
+
+Use `storage.features` for small, typed feature documents and work that must
+survive a bot restart. PostgreSQL owns the data; the authenticated Supabase RPC
+boundary owns access. Features register models and job handlers in Python.
+Ordinary payload fields require no SQL migration.
+
+Keep relational identities, message history and reaction analytics in their
+dedicated tables. This API supports exact keys and bounded collection listings,
+not arbitrary JSON queries, joins or an alternative SQL language.
+
+## A document and an atomic change
+
+```python
+from msu_hub_bot.storage.features import Payload, Scope
+
+class Preferences(Payload):
+    timezone: str = "Europe/Moscow"
+
+preferences = store.collection(
+    "example", "preferences", Preferences, retention=None,
+)
+scope = Scope(f"user:{user_id}")
+record = await preferences.get(scope, "default")
+tx = store.transaction("example", scope, operation_id=action_id)
+if record is None:
+    tx.expect_absent("preferences", "default")
+    value = Preferences(timezone="Europe/London")
+else:
+    tx.expect(record)
+    value = record.value.model_copy(update={"timezone": "Europe/London"})
+tx.put(preferences, "default", value)
+await tx.commit()
+```
+
+`retention=None` explicitly means permanent. A positive `timedelta` sets expiry
+on each write; `expires_at=` overrides it for a specific mutation. Reads never
+extend expiry. Explicit deletion remains available with `tx.delete(record)`.
+
+Feature and collection names are stable lowercase identifiers. Scope/key values
+are opaque, bounded identifiers: use user/chat/message IDs or activity tokens,
+never message text or secrets. Bot ownership comes from the caller's principal.
+`Scope(key, owner="application")` deliberately shares records among this app's
+enabled principals; it does not grant another app access. Namespaces prevent
+accidental collisions, not hostile code sharing credentials.
+
+## Concurrency and uncertain writes
+
+- Every changed record requires an exact `etag` or absence guard. Read-only
+  guards can protect a related record: accepting a vote checks the open round
+  and inserts the unique voter record in one transaction.
+- A `Conflict` means reload, reconsider the change and use a new operation ID.
+  Reapply only intended changes, preserving fields another writer updated.
+- A timeout has an unknown outcome. Retry the **same frozen transaction** with
+  its original operation ID; do not rerun the handler or reconstruct its request
+  from newer reads. Different data under the same ID raises `OperationMismatch`.
+- Successful requests and conflicts have seven-day receipts. After that window,
+  reconcile durable entity state before retrying; receipts no longer guarantee
+  deduplication. Jobs have their own persistent identity and generation.
+- No network calls belong inside a retried state transformation. A database
+  commit cannot atomically include a Telegram send or a provider request.
+
+Transactions allow at most 64 guards and 64 mutations, 256 KiB per request and
+64 KiB per document. Listings have a maximum page of 200 records, ordered by key;
+pass the last key as `after` until a short page is returned. Keep unbounded
+participants in child records (`parent=activity_key`), not a growing JSON array.
+Feature-specific capacity limits still belong to the feature service.
+
+## Evolving models
+
+`Payload` preserves unknown fields and validates known fields. Nested stored
+models must also inherit it. Validate command input separately; preserving
+stored extras is not permission to accept arbitrary user input.
+
+`payload_version` belongs to each collection's record envelope. It is independent
+of concurrency `etag`, job generation, SQL migration ledger and RPC version.
+
+- A compatible optional field needs an explicit stable default. No version bump
+  is necessary if old code can safely ignore and preserve the field.
+- Renames, required fields, changed units/types/meaning and changed defaults
+  require explicit upgrades. Preserve the meaning of omitted old fields; never
+  invent missing data or silently reset malformed documents.
+- Register pure adjacent transforms with `upgrades={1: v1_to_v2, 2: v2_to_v3}`
+  and `version=3`. Preserve unrelated fields; reject conflicting rename data.
+- Reads upgrade a copy in memory. `Record.payload_version` reports its stored
+  version; `Record.value` uses the current model. The next mutation writes the
+  current version with the original `etag` guard.
+- Missing/failed upgrades raise `InvalidPayload`; future versions raise
+  `FutureVersion`. Neither writes anything. Errors exclude payloads.
+- Forward transforms do not make an old image compatible with new data. Deploy
+  compatible readers before breaking writers. Permanent records and old backups
+  need retained upgrade paths or a verified backfill/restore plan.
+
+Expensive conversions or ones requiring external data belong in bounded,
+resumable administrative backfills. New indexes and database constraints still
+need reviewed SQL migrations.
+
+## Scheduled work
+
+Create/change the record and schedule its work in the same transaction:
+
+```python
+from msu_hub_bot.storage.features import RecordKey
+
+tx.schedule(
+    key=f"deliver:{reminder_id}", kind="deliver",
+    record=RecordKey("reminders", reminder_id), run_at=due_at,
+)
+```
+
+The referenced record must be guarded and exist after commit. Register a stable
+`worker.register(feature, kind, handler)` callback at composition time. A handler
+receives `JobContext`, reads its record, checks `await context.current()` before
+effects, and returns on success. Leases renew during execution. Tasks, locks,
+Telegram objects and executable Python are never serialized.
+
+`JobRetry` explicitly asserts replay is safe; it uses bounded backoff and a
+registered attempt limit. `JobHold` and unexpected failures stop automatic replay
+for reconciliation. `JobExpired` closes work whose semantic window ended.
+`serial_key` preserves job order within feature/scope, including retries and
+holds. Rescheduling advances generation; stale completion cannot clear newer
+work. Cancellation cannot recall an external request already sent.
+
+Pending-dependent records need `expires_at=None`. Physical protection by a job
+does not override read expiry. Set terminal retention or schedule cleanup only
+after the activity finishes. Unfinished jobs do not expire automatically;
+terminal jobs and operation receipts are cleaned after seven days. A separate
+bounded administrative `retain_features` function performs physical cleanup.
+
+For reminders, save the destination independently of the original message,
+store a finite UTC deadline plus the IANA timezone, and retain the record until
+delivery/cancellation is resolved. A reminder years ahead must not inherit a
+seven-day creation TTL. Ambiguous sends require reconciliation: leases cannot
+promise exactly-once external delivery. Preserve handler kind names while older
+scheduled jobs can reference them.
+
+## Operations and checks
+
+Apply the feature schema administratively before deploying consumers. Startup
+checks the feature RPC contract; it never applies migrations. Follow
+[database operations](database-operations.md) to update installed retention
+guards, schedule bounded feature cleanup and verify backup/restore coverage.
+Shutdown stops claiming work and drains handlers before closing clients;
+interrupted claims expire for another worker to recover.
+
+Test upgrades, preserved extras, concurrent changes, replayed commits, expired
+records, stale leases/generations and interrupted external effects. The real
+PostgreSQL suite validates authentication and transaction guarantees. Inspect
+held work and retry pressure through redacted diagnostics, never payload logs.
