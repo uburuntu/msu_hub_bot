@@ -79,12 +79,22 @@ class ReminderService:
         if schedule.due_at <= self.clock():
             raise ReminderError("Выбери время в будущем.")
 
+    def creation_key(self, *, author_id: int, chat_id: int, thread_id: int | None, source_message_id: int) -> str:
+        """Stable identity lets adapters reconcile a repeated request before parsing its date."""
+        return hashlib.blake2s(f"{self.bot.id}:{author_id}:{chat_id}:{thread_id}:{source_message_id}".encode(), digest_size=6).hexdigest()
+
+    async def get_creation(self, *, author_id: int, chat_id: int, thread_id: int | None, source_message_id: int) -> Record[Reminder] | None:
+        key = self.creation_key(author_id=author_id, chat_id=chat_id, thread_id=thread_id, source_message_id=source_message_id)
+        row = await self.items.get(self.scope(author_id), key)
+        if row is not None and (row.value.author_id, row.value.chat_id, row.value.thread_id) != (author_id, chat_id, thread_id):
+            raise ReminderError("Не удалось проверить владельца напоминания.")
+        return row
+
     async def create(
         self, *, author_id: int, author_name: str, chat_id: int, thread_id: int | None, source_message_id: int, schedule: Schedule
     ) -> Record[Reminder]:
-        scope = self.scope(author_id)
-        key = hashlib.blake2s(f"{self.bot.id}:{author_id}:{chat_id}:{thread_id}:{source_message_id}".encode(), digest_size=6).hexdigest()
-        old = await self.items.get(scope, key)
+        key = self.creation_key(author_id=author_id, chat_id=chat_id, thread_id=thread_id, source_message_id=source_message_id)
+        old = await self.get_creation(author_id=author_id, chat_id=chat_id, thread_id=thread_id, source_message_id=source_message_id)
         if old is not None:
             return old
         self._future(schedule)

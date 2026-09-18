@@ -133,6 +133,17 @@ async def test_owner_and_destination_are_checked_for_every_control(rig):
     assert (await rig.service.get(42, record.key)).value.status == "pending"
 
 
+async def test_creation_lookup_reconciles_retries_after_due_time_without_reparsing(rig):
+    record = await create(rig)
+    rig.backend.now = record.value.due_at + timedelta(days=1)
+    identity = {"author_id": 42, "chat_id": -123, "thread_id": 17, "source_message_id": 1}
+    assert rig.service.creation_key(**identity) == record.key
+    assert await rig.service.get_creation(**identity) == record
+    assert await rig.service.get_creation(**{**identity, "author_id": 43}) is None
+    assert await rig.service.get_creation(**{**identity, "thread_id": 18}) is None
+    assert len(rig.backend.records) == 1 and len(rig.backend.jobs) == 1
+
+
 async def test_reschedule_and_cancel_fence_old_work_and_stale_buttons(rig):
     record = await create(rig)
     changed = await rig.service.reschedule(42, record.key, Schedule(due_at=NOW + timedelta(days=3000)), expected_etag=record.etag)
