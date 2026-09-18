@@ -360,6 +360,34 @@ def test_target_credentials_only_enter_environment(monkeypatch, tmp_path):
     assert captured["env"]["PGPASSWORD"] == "private-canary"
 
 
+@pytest.mark.parametrize("revision", [4, 6, 7, 99, True, "5", None])
+def test_historical_restore_cannot_be_retargeted_to_another_schema(tmp_path, monkeypatch, revision):
+    monkeypatch.setattr(migration.subprocess, "run", lambda *args, **kwargs: pytest.fail("Must reject before connecting"))
+    with pytest.raises(migration.MigrationError, match="historical_restore_requires_schema_5"):
+        migration.Postgres({"expected_schema_version": revision}, tmp_path, 999)
+
+
+@pytest.mark.parametrize("revision", [5, 6, 7])
+def test_historical_restore_checks_actual_revision_even_with_valid_configuration(tmp_path, monkeypatch, revision):
+    target = migration.Postgres(
+        {
+            "connection": {"PGDATABASE": "hub_test_restore"},
+            "expected_database": "hub_test_restore",
+            "expected_system_identifier": "123",
+            "expected_schema_version": 5,
+        },
+        tmp_path,
+        999,
+    )
+    result = {"database": "hub_test_restore", "cluster": "123", "principal": True, "version": revision}
+    monkeypatch.setattr(target, "run", lambda script: migration.canonical(result))
+    if revision == 5:
+        target.guard()
+    else:
+        with pytest.raises(migration.MigrationError, match="historical_restore_requires_schema_5"):
+            target.guard()
+
+
 def test_private_config_required(tmp_path):
     path = tmp_path / "config.json"
     path.write_text('{"password":"private-canary"}')

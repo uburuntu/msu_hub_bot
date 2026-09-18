@@ -55,14 +55,17 @@ column, such as an observed user attribute, and releases the database change fir
 Before each SQL revision, search for consumers of the schema version and the
 changed columns/functions, including installed operator tools:
 
-- `tests/test_postgres_storage.py` applies **every** top-level `*.sql` file in
-  lexical order. Update its expected migration ledger and affected assertions;
-  new tables also need fixture cleanup and authorization coverage. Do not put
-  sample SQL or manual one-off scripts in that migration directory.
-- `tools/migrate_storage.py` checks a configured `expected_schema_version`
-  against the exact target revision and also has a fallback revision. Review
-  the tool, synthetic fixtures, private target configurations and preserved
-  export compatibility together; changing a number does not prove compatibility.
+- The PostgreSQL suites retain a schema-5 fixture for historical contracts and
+  clone an isolated database for the complete migration history. Update the
+  fixture, expected ledger and affected assertions; new tables also need cleanup
+  and authorization coverage. Do not put sample SQL or manual one-off scripts in
+  the numbered migration directory.
+- `tools/migrate_storage.py` restores historical exports only into an isolated
+  schema-5 target. It rejects other configured or actual revisions and guards
+  every write batch. Finish import, reconciliation and normalization before
+  applying later migrations to that target. Current recovery uses PostgreSQL
+  backups containing feature records, jobs and transaction receipts together;
+  old exports cannot reconstruct those records.
 - The installed retention supervisor deliberately rejects an unreviewed SQL
   revision. It also pins the retention function body, owner and privileges,
   rejects unreviewed triggers/rules/inbound foreign keys on retention targets,
@@ -80,6 +83,53 @@ changed columns/functions, including installed operator tools:
   helper. Schedule and verify it explicitly when enabling feature consumers;
   `retain_messages` does not clean feature records, terminal jobs or operation
   receipts. Preserve pending dependencies and validate its own ownership/grants.
+
+## Consolidating application documents
+
+Preferences, directory entries and VK subscriptions use permanent typed documents
+in application scope `global` (`owner_id = 0`). Their maintained models live in
+`storage/application.py`; ordinary field changes follow the feature model upgrade
+contract instead of adding table-specific SQL.
+
+| Source storage | Feature / collection | Document key |
+| --- | --- | --- |
+| `chat_settings` | `settings/chats` | Chat ID |
+| `directory` | `ecosystem/chats` | Chat ID |
+| `vk_subscriptions` | `vk/subscriptions` | `owner_id:chat_id` |
+
+Use the following procedure for the numbered consolidation migrations:
+
+1. Verify the exact database/cluster, preceding ledger, source counts, known
+   preference types, document size bounds and an empty destination. Preserve a
+   consistent recovery copy and validate its isolated restore. Review consumers,
+   maintenance guards and backup coverage before changing the schema.
+2. Pause CD and maintenance, hold the deployment lock and stop the sole poller.
+   Install the feature foundation first if needed. Keep every application writer
+   stopped through both migration stages; the tool does not stop them for you.
+3. Apply `006_application_documents.sql`. It rejects destination collisions and
+   invalid preferences, preserves source values and timestamps, and verifies an
+   exact copy. The three preference defaults fill only missing keys. Directory
+   and VK UUIDs/creation times stay in their payloads; all documents have no expiry.
+   Read the administrative `verify_application_documents()` count report and
+   validate the copied records through their Pydantic models without modifying them.
+4. Apply `007_retire_application_tables.sql`. It repeats exact parity checks,
+   then removes only the three source tables, their ten dedicated RPCs and the
+   staging helpers. Unexpected dependencies abort the transaction; no cascading
+   drop is used. User/chat journaling and historical journal entries remain.
+   The generic chat RPC gains an explicit `p_refresh` policy for stale snapshots.
+5. Verify authenticated health reports `application_documents: 1`, retained data
+   and access restrictions, then start a compatible image. Startup/preflight reject
+   an incomplete consolidation. Validate settings, directory and VK operations,
+   game recovery and scheduled work. Reinstall reviewed maintenance expectations,
+   run bounded cleanup checks and verify a scheduled run before resuming CD.
+
+Before revision 7, source tables remain authoritative. Resuming old writers makes
+the copied documents stale; stop again and explicitly reconcile before retirement.
+After revision 7, an old image requiring the removed RPCs is not a valid rollback.
+Use a schema-compatible image, or stop writers and reconcile a verified isolated
+restore while preserving the current recovery copy. Feature writes are not covered
+by the user/chat mutation journal. Never restore the whole shared Supabase instance
+to undo one application's migration without assessing other projects' data.
 
 ## Other common changes
 
@@ -149,7 +199,7 @@ uv run --no-sync ruff format --check src tests tools
 uv run --no-sync mypy
 uv run --no-sync pytest -q
 HUB_TEST_POSTGRES_DSN=postgresql:///hub_test_schema_change \
-  uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py
+  uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py tests/test_application_postgres.py
 ```
 
 The ordinary suite skips real SQL without that variable; CI has a dedicated

@@ -1,7 +1,9 @@
-"""Explicit administrative storage transfer; never imported by the bot or deployment.
+"""Historical export restoration into an isolated schema-5 PostgreSQL database.
 
 Existing exports are immutable, private recovery artifacts. Imports upsert only
-source-owned fields and never delete target records; no source database driver is needed.
+source-owned fields and never delete target records. Finish reconciliation before
+applying newer SQL revisions. Current application recovery uses PostgreSQL backups;
+this tool neither restores feature documents nor connects to a retired backend.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from typing import Any
 from uuid import UUID
 
 FORMAT = 2
+RESTORE_SCHEMA_REVISION = 5
 MAX_LINE = 32 * 1024 * 1024
 IDENTIFIER = re.compile(r"[a-z_][a-z_0-9]*\Z")
 TABLES = {
@@ -293,6 +296,9 @@ def copy_unescape(text: str) -> str:
 
 class Postgres:
     def __init__(self, config: dict[str, Any], directory: Path, bot_id: int) -> None:
+        revision = config.get("expected_schema_version", RESTORE_SCHEMA_REVISION)
+        if type(revision) is not int or revision != RESTORE_SCHEMA_REVISION:
+            raise MigrationError("historical_restore_requires_schema_5")
         self.config = config
         self.directory = directory
         self.bot_id = bot_id
@@ -360,10 +366,12 @@ SELECT json_build_object('database',current_database(),'cluster',system_identifi
 FROM pg_control_system();
 """)
         )
+        if isinstance(result, dict) and result.get("version") != RESTORE_SCHEMA_REVISION:
+            raise MigrationError("historical_restore_requires_schema_5")
         if result != {
             "database": self.config["expected_database"],
             "cluster": self.config["expected_system_identifier"],
-            "version": self.config.get("expected_schema_version", 5),
+            "version": RESTORE_SCHEMA_REVISION,
             "principal": True,
         }:
             raise MigrationError("target_identity_mismatch")
@@ -404,6 +412,16 @@ def import_fields(table: str, schema: dict[str, Any]) -> list[str]:
     if any(item["target"]["name"] != SOURCE_TYPES.get(item["name"], "std::str") for item in schema["properties"]):
         raise MigrationError("unmapped_source_scalar_type")
     return sorted(set(names) - {"full_name"})
+
+
+def restore_revision_guard() -> str:
+    return f"""LOCK TABLE msu_hub_private.schema_migrations IN SHARE MODE;
+DO $$ BEGIN
+ IF (SELECT max(version) FROM msu_hub_private.schema_migrations) IS DISTINCT FROM {RESTORE_SCHEMA_REVISION} THEN
+  RAISE EXCEPTION 'Historical restore requires schema revision {RESTORE_SCHEMA_REVISION}';
+ END IF;
+END $$;
+"""
 
 
 def batch_script(table: str, batch: list[dict[str, Any]], manifest: dict[str, Any]) -> str:
@@ -447,6 +465,8 @@ END $$;
     copied = "".join(copy_escape(canonical(row)) + "\n" for row in batch)
     return f"""BEGIN;
 SET LOCAL statement_timeout='240s';
+SET LOCAL lock_timeout='3s';
+{restore_revision_guard()}
 SELECT pg_advisory_xact_lock({manifest["bot_id"]});
 CREATE TEMP TABLE migration_batch(payload jsonb) ON COMMIT DROP;
 COPY migration_batch(payload) FROM STDIN;
@@ -760,6 +780,8 @@ def normalization_script(batch: list[dict[str, Any]], bot_id: int, as_of: str) -
     copied = "".join(copy_escape(canonical(row)) + "\n" for row in batch)
     return f"""BEGIN;
 SET LOCAL statement_timeout='240s';
+SET LOCAL lock_timeout='3s';
+{restore_revision_guard()}
 SELECT pg_advisory_xact_lock({bot_id});
 CREATE TEMP TABLE migration_batch(payload jsonb) ON COMMIT DROP;
 COPY migration_batch(payload) FROM STDIN;

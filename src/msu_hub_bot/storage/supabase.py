@@ -62,6 +62,7 @@ class _Health(BaseModel):
 
     schema_version: StrictInt
     bot_id: StrictInt = Field(gt=0, le=2**63 - 1)
+    application_documents: StrictInt
 
 
 def _record(model: type[_Record], value: JsonValue) -> _Record:
@@ -265,7 +266,7 @@ class SupabaseRepository:
     async def check(self) -> None:
         def validate(value: JsonValue) -> None:
             result = _record(_Health, value)
-            if result.schema_version != 1 or result.bot_id != self._bot_id:
+            if result.schema_version != 1 or result.bot_id != self._bot_id or result.application_documents != 1:
                 raise RepositoryProtocolError()
 
         await self._rpc("health", {}, validate, operation="database.check")

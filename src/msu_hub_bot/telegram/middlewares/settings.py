@@ -11,21 +11,16 @@ from aiogram import BaseMiddleware
 from aiogram.types import Chat, TelegramObject
 from msu_hub_bot.telemetry import Backend, Boundary, Telemetry
 
-from pydantic import BaseModel, ConfigDict, JsonValue, PrivateAttr, TypeAdapter
+from pydantic import JsonValue, PrivateAttr, TypeAdapter
 
+from msu_hub_bot.storage.application import ChatPreferences
 from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.observations import chat_observation
 
 _JSON_SETTINGS = TypeAdapter(dict[str, JsonValue])
 
 
-class Settings(BaseModel):
-    model_config = ConfigDict(validate_assignment=True, validate_default=True, extra="allow", hide_input_in_errors=True)
-
-    auto_speech_recognition: bool = True
-    auto_video_links: bool = True
-    with_nsfw: bool = False
-
+class Settings(ChatPreferences):
     _chat_id: int | None = PrivateAttr(default=None)
     _saved_snapshot: dict[str, Any] = PrivateAttr(default_factory=dict)
     _save_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)

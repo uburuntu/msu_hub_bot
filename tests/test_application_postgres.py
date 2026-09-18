@@ -379,3 +379,23 @@ async def test_application_facade_preserves_identity_and_fields_through_conflict
     assert await documents.list_directory() == []
     assert db.value("SELECT count(*) FROM msu_hub_private.feature_records WHERE expires_at IS NOT NULL;") == 0
     assert db.value("SELECT count(*) FROM msu_hub_private.mutation_journal WHERE relation_name NOT IN ('users','chats');") == 0
+
+
+def test_historical_import_and_normalization_refuse_current_schema_before_any_writes(application_db, tmp_path):
+    from test_migrate_storage import AS_OF, make_export, source_records
+    from test_postgres_storage import migration_target
+
+    from tools.migrate_storage import MigrationError, batch_script, normalization_script
+
+    db = application_db
+    directory = tmp_path / "historical-restore"
+    manifest = make_export(directory)
+    target = migration_target(db, directory)
+    with pytest.raises(MigrationError, match="historical_restore_requires_schema_5"):
+        target.guard()
+    before = rows_snapshot(db, ("users", "chats", "updates", "messages", "feature_records", "mutation_journal"))
+    scripts = [batch_script("users", source_records()["users"], manifest), normalization_script([], 999, AS_OF)]
+    for script in scripts:
+        result = db.run(script, check=False)
+        assert result.returncode and "Historical restore requires schema revision 5" in result.stderr
+        assert rows_snapshot(db, ("users", "chats", "updates", "messages", "feature_records", "mutation_journal")) == before

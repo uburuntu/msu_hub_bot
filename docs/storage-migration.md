@@ -1,6 +1,8 @@
 # Recovery artifact verification and import
 
-`tools/migrate_storage.py` verifies preserved exports and imports their five entity types into the bot's PostgreSQL schema. It is an operator tool, separate from application startup and deployment. Run it with `uv run python -m tools.migrate_storage`. It reads immutable artifacts and connects only to PostgreSQL; it cannot export from a retired database backend.
+`tools/migrate_storage.py` verifies preserved exports and restores their five entity types into an **isolated PostgreSQL database at SQL revision 5**. It is an operator tool, separate from application startup and deployment. Run it with `uv run python -m tools.migrate_storage`. It reads immutable artifacts and connects only to PostgreSQL; it cannot export from a retired backend or restore current feature records, jobs and transaction receipts.
+
+Current application recovery uses a consistent PostgreSQL backup. To reconstruct a historical export, install SQL revisions 001–005 in an isolated target, import and complete reconciliation/normalization there, then apply later migrations through the [database procedure](database-operations.md#consolidating-application-documents). The tool rejects other target revisions before writes and checks revision 5 again inside every write batch. Changing a configuration number cannot enable historical mappings against the current schema.
 
 Keep configuration, exports, diagnostics and recovery copies in private directories outside the repository. Configuration files must have mode `0600`; the tool creates private artifacts and prints only counts and error categories. Never pass credentials as command arguments.
 
@@ -10,10 +12,10 @@ The target JSON contains:
 
 - `connection`: explicit `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` and optional TLS environment values.
 - `expected_database` and `expected_system_identifier`: the intended database name and PostgreSQL cluster identity from `pg_control_system()`.
-- `expected_schema_version`: the applied SQL migration number, defaulting to `5`. This differs from the public RPC contract version, which remains `1`.
+- `expected_schema_version`: `5`, the supported historical restore schema; omission also selects `5`. Other values are rejected. This is independent of the public RPC contract version.
 - Optional `psql_command`: normally `["psql"]`. A local container transport may use `["docker", "exec", "-i", "-e", "PGPASSWORD", "-e", "PGUSER", "-e", "PGDATABASE", "supabase-db", "psql"]`. Forward environment variable names, never their values. The container must receive every connection variable it needs.
 
-The administrative identity needs access to cluster identity, application tables and private observation helpers. Never give these privileges or platform credentials to the bot. The target guard checks the cluster, database, SQL revision and configured bot principal before transfer.
+The administrative identity needs access to cluster identity, application tables and private observation helpers. Never give these privileges or platform credentials to the bot. The target guard checks the cluster, database, historical SQL revision and configured bot principal before transfer. The connection must point to the isolated restore target, not the running application's database.
 
 ## Snapshot and exact import
 
@@ -43,7 +45,7 @@ Imports use bounded transactional COPY batches and absolute upserts keyed by sou
 
 Local checkpoints acknowledge successful batches. Rerunning the same import resumes; an uncertain commit is safely replayed. Keep batch size and manifest unchanged when resuming. Import and normalization checkpoints bind the complete manifest, including selection scope. `--replay` reapplies acknowledged batches, but cannot replay an export after its normalization has been applied. Target application writers must remain stopped during import and reconciliation: the flag is an operator assertion, not a mechanism that stops them. Reconciliation uses stable ordered streams and reports missing/extra rows and per-field hashes without printing values.
 
-Before importing into an existing database, freeze application writers and verify
+Before importing into an existing isolated restore database, freeze its writers and verify
 that the chosen artifact and target are authoritative for that recovery operation.
 Extra target rows require review and are never automatically pruned. Production
 PostgreSQL backups remain authoritative for writes made after an export.
@@ -77,4 +79,4 @@ Normalization is resumable and transactional. Its audit compares expected messag
 
 ## Recovery boundary
 
-Supported recovery stays on Supabase using a compatible image and verified PostgreSQL backups. Image rollback cannot reverse a database cutover; cross-backend recovery remains blocked until a separate reverse transfer is implemented and verified. Preserve the mutation journal, deletion tombstones and current settings for that reconciliation. A frozen PostgreSQL backup is authoritative for post-cutover data: latest-only normalized messages cannot reconstruct every historical edit body. Verify counts and values before starting exactly one writer. The transfer tool never writes to the source database or runs a reverse migration automatically.
+Supported application recovery uses a compatible image and verified PostgreSQL backups. Image rollback cannot reverse a database cutover. Preserve the mutation journal, deletion tombstones and current application documents; the journal does not reconstruct feature records or jobs. A frozen PostgreSQL backup is authoritative for data written after the historical export: latest-only normalized messages cannot reconstruct every historical edit body. Restore and verify in isolation before any application-scoped reconciliation, preserving other projects in the shared Supabase instance. Verify counts and values before starting exactly one writer. The transfer tool never writes to a retired source database or runs a reverse migration automatically.

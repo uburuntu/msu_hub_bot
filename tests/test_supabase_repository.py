@@ -27,7 +27,7 @@ from telemetry_helpers import Capture, config
 CANARY = "synthetic-private-value"
 NOW = datetime(2026, 9, 17, tzinfo=UTC)
 BOT_ID = 123456789
-HEALTH = {"schema_version": 1, "bot_id": BOT_ID}
+HEALTH = {"schema_version": 1, "bot_id": BOT_ID, "application_documents": 1}
 
 
 def token(name="one", expires=3600):
@@ -466,13 +466,18 @@ async def test_cancellation_propagates_and_closes_response(configured):
     [
         None,
         [],
-        {"schema_version": 2, "bot_id": BOT_ID},
-        {"schema_version": True, "bot_id": BOT_ID},
-        {"schema_version": 1, "bot_id": str(BOT_ID)},
-        {"schema_version": 1, "bot_id": BOT_ID + 1},
+        {**HEALTH, "schema_version": 2},
+        {**HEALTH, "schema_version": True},
+        {**HEALTH, "bot_id": str(BOT_ID)},
+        {**HEALTH, "bot_id": BOT_ID + 1},
+        {"schema_version": 1, "bot_id": BOT_ID},
+        {**HEALTH, "application_documents": 0},
+        {**HEALTH, "application_documents": 2},
+        {**HEALTH, "application_documents": True},
+        {**HEALTH, "application_documents": "1"},
     ],
 )
-async def test_health_rejects_wrong_schema_or_principal(configured, value):
+async def test_health_rejects_wrong_contract_principal_or_missing_document_capability(configured, value):
     repo, _ = configured([Response(token()), Response(value)])
     try:
         with pytest.raises(module.RepositoryProtocolError):
