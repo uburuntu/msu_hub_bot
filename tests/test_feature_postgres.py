@@ -517,18 +517,30 @@ async def test_quiz_restart_settlement_and_cleanup_use_real_feature_transactions
     from unittest.mock import AsyncMock, Mock
 
     from aiogram.methods import SendPhoto
-    from quiz_helpers import GameSession, PHOTO, PNG, PUZZLE, ScoreStore, click, edits, restart, settle, start, text_of
+    from quiz_helpers import GameSession, PHOTO, PNG, PUZZLE, click, edits, restart, score_rows, score_values, settle, start, text_of
     from telegram_helpers import make_message
 
-    from msu_hub_bot.games import definitions, scores
+    from msu_hub_bot.games import definitions
     from msu_hub_bot.games.quiz import RESULT_TTL
     from msu_hub_bot.telegram.wrapper import BotWrapper
 
     class Backend:
         now = datetime.now(UTC)
 
+        def __init__(self):
+            self.score_requests = []
+            self.lost = False
+
         async def feature_request(self, operation, value):
-            return await asyncio.to_thread(call, db, operation, value)
+            from msu_hub_bot.storage.supabase import RepositoryFailure, RepositoryUnavailable
+
+            result = await asyncio.to_thread(call, db, operation, value)
+            if operation == "commit" and any(put["collection"] == "scores" for put in value["puts"]):
+                self.score_requests.append((value, result["outcome"]))
+                if not self.lost:
+                    self.lost = True
+                    raise RepositoryUnavailable(RepositoryFailure.UNAVAILABLE)
+            return result
 
     monkeypatch.setattr("msu_hub_bot.games.quiz.EDIT_INTERVAL", 0)
     monkeypatch.setattr(definitions, "random_puzzle", AsyncMock(return_value=PUZZLE))
@@ -537,14 +549,11 @@ async def test_quiz_restart_settlement_and_cleanup_use_real_feature_transactions
     backend = Backend()
     session = GameSession(backend)
     bot = BotWrapper("123456789:" + "a" * 35, session=session)
-    client = ScoreStore()
     rig = SimpleNamespace(
         feature=feature,
         backend=backend,
         session=session,
         bot=bot,
-        client=client,
-        redis=SimpleNamespace(redis=AsyncMock(return_value=client)),
         message=make_message(bot, message_id=10, date=backend.now, is_topic_message=True, message_thread_id=17),
     )
     restart(rig)
@@ -553,8 +562,9 @@ async def test_quiz_restart_settlement_and_cleanup_use_real_feature_transactions
         assert record is not None and record.value.question is not None
         question = record.value.question.model_dump()
         message_id = record.value.message_id
-        await click(rig, record, record.value.question.answer)
-        await click(rig, record, (record.value.question.answer + 1) % 6, user_id=43)
+        for uid in range(42, 107):
+            choice = (record.value.question.answer + (1 if uid == 43 else 0)) % 6
+            await click(rig, record, choice, user_id=uid)
         rig.worker.stop()
         restart(rig)
         definitions.random_puzzle.side_effect = AssertionError("A restored game must not fetch another question")
@@ -563,16 +573,25 @@ async def test_quiz_restart_settlement_and_cleanup_use_real_feature_transactions
         assert restored.value.question.model_dump() == question
         assert restored.value.message_id == message_id and restored.value.thread_id == 17
         voters = await rig.quiz.votes(feature, record.scope, record.key)
-        assert [(v.value.user_id, v.value.choice) for v in voters] == [(42, question["answer"]), (43, (question["answer"] + 1) % 6)]
+        assert {v.value.user_id: v.value.choice for v in voters} == {
+            uid: (question["answer"] + (1 if uid == 43 else 0)) % 6 for uid in range(42, 107)
+        }
         await click(rig, restored, "finish")
         await settle(rig)
         closed = await rig.quiz.round(feature, record.value.chat_id, record.key)
         assert closed.value.phase == "closed" and closed.value.score_status == "recorded"
         assert closed.value.message_id == message_id
-        score_key = scores.score_key(feature, closed.value.chat_id, closed.value.score_day)
-        assert client.scores[score_key] == {"42": 1, "43": 0}
-        client.eval.assert_awaited_once()
-        assert "Угадали 1 из 2" in text_of(edits(rig)[-1])
+        assert closed.value.score_count == 65 and closed.value.score_cursor is not None
+        expected_scores = {uid: 0 if uid == 43 else 1 for uid in range(42, 107)}
+        assert await score_values(rig, closed.value.score_day) == expected_scores
+        assert [outcome for _, outcome in backend.score_requests] == ["committed", "replayed", "committed", "committed"]
+        assert backend.score_requests[0][0] == backend.score_requests[1][0]
+        assert [
+            sum(put["collection"] == "scores" for put in request["puts"])
+            for request, outcome in backend.score_requests
+            if outcome == "committed"
+        ] == [30, 30, 5]
+        assert "Угадали 64 из 65" in text_of(edits(rig)[-1])
         assert {method.message_id for method in edits(rig)} == {message_id}
         assert len([method for method in session.methods if isinstance(method, SendPhoto)]) == 1
 
@@ -586,7 +605,10 @@ async def test_quiz_restart_settlement_and_cleanup_use_real_feature_transactions
         assert db.value("SELECT count(*) FROM msu_hub_private.feature_jobs WHERE terminal_at IS NULL;") == 0
         chat = await rig.quiz.collections[feature].chats.get(record.scope, "state")
         assert chat.value.recent == [record.value.question.identity]
-        assert client.scores[score_key] == {"42": 1, "43": 0}
+        assert await score_values(rig, closed.value.score_day) == expected_scores
+        assert all(score.expires_at is None for score in await score_rows(rig, closed.value.score_day))
+        db.run("SELECT msu_hub_private.retain_features(1000,clock_timestamp()+interval '90 days');")
+        assert await score_values(rig, closed.value.score_day) == expected_scores
     finally:
         rig.worker.stop()
         await session.close()

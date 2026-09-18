@@ -9,9 +9,9 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import AnswerCallbackQuery, EditMessageCaption, EditMessageMedia, SendMessage, SendPhoto
 
 from msu_hub_bot.commands import chess, geoguess
-from msu_hub_bot.games import definitions, scores
+from msu_hub_bot.games import definitions
 from msu_hub_bot.providers.exceptions import ExternalServiceError
-from quiz_helpers import PHOTO, PNG, PUZZLE, click, edits, restart, rig as rig, settle, start, text_of
+from quiz_helpers import PHOTO, PNG, PUZZLE, click, edits, restart, rig as rig, score_rows, score_values, settle, start, text_of
 from telegram_helpers import make_message
 
 
@@ -78,14 +78,14 @@ async def test_finish_scores_all_players_once_with_floor_and_names(rig):
     await settle(rig)
     stored = await current(rig, record)
     assert stored.value.phase == "closed" and stored.value.score_status == "recorded"
-    key = scores.score_key(rig.feature, rig.message.chat.id, stored.value.score_day)
-    assert rig.client.scores[key] == {"42": 1, "43": 0}
-    assert rig.client.hashes[key + ":names"]["42"] == "User 42 <&>"
-    rig.client.eval.assert_awaited_once()
+    assert await score_values(rig, stored.value.score_day) == {42: 1, 43: 0}
+    players = await score_rows(rig, stored.value.score_day)
+    assert players[0].value.name == "User 42 <&>" and players[0].value.username == "user_42"
+    assert stored.value.score_count == 2
     result = text_of(edits(rig)[-1])
     assert "Угадали 1 из 2" in result and "+1" in result and "−1" in result
     if rig.feature == "chess":
-        assert "Rxc8+" in result and isinstance(edits(rig)[-1], EditMessageMedia)
+        assert "Rxc8+" in result and any(isinstance(edit, EditMessageMedia) for edit in edits(rig))
     else:
         assert "Берген" in result and "Норвегия" in result and "Источник фотографии" in result
     await click(rig, record, answer, user_id=44)
@@ -113,7 +113,7 @@ async def test_cancelled_finish_callback_cannot_cancel_durable_settlement(rig, m
     restart(rig)
     await settle(rig)
     assert (await current(rig, record)).value.score_status == "recorded"
-    rig.client.eval.assert_awaited_once()
+    assert (await current(rig, record)).value.score_status == "recorded"
 
 
 @pytest.mark.parametrize("choice", ["-1", "6", "nope", "page_", "page_-1", "page_1.5", "page_١", "page_999999999"])
@@ -178,7 +178,7 @@ async def test_many_voters_are_paged_on_the_original_message_after_restart(rig):
     assert seen == {f"tg://user?id={user_id}" for user_id in range(61)}
     assert {method.message_id for method in edits(rig)} == {record.value.message_id}
     assert not any(isinstance(method, SendMessage) for method in rig.session.methods)
-    rig.client.eval.assert_awaited_once()
+    assert (await current(rig, record)).value.score_status == "recorded"
 
 
 async def test_completed_navigation_does_not_change_new_active_round(rig):
@@ -247,52 +247,140 @@ async def test_future_record_version_is_rejected_without_overwriting(rig):
     assert not await votes(rig, record)
 
 
-async def test_lost_redis_response_retries_frozen_settlement_once(rig):
+async def test_lost_score_commit_reply_replays_the_same_transaction_once(rig, monkeypatch):
+    from msu_hub_bot.storage.supabase import RepositoryFailure, RepositoryUnavailable
+
     record = await start(rig)
     await click(rig, record, record.value.question.answer)
-    original = rig.client.apply
-    calls = 0
+    await click(rig, record, "finish")
+    original = rig.backend.feature_request
+    lost = False
+    attempts = []
 
-    async def uncertain(*args):
-        nonlocal calls
-        calls += 1
-        result = await original(*args)
-        if calls == 1:
-            raise TimeoutError("reply lost after committing scores")
+    async def uncertain(operation, request):
+        nonlocal lost
+        result = await original(operation, request)
+        if operation == "commit" and any(put["collection"] == "scores" for put in request["puts"]):
+            attempts.append(request)
+            if not lost:
+                lost = True
+                raise RepositoryUnavailable(RepositoryFailure.UNAVAILABLE)
         return result
 
-    rig.client.eval.side_effect = uncertain
-    await click(rig, record, "finish")
-    await settle(rig)
-    pending = await current(rig, record)
-    assert pending.value.score_status == "pending"
-    rig.backend.now += timedelta(seconds=3)
-    restart(rig)
+    monkeypatch.setattr(rig.backend, "feature_request", uncertain)
     await settle(rig)
     result = await current(rig, record)
-    key = scores.score_key(rig.feature, result.value.chat_id, result.value.score_day)
-    assert rig.client.scores[key] == {"42": 1}
-    assert result.value.score_status == "recorded" and calls == 2
-    assert rig.client.eval.call_args_list[0].args == rig.client.eval.call_args_list[1].args
+    assert await score_values(rig, result.value.score_day) == {42: 1}
+    assert result.value.score_status == "recorded" and result.value.score_count == 1
+    assert len(attempts) == 2 and attempts[0] == attempts[1]
+
+
+async def test_many_scores_use_guarded_batches_without_exceeding_transaction_limits(rig):
+    record = await start(rig)
+    answer = record.value.question.answer
+    await asyncio.gather(*(click(rig, record, answer, user_id=uid) for uid in range(65)))
+    await click(rig, record, "finish")
+    await settle(rig)
+    closed = await current(rig, record)
+    assert closed.value.score_status == "recorded" and closed.value.score_count == 65
+    assert await score_values(rig, closed.value.score_day) == dict.fromkeys(range(65), 1)
+    batches = [
+        request
+        for operation, request in rig.backend.calls
+        if operation == "commit" and any(put["collection"] == "scores" for put in request["puts"])
+    ]
+    assert len(batches) == 3
+    assert [sum(put["collection"] == "scores" for put in batch["puts"]) for batch in batches] == [30, 30, 5]
+    for batch in batches:
+        assert len(batch["guards"]) <= 64
+        assert len(batch["puts"]) + len(batch["deletes"]) + len(batch["jobs"]) + len(batch["cancel_jobs"]) <= 64
+        assert {guard["collection"] for guard in batch["guards"]} == {"rounds", "votes", "scores"}
+        assert next(put for put in batch["puts"] if put["collection"] == "rounds")["payload"]["score_cursor"]
+
+
+async def test_restart_after_one_committed_batch_resumes_without_duplicate_points(rig, monkeypatch):
+    record = await start(rig)
+    await asyncio.gather(*(click(rig, record, record.value.question.answer, user_id=uid) for uid in range(65)))
+    await click(rig, record, "finish")
+    original = rig.backend.feature_request
+    crashed = False
+
+    async def crash_after_commit(operation, request):
+        nonlocal crashed
+        result = await original(operation, request)
+        if not crashed and operation == "commit" and any(put["collection"] == "scores" for put in request["puts"]):
+            crashed = True
+            raise asyncio.CancelledError()
+        return result
+
+    monkeypatch.setattr(rig.backend, "feature_request", crash_after_commit)
+    with pytest.raises(asyncio.CancelledError):
+        await rig.worker.run_once()
+    pending = await current(rig, record)
+    assert pending.value.score_status == "pending" and pending.value.score_count == 30
+    assert len(await score_values(rig, pending.value.score_day)) == 30
+    assert pending.value.score_cursor is not None
+    rig.backend.now += timedelta(seconds=61)
+    restart(rig)
+    await settle(rig)
+    closed = await current(rig, record)
+    assert closed.value.score_status == "recorded" and closed.value.score_count == 65
+    assert await score_values(rig, closed.value.score_day) == dict.fromkeys(range(65), 1)
+
+
+async def test_two_stale_workers_cannot_both_apply_the_same_score_batch(rig, monkeypatch):
+    from msu_hub_bot.games.quiz import QuizService
+    from msu_hub_bot.storage.features import Conflict, FeatureWorker, Job, JobContext
+
+    record = await start(rig)
+    await click(rig, record, record.value.question.answer)
+    await click(rig, record, "finish")
+    claimed = await rig.backend.feature_request(
+        "claim_jobs", {"handlers": [{"feature": rig.feature, "kind": "settle"}], "limit": 1, "lease_seconds": 60}
+    )
+    context = JobContext(rig.store, Job.model_validate(claimed[0]))
+    competitor = QuizService(rig.bot, rig.store, FeatureWorker(rig.store))
+    competitor.clock = rig.quiz.clock
+    original = rig.backend.feature_request
+    ready = asyncio.Event()
+    writers = 0
+
+    async def race(operation, request):
+        nonlocal writers
+        if operation == "commit" and any(put["collection"] == "scores" for put in request["puts"]):
+            writers += 1
+            if writers == 2:
+                ready.set()
+            await ready.wait()
+        return await original(operation, request)
+
+    monkeypatch.setattr(rig.backend, "feature_request", race)
+    results = await asyncio.gather(rig.quiz._settle(context), competitor._settle(context), return_exceptions=True)
+    assert any(isinstance(result, Conflict) for result in results)
+    assert writers == 2
+    closed = await current(rig, record)
+    assert closed.value.score_count == 1 and closed.value.score_status == "recorded"
+    assert await score_values(rig, closed.value.score_day) == {42: 1}
 
 
 async def test_pending_settlements_cannot_reorder_floored_scores(rig):
     first = await start(rig)
     await click(rig, first, (first.value.question.answer + 1) % 6)
-    rig.client.eval.side_effect = TimeoutError("temporary Redis outage")
     await click(rig, first, "finish")
-    await settle(rig)
+    first_job = next(job for job in rig.backend.jobs.values() if job["kind"] == "settle")
+    first_job["state"] = "held"
     second = await start(rig, rig.message.model_copy(update={"message_id": 11}))
     await click(rig, second, second.value.question.answer)
     await click(rig, second, "finish")
     await settle(rig)
-    assert rig.client.eval.await_count == 1
-    rig.client.eval.side_effect = rig.client.apply
-    rig.backend.now += timedelta(seconds=3)
+    day = (await current(rig, first)).value.score_day
+    assert await score_values(rig, day) == {}
+    assert (await current(rig, second)).value.score_status == "pending"
+    first_job["state"] = "pending"
     await settle(rig)
-    key = scores.score_key(rig.feature, first.value.chat_id, (await current(rig, first)).value.score_day)
-    assert rig.client.scores[key] == {"42": 1}
-    assert [call.args[7] for call in rig.client.eval.call_args_list] == [first.key, first.key, second.key]
+    assert await score_values(rig, day) == {42: 1}
+    assert (await current(rig, first)).value.score_status == "recorded"
+    assert (await current(rig, second)).value.score_status == "recorded"
 
 
 async def test_prior_day_held_settlement_does_not_block_todays_independent_scores(rig):
@@ -311,36 +399,29 @@ async def test_prior_day_held_settlement_does_not_block_todays_independent_score
     assert (await current(rig, first)).value.score_status == "pending"
     closed = await current(rig, second)
     assert closed.value.score_status == "recorded"
-    assert rig.client.scores[scores.score_key(rig.feature, second.value.chat_id, closed.value.score_day)] == {"42": 1}
+    assert await score_values(rig, closed.value.score_day) == {42: 1}
 
 
-async def test_held_settlement_expires_and_releases_result_cleanup(rig):
+async def test_held_settlement_and_votes_survive_until_reconciled_without_a_score_expiry(rig):
     record = await start(rig)
-    await click(rig, record, "0")
+    await click(rig, record, record.value.question.answer)
     await click(rig, record, "finish")
-    for job in rig.backend.jobs.values():
-        if job["kind"] == "settle":
-            job["state"] = "held"
+    job = next(job for job in rig.backend.jobs.values() if job["kind"] == "settle")
+    job["state"] = "held"
     closed = await current(rig, record)
-    rig.backend.now = scores.score_expiry(closed.value.score_day) + timedelta(seconds=1)
+    rig.backend.now += timedelta(days=90)
     restart(rig)
     await settle(rig)
-    rig.backend.now += timedelta(seconds=61)
+    assert (await current(rig, record)).value.score_status == "pending"
+    assert len(await votes(rig, record)) == 1
+    assert await score_values(rig, closed.value.score_day) == {}
+    assert not any(job["kind"] == "score_expiry" for job in rig.backend.jobs.values())
+    job["state"] = "pending"
     await settle(rig)
-    assert await current(rig, record) is None and not await votes(rig, record)
-    rig.client.eval.assert_not_awaited()
-    assert all(job["state"] in {"cancelled", "complete", "expired"} for job in rig.backend.jobs.values())
-
-
-async def test_redis_clock_expiry_is_not_reported_as_success(rig):
-    record = await start(rig)
-    await click(rig, record, "0")
-    rig.client.eval.side_effect = None
-    rig.client.eval.return_value = -1
-    await click(rig, record, "finish")
-    await settle(rig)
-    assert (await current(rig, record)).value.score_status == "expired"
-    assert "Не удалось подтвердить запись" in text_of(edits(rig)[-1])
+    assert await score_values(rig, closed.value.score_day) == {42: 1}
+    assert await current(rig, record) is None
+    assert not await votes(rig, record)
+    assert all(row.expires_at is None for row in await score_rows(rig, closed.value.score_day))
 
 
 async def test_overdue_round_uses_saved_deadline_day_after_restart(rig):
@@ -555,7 +636,7 @@ async def test_deleted_photo_never_generates_replacement_messages_and_buttons_ca
     await settle(rig)
     assert "Правильный ход" in text_of(edits(rig)[-1]) if rig.feature == "chess" else "На снимке" in text_of(edits(rig)[-1])
     assert len([method for method in rig.session.methods if isinstance(method, SendPhoto)]) == 1
-    rig.client.eval.assert_awaited_once()
+    assert (await current(rig, record)).value.score_status == "recorded"
 
 
 async def test_not_modified_accepts_the_view_without_repeated_edits(rig):
@@ -576,6 +657,8 @@ async def test_not_modified_accepts_the_view_without_repeated_edits(rig):
 async def test_chess_transient_media_failure_keeps_caption_and_automatically_repairs_photo(rig):
     if rig.feature != "chess":
         return
+    # Exercise the fallback itself without settlement superseding its render lease.
+    rig.worker.concurrency = 1
     record = await start(rig)
     await click(rig, record, "0")
     failed = False
@@ -593,7 +676,7 @@ async def test_chess_transient_media_failure_keeps_caption_and_automatically_rep
     rig.backend.now += timedelta(seconds=3)
     await settle(rig)
     assert isinstance(edits(rig)[-1], EditMessageMedia)
-    rig.client.eval.assert_awaited_once()
+    assert (await current(rig, record)).value.score_status == "recorded"
 
 
 async def test_country_only_result_has_no_empty_city_and_preserves_credit(rig):
@@ -615,22 +698,155 @@ async def test_burst_of_votes_coalesces_into_the_latest_caption(rig):
     assert len(edits(rig)) == 1 and "Ответили: 40" in text_of(edits(rig)[0])
 
 
-async def test_leaderboard_uses_one_moscow_day_and_native_entities(rig, monkeypatch):
-    module = chess if rig.feature == "chess" else geoguess
-    handler = module.Chess if rig.feature == "chess" else module.Geoguess
-    day = datetime(2030, 1, 1).date()
-    monkeypatch.setattr(module, "today", lambda: day)
-    rig.client.zrevrange.side_effect = None
-    rig.client.zrevrange.return_value = [(b"42", 3)]
-    rig.client.hget.side_effect = [b"User <name>", b"user_name"]
-    await handler.top(rig.message, rig.redis)
+async def test_leaderboard_uses_one_moscow_day_and_native_entities(rig):
+    handler = chess.Chess if rig.feature == "chess" else geoguess.Geoguess
+    rig.backend.now = datetime(2030, 1, 1, 12, tzinfo=UTC)
+    record = await start(rig)
+    await click(rig, record, record.value.question.answer, name="User <name>", username="user_name")
+    await click(rig, record, "finish")
+    await settle(rig)
+    restart(rig)
+    await handler.top(rig.message, rig.quiz)
     result = rig.session.methods[-1]
     assert "01.01.2030" in result.text and "User <name>" in result.text and "@user_name" in result.text
     assert result.parse_mode is None and any(entity.url == "tg://user?id=42" for entity in result.entities)
-    rig.client.zrevrange.assert_awaited_once_with(scores.score_key(rig.feature, rig.message.chat.id, day), 0, 9, withscores=True)
-    rig.client.zrevrange.side_effect = RuntimeError("score store unavailable")
-    await handler.top(rig.message, rig.redis)
+    rig.backend.fail = True
+    await handler.top(rig.message, rig.quiz)
     assert rig.session.methods[-1].text == "Рейтинг сейчас недоступен."
+
+
+async def test_scores_floor_at_zero_and_refresh_labels_between_rounds(rig):
+    for index, (correct, name, username) in enumerate(
+        [(False, "First <name>", "first_name"), (True, "Renamed & player", None), (False, "Final name", "final_name")]
+    ):
+        record = await start(rig, rig.message.model_copy(update={"message_id": index + 10}))
+        choice = record.value.question.answer if correct else (record.value.question.answer + 1) % 6
+        await click(rig, record, choice, name=name, username=username)
+        await click(rig, record, "finish")
+        await settle(rig)
+        closed = await current(rig, record)
+        (player,) = await score_rows(rig, closed.value.score_day)
+        assert player.value.points == (1 if correct else 0)
+        assert player.value.name == name and player.value.username == username
+        assert player.expires_at is None
+        restart(rig)
+
+
+@pytest.mark.parametrize("invalid", ["missing_points", "negative_points", "future_version", "wrong_user", "wrong_day"])
+async def test_unreadable_score_is_held_without_replacing_it_with_defaults(rig, invalid):
+    from copy import deepcopy
+
+    first = await start(rig)
+    await click(rig, first, first.value.question.answer)
+    await click(rig, first, "finish")
+    await settle(rig)
+    identity, score = next((key, row) for key, row in rig.backend.records.items() if row["collection"] == "scores")
+    if invalid == "missing_points":
+        del score["payload"]["points"]
+    elif invalid == "negative_points":
+        score["payload"]["points"] = -1
+    elif invalid == "future_version":
+        score["payload_version"] = 2
+    elif invalid == "wrong_user":
+        score["payload"]["user_id"] = 99
+    else:
+        score["parent"] = "2000-01-01"
+    before = deepcopy(score)
+    second = await start(rig, rig.message.model_copy(update={"message_id": 11}))
+    await click(rig, second, second.value.question.answer)
+    await click(rig, second, "finish")
+    await settle(rig)
+    state = (await current(rig, second)).value
+    assert state.score_status == "pending" and state.score_count == 0
+    assert rig.backend.records[identity] == before
+    assert next(job for job in rig.backend.jobs.values() if job["key"] == f"settle:{second.key}")["state"] == "held"
+
+
+async def test_score_updates_preserve_unknown_metadata(rig):
+    first = await start(rig)
+    await click(rig, first, first.value.question.answer)
+    await click(rig, first, "finish")
+    await settle(rig)
+    score = next(row for row in rig.backend.records.values() if row["collection"] == "scores")
+    score["payload"]["future_metadata"] = {"keep": [1, 2]}
+    second = await start(rig, rig.message.model_copy(update={"message_id": 11}))
+    await click(rig, second, second.value.question.answer)
+    await click(rig, second, "finish")
+    await settle(rig)
+    day = (await current(rig, second)).value.score_day
+    (result,) = await score_rows(rig, day)
+    assert result.value.points == 2 and result.value.model_dump()["future_metadata"] == {"keep": [1, 2]}
+
+
+async def test_round_without_players_creates_no_score_documents(rig):
+    record = await start(rig)
+    await click(rig, record, "finish")
+    await settle(rig)
+    closed = await current(rig, record)
+    assert closed.value.score_status == "recorded" and closed.value.score_count == 0
+    assert await score_values(rig, closed.value.score_day) == {}
+
+
+async def test_scores_are_isolated_by_game_chat_and_moscow_day(rig):
+    rig.backend.now = datetime(2030, 1, 1, 20, 45, tzinfo=UTC)
+    first = await start(rig)
+    await click(rig, first, first.value.question.answer)
+    await click(rig, first, "finish")
+    await settle(rig)
+    day = (await current(rig, first)).value.score_day
+
+    other_feature = "geoguess" if rig.feature == "chess" else "chess"
+    assert await score_values(rig, day, feature=other_feature) == {}
+    other_message = make_message(rig.bot, chat={"id": -100222, "type": "supergroup"}, date=rig.backend.now)
+    second = await start(rig, other_message)
+    await click(rig, second, (second.value.question.answer + 1) % 6)
+    await click(rig, second, "finish")
+    await settle(rig)
+    assert await score_values(rig, day, chat_id=-100222) == {42: 0}
+    assert await score_values(rig, day) == {42: 1}
+
+    rig.backend.now = datetime(2030, 1, 1, 21, 1, tzinfo=UTC)
+    next_day = await start(rig, rig.message.model_copy(update={"message_id": 11}))
+    await click(rig, next_day, (next_day.value.question.answer + 1) % 6)
+    await click(rig, next_day, "finish")
+    await settle(rig)
+    tomorrow = (await current(rig, next_day)).value.score_day
+    assert tomorrow == day + timedelta(days=1)
+    assert await score_values(rig, tomorrow) == {42: 0}
+    assert await score_values(rig, day) == {42: 1}
+
+
+async def test_leaderboard_reads_every_page_and_captures_the_moscow_day_once(rig, monkeypatch):
+    from msu_hub_bot.games.models import Score
+
+    rig.backend.now = datetime(2030, 1, 1, 20, 59, tzinfo=UTC)
+    day = rig.backend.now.date()
+    scope = rig.quiz._scope(rig.message.chat.id)
+    collection = rig.quiz.collections[rig.feature].scores
+    for offset in range(0, 205, 30):
+        tx = rig.store.transaction(rig.feature, scope, operation_id=f"seed-{offset}")
+        for uid in range(1000 + offset, 1000 + min(205, offset + 30)):
+            key = f"{day.isoformat()}:{uid}"
+            tx.expect_absent("scores", key)
+            tx.put(collection, key, Score(user_id=uid, name=f"Player {uid}", username=None, points=uid), parent=day.isoformat())
+        await tx.commit()
+    original = rig.backend.feature_request
+    pages = []
+
+    async def midnight(operation, request):
+        if operation == "list" and request["collection"] == "scores":
+            pages.append(request)
+            rig.backend.now = datetime(2030, 1, 1, 21, 1, tzinfo=UTC)
+        return await original(operation, request)
+
+    monkeypatch.setattr(rig.backend, "feature_request", midnight)
+    body = await rig.quiz.ranking(rig.feature, rig.message.chat.id)
+    text, entities = body.render()
+    assert "01.01.2030" in text
+    assert [entity.url for entity in entities if entity.url and entity.url.startswith("tg://user")] == [
+        f"tg://user?id={uid}" for uid in range(1204, 1194, -1)
+    ]
+    assert len(pages) == 2 and {page["parent"] for page in pages} == {day.isoformat()}
 
 
 async def test_recent_history_survives_restart_and_keeps_last_fifteen_delivered_questions(rig):
@@ -659,18 +875,6 @@ async def test_store_serialization_contains_no_telegram_objects_tasks_or_rendere
     encoded = json.dumps(list(rig.backend.records.values()))
     assert "asyncio" not in encoded and "caption_entities" not in encoded and "synthetic-board" not in encoded
     assert "message_id" in encoded and "question" in encoded and "accepted_at" in encoded
-
-
-def test_moscow_date_helper_uses_moscow_clock(monkeypatch):
-    original = scores.today
-
-    class Clock(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 9, 16, 21, 1, tzinfo=UTC).astimezone(tz)
-
-    monkeypatch.setattr(scores, "datetime", Clock)
-    assert original().isoformat() == "2026-09-17"
 
 
 def test_geography_country_and_user_labels_are_safe():

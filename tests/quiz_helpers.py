@@ -1,7 +1,6 @@
 """Network-free quiz fixtures; PostgreSQL contracts validate the backing protocol."""
 
 import asyncio
-from collections import defaultdict
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -200,32 +199,6 @@ class FeatureFixture:
         return {"current": bool(current)}
 
 
-class ScoreStore:
-    def __init__(self):
-        self.scores, self.hashes, self.rounds = defaultdict(dict), defaultdict(dict), defaultdict(set)
-        self.expiries = {}
-        self.eval = AsyncMock(side_effect=self.apply)
-        self.zrevrange = AsyncMock(side_effect=self.ranking)
-        self.hget = AsyncMock(side_effect=lambda key, uid: self.hashes[key].get(str(uid)))
-
-    async def apply(self, script, numkeys, *args):
-        assert numkeys == 4
-        key, names, usernames, rounds, expires, token, *players = args
-        if token in self.rounds[rounds]:
-            return 0
-        for index in range(0, len(players), 4):
-            uid, name, username, delta = players[index : index + 4]
-            self.scores[key][uid] = max(0, self.scores[key].get(uid, 0) + delta)
-            self.hashes[names][uid], self.hashes[usernames][uid] = name, username
-        self.rounds[rounds].add(token)
-        self.expiries.update(dict.fromkeys((key, names, usernames, rounds), expires))
-        return 1
-
-    async def ranking(self, key, first, last, *, withscores):
-        assert withscores
-        return sorted(self.scores[key].items(), key=lambda item: item[1], reverse=True)[first : last + 1]
-
-
 class GameSession(RecordingSession):
     def __init__(self, backend):
         super().__init__()
@@ -275,14 +248,11 @@ async def rig(request, monkeypatch):
     backend = FeatureFixture()
     session = GameSession(backend)
     bot = BotWrapper("123456789:" + "a" * 35, session=session)
-    client = ScoreStore()
     result = SimpleNamespace(
         feature=request.param,
         backend=backend,
         session=session,
         bot=bot,
-        client=client,
-        redis=SimpleNamespace(redis=AsyncMock(return_value=client)),
         message=make_message(bot, message_id=10, date=backend.now, is_topic_message=True, message_thread_id=17),
     )
     restart(result)
@@ -294,7 +264,7 @@ async def rig(request, monkeypatch):
 def restart(rig):
     rig.store = FeatureStore(rig.backend)
     rig.worker = FeatureWorker(rig.store)
-    rig.quiz = QuizService(rig.bot, rig.redis, rig.store, rig.worker)
+    rig.quiz = QuizService(rig.bot, rig.store, rig.worker)
     rig.quiz.clock = lambda: rig.backend.now
 
 
@@ -311,7 +281,7 @@ async def start(rig, message=None):
     return await rig.quiz.round(rig.feature, message.chat.id, token)
 
 
-async def click(rig, record, choice, *, user_id=42, token=None, message=None):
+async def click(rig, record, choice, *, user_id=42, token=None, message=None, name=None, username=True):
     message = message or rig.session.messages[record.value.message_id]
     query = CallbackQuery.model_validate(
         {
@@ -319,7 +289,12 @@ async def click(rig, record, choice, *, user_id=42, token=None, message=None):
             "chat_instance": "synthetic",
             "message": message,
             "data": f"{rig.feature}:{token or record.key}:{choice}",
-            "from_user": {"id": user_id, "is_bot": False, "first_name": f"User {user_id} <&>", "username": f"user_{user_id}"},
+            "from_user": {
+                "id": user_id,
+                "is_bot": False,
+                "first_name": f"User {user_id} <&>" if name is None else name,
+                "username": f"user_{user_id}" if username is True else username,
+            },
         },
         context={"bot": rig.bot},
     )
@@ -335,3 +310,20 @@ def text_of(method):
 
 def edits(rig):
     return [method for method in rig.session.methods if isinstance(method, (EditMessageCaption, EditMessageMedia))]
+
+
+async def score_rows(rig, day, *, chat_id=None, feature=None):
+    feature = feature or rig.feature
+    scope = rig.quiz._scope(rig.message.chat.id if chat_id is None else chat_id)
+    collection = rig.quiz.collections[feature].scores
+    result, after = [], None
+    while True:
+        page = await collection.list(scope, parent=day.isoformat(), after=after, limit=200)
+        result.extend(page)
+        if len(page) < 200:
+            return result
+        after = page[-1].key
+
+
+async def score_values(rig, day, **scope):
+    return {row.value.user_id: row.value.points for row in await score_rows(rig, day, **scope)}
