@@ -64,6 +64,10 @@ def is_added_route(handler):
         "Chess.process",
         "Chess.top",
         "Chess.process_cb",
+        "ChessPlay.process",
+        "ChessPlay.callback",
+        "ChessRating.process",
+        "ChessRating.callback",
         "process_meme",
         "Reactions.process",
         "Reactions.process_cb",
@@ -79,7 +83,7 @@ def test_every_route_preserves_order_and_aliases():
     counts = Counter(route["event"] for route in CONTRACT["routes"])
     for kind, count in counts.items():
         actual = routes(root, "error" if kind == "errors" else kind)
-        extra = {"message": 8, "edited_message": 1, "callback_query": 3}.get(kind, 0)
+        extra = {"message": 10, "edited_message": 1, "callback_query": 5}.get(kind, 0)
         assert len(actual) == count + extra
         retained = [handler for handler in actual if not is_added_route(handler)]
         expected = [route for route in CONTRACT["routes"] if route["event"] == kind]
@@ -164,6 +168,12 @@ async def chess_selection_dispatcher():
         ("/CHESS_TOP@CONTRACT_BOT", "Chess.top"),
         ("/chess@another_bot", None),
         ("/chess_top@another_bot", None),
+        ("/chess_play", "ChessPlay.process"),
+        ("/CHESS_PLAY@CONTRACT_BOT", "ChessPlay.process"),
+        ("/chess_rating", "ChessRating.process"),
+        ("/CHESS_RATING@CONTRACT_BOT", "ChessRating.process"),
+        ("/chess_play@another_bot", None),
+        ("/chess_rating@another_bot", None),
     ],
 )
 async def test_chess_commands_select_real_routes_with_case_and_mentions(chess_selection_dispatcher, text, expected):

@@ -291,6 +291,8 @@ def check_chess():
     import chess
     from PIL import Image
 
+    from msu_hub_bot.games.chess_play.models import Game, Player
+    from msu_hub_bot.media.chess_play_board import HEIGHT, WIDTH, captured_pieces, render_match
     from msu_hub_bot.media.chessboard import render_board
 
     board = chess.Board()
@@ -303,6 +305,27 @@ def check_chess():
                 assert image.format == "PNG" and image.size == (720, 720)
                 image.verify()
         board.push_uci(move)
+
+    match = Game(
+        token="a" * 12,
+        bot_id=42,
+        chat_id=-10012,
+        white=Player(user_id=1, name="Белые"),
+        created_at=1000,
+        invite_deadline=1600,
+    )
+    match.join(Player(user_id=2, name="Чёрные"), 1100)
+    for move in ("e2e4", "d7d5", "e4d5", "d8d5"):
+        match.move(match.turn_player.user_id, move, 1100)
+    assert captured_pieces(match) == ((chess.Piece(chess.PAWN, chess.BLACK),), (chess.Piece(chess.PAWN, chess.WHITE),))
+    active = render_match(match)
+    match.resign(match.white.user_id, 1101)
+    finished = render_match(match)
+    assert active != finished, "Chess match result banner is missing"
+    for payload in (active, finished):
+        with Image.open(io.BytesIO(payload)) as image:
+            assert image.format == "PNG" and image.size == (WIDTH, HEIGHT), "Chess match PNG is invalid"
+            image.verify()
 
 
 async def main():
@@ -341,8 +364,8 @@ async def main():
         def count(event):
             return sum(len(router.observers[event].handlers) for router in app.dispatcher.chain_tail)
 
-        assert count("message") == 269
-        assert count("callback_query") == 22
+        assert count("message") == 271
+        assert count("callback_query") == 24
         assert count("edited_message") == 149
         from PIL import ImageFont
 

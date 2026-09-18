@@ -26,6 +26,23 @@ over 24 hours, seven days or thirty days. The bot needs administrator rights to
 collect new reactions; reaction state expires after thirty days. See
 [reaction scores and coverage](docs/reactions.md).
 
+## Chess with friends
+
+`/chess_play` opens a public invitation in a group: the author plays white,
+the first other person to join plays black. One match runs per chat, across
+forum topics. Choose a piece and a legal destination on the board's buttons;
+everyone can watch, but only the players control the match.
+
+The clock is 10+5: ten minutes per player, with five seconds added after each
+move. The caption refreshes about every five seconds while playing; the saved
+deadline decides timeouts even when the display lags. Invitations expire after
+ten minutes. Players can resign, offer a draw, or claim one under chess rules.
+
+`/chess_rating` shows permanent, bot-wide Elo (start 800, K=32). Matches,
+clocks and ratings survive restarts through the [feature store](docs/feature-persistence.md).
+Completed matches remain available for 24 hours; ratings do not expire.
+Game buttons work during another conversation without changing its draft.
+
 ## Development
 
 Use Python 3.14 and uv 0.12.15 or newer. Native development works on macOS; the
