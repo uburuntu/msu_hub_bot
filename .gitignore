@@ -25,3 +25,4 @@ build/
 core
 core.*
 .DS_Store
+node_modules/

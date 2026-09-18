@@ -84,7 +84,7 @@ def test_new_supabase_payload_requires_an_explicit_schema(schema):
 @pytest.mark.parametrize("schema,omit_schema", [("hub_api", True), ("hub_api", False), ("msu_hub_api", False)])
 def test_historical_supabase_identity_comes_from_the_private_runtime_file(tmp_path, schema, omit_schema):
     state = stored_supabase(tmp_path, schema=schema, historical=True, omit_schema=omit_schema)
-    assert deployment.Deployer(tmp_path).storage_identity(state) == ("supabase", schema)
+    assert deployment.Deployer(tmp_path).storage_identity(state) == ("supabase", schema, "relational-v1")
 
 
 def test_new_metadata_does_not_enable_the_historical_schema_default(tmp_path):
@@ -496,7 +496,7 @@ def test_namespace_transition_does_not_stop_the_poller_if_the_guard_cannot_be_sa
     with pytest.raises(OSError, match="guard publication"):
         deployer.deploy(supabase_payload())
     assert not stops
-    assert deployer.storage_identity(deployer.read_state("current.json")) == ("supabase", "hub_api")
+    assert deployer.storage_identity(deployer.read_state("current.json")) == ("supabase", "hub_api", "relational-v1")
 
 
 @pytest.mark.parametrize("namespace", [False, True])
@@ -644,3 +644,28 @@ def test_archive_rejects_baked_telemetry_configuration(tmp_path, variable):
     with pytest.raises(deployment.DeploymentError, match="Image contains runtime configuration") as caught:
         deployment.validate_archive(path, state)
     assert "private-canary" not in str(caught.value)
+
+
+def test_web_release_attaches_only_private_proxy_network_without_host_ports(tmp_path):
+    document = deployment.compose_document(payload()["image"], tmp_path / "runtime.env", web=True)
+    assert document["networks"] == {"msu_db": {"external": True}, "msu_hub_web": {"external": True}}
+    assert document["services"]["bot"]["networks"] == ["msu_db", "msu_hub_web"]
+    assert "ports" not in document["services"]["bot"]
+
+
+def test_rollback_refuses_old_table_writers_after_application_document_cutover(tmp_path):
+    previous = stored_supabase(tmp_path)
+    current = stored_supabase(tmp_path, number=2)
+    runtime = tmp_path / "releases" / current["release"] / "runtime.env"
+    environment = json.loads(runtime.read_text().removeprefix("HUB_CONFIG_JSON="))
+    environment["HUB_STORAGE_CONTRACT"] = "application-documents-v1"
+    deployment.write_private(runtime, "HUB_CONFIG_JSON=" + json.dumps(environment) + "\n")
+    deployment.write_private(tmp_path / "current.json", json.dumps(current))
+    deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
+    deployer = deployment.Deployer(tmp_path)
+    restored = []
+    deployer.restore = restored.append
+    with pytest.raises(deployment.DeploymentError, match="reconcile data"):
+        deployer.deploy({"action": "rollback"})
+    assert not restored
+    assert deployer.read_state("current.json") == current

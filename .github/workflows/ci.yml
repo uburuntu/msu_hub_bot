@@ -8,6 +8,23 @@ permissions:
   contents: read
 
 jobs:
+  web:
+    name: Mini App
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck && npm run format:check && npm test && npm run build
+        working-directory: web
+
   python:
     name: Python (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -65,7 +82,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
       - run: uv sync --locked
       - name: Exercise schema, isolation, quiz scoring, atomic mutations and retention
-        run: uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py
+        run: uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py tests/test_application_postgres.py tests/test_reminders.py
         env:
           HUB_TEST_POSTGRES_DSN: postgresql://postgres:test-only-postgres@localhost:5432/hub_test_ci
 

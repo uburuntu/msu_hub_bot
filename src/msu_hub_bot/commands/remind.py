@@ -4,16 +4,16 @@ import asyncio
 from datetime import timedelta
 from uuid import UUID
 
-from aiogram.filters.callback_data import CallbackData
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from msu_hub_bot.commands.quiz_view import compact
-from msu_hub_bot.reminders import Reminder, ReminderError, ReminderService, Schedule, parse_schedule
-from msu_hub_bot.reminders.service import when
-from msu_hub_bot.storage.features import Conflict, FeatureError, Record
+from msu_hub_bot.reminders import ReminderError, ReminderService, Schedule, parse_schedule
+from msu_hub_bot.reminders.presentation import ReminderCallback, confirmation, keyboard
+from msu_hub_bot.storage.features import Conflict, FeatureError
 from msu_hub_bot.storage.supabase import RepositoryError
 from msu_hub_bot.telegram.context import bot_for
 from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.web.links import WebAppLinks
 
 HELP = (
     "⏰ Напомню здесь, в этой же теме. По умолчанию — московское время.\n\n"
@@ -25,40 +25,6 @@ HELP = (
     "/remind cancel ID — отменить\n"
     "/remind retry ID — повторить после ошибки. Если доставка не подтверждена, возможен повтор сообщения."
 )
-STATUSES = {
-    "pending": "ждёт",
-    "sending": "отправляется",
-    "delivered": "доставлено",
-    "cancelled": "отменено",
-    "failed": "ошибка доставки",
-    "uncertain": "доставка не подтверждена",
-}
-
-
-class ReminderCallback(CallbackData, prefix="remind"):
-    key: str
-    revision: str
-    action: str
-
-
-def keyboard(record: Record[Reminder]) -> InlineKeyboardMarkup | None:
-    if record.value.status != "pending":
-        return None
-
-    def button(label: str, action: str) -> InlineKeyboardButton:
-        data = ReminderCallback(key=record.key, revision=record.etag.replace("-", ""), action=action).pack()
-        return InlineKeyboardButton(text=label, callback_data=data)
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [button("+10 минут", "10m"), button("+1 час", "1h"), button("+24 часа", "1d")],
-            [button("Отменить", "off")],
-        ]
-    )
-
-
-def confirmation(record: Record[Reminder]) -> str:
-    return f"⏰ {when(record.value)} — {STATUSES[record.value.status]}\n{compact(record.value.text, 160)}\n\nID: {record.key}"
 
 
 async def answer(query: CallbackQuery, text: str, *, alert: bool = False) -> None:
@@ -70,7 +36,7 @@ class Remind:
     callback_data = ReminderCallback
 
     @staticmethod
-    async def process(message: Message, meta: MetaInfo, reminders: ReminderService) -> Message:
+    async def process(message: Message, meta: MetaInfo, reminders: ReminderService, web_apps: WebAppLinks | None = None) -> Message:
         markup = None
         try:
             if message.from_user is None or message.from_user.is_bot or message.sender_chat is not None:
@@ -122,7 +88,7 @@ class Remind:
                     schedule = parse_schedule(text, reminders.clock())
                     record = await reminders.create(
                         author_id=user.id,
-                        author_name=user.full_name,
+                        author_name=compact(user.full_name, 256),
                         chat_id=message.chat.id,
                         thread_id=message.message_thread_id,
                         source_message_id=message.message_id,
@@ -133,6 +99,8 @@ class Remind:
             body = str(error)
         except Conflict, FeatureError, RepositoryError, TimeoutError, ValueError:
             body = "Не удалось подтвердить изменение. Проверь /remind list перед повтором."
+        if web_apps is not None and (button := web_apps.button(message, now=reminders.clock())) is not None:
+            markup = InlineKeyboardMarkup(inline_keyboard=[*(markup.inline_keyboard if markup else []), [button]])
         async with asyncio.timeout(15):
             return await bot_for(message)(message.reply(body, parse_mode=None, reply_markup=markup), request_timeout=15)
 

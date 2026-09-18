@@ -4,6 +4,10 @@
 !src/
 !src/msu_hub_bot/
 !src/msu_hub_bot/**
+!web/
+!web/**
+web/node_modules/
+web/dist/
 !LICENSE
 !THIRD_PARTY_NOTICES.md
 !licenses/
@@ -16,4 +20,3 @@
 **/*.key
 **/*.pem
 **/core*
-

@@ -62,6 +62,7 @@ jobs:
           HUB_REDIS_PASSWORD: ${{ secrets.HUB_REDIS_PASSWORD }}
           HUB_REDIS_DB: ${{ secrets.HUB_REDIS_DB }}
           HUB_STORAGE_BACKEND: ${{ secrets.HUB_STORAGE_BACKEND || 'supabase' }}
+          HUB_STORAGE_CONTRACT: application-documents-v1
           HUB_SUPABASE_URL: ${{ secrets.HUB_SUPABASE_URL }}
           HUB_SUPABASE_KEY: ${{ secrets.HUB_SUPABASE_KEY }}
           HUB_SUPABASE_EMAIL: ${{ secrets.HUB_SUPABASE_EMAIL }}
@@ -72,6 +73,8 @@ jobs:
           HUB_PKEY: ${{ secrets.HUB_PKEY }}
           HUB_LOGS_FILE: ${{ secrets.HUB_LOGS_FILE }}
           HUB_HEALTH_CHECK_URL: ${{ secrets.HUB_HEALTH_CHECK_URL }}
+          HUB_WEB_APP_URL: ${{ vars.HUB_WEB_APP_URL }}
+          HUB_WEB_PORT: '8081'
           HUB_DUMPS_CHAT_ID: ${{ secrets.HUB_DUMPS_CHAT_ID }}
           HUB_EVENTS_CHAT_ID: ${{ secrets.HUB_EVENTS_CHAT_ID }}
           HUB_ERROR_CHAT_ID: ${{ secrets.HUB_ERROR_CHAT_ID }}

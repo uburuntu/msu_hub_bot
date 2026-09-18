@@ -91,6 +91,8 @@ from msu_hub_bot.commands.settings import process_settings
 from msu_hub_bot.commands.song import process_song
 from msu_hub_bot.commands.stats import Stats
 from msu_hub_bot.commands.reactions import Reactions
+from msu_hub_bot.commands.remind import Remind
+from msu_hub_bot.commands.app import is_app_start, process_app, process_app_start
 from msu_hub_bot.commands.sticker import (
     process_sticker,
     process_sticker_chat,
@@ -132,6 +134,32 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
     unrelated_id, related_chat_id = settings.related_chat_ids
     only_for_me = F.from_user.id == settings.owner_id
     only_for_founders = F.from_user.id.in_(settings.founder_ids)
+    group("app").message.register(
+        process_app_start,
+        SlashCommand("start"),
+        is_app_start,
+        StateFilter(None),
+        flags={"handler_key": "process_app_start", "fsm_release": True},
+    )
+    group("app").message.register(
+        process_app,
+        SlashCommand("app"),
+        StateFilter(None),
+        flags={"handler_key": "process_app", "fsm_release": True},
+    )
+    group("reminders").message.register(
+        Remind.process,
+        MetaCommand("remind", "напомни"),
+        StateFilter(None),
+        F.content_type == ContentType.TEXT,
+        flags={"handler_key": "Remind.process", "fsm_release": True},
+    )
+    group("reminders").callback_query.register(
+        Remind.process_cb,
+        Remind.callback_data.filter(),
+        fsm_callback_allowed,
+        flags={"handler_key": "Remind.process_cb", "fsm_release": True},
+    )
     group("control").message.register(
         process_start,
         SlashCommand("start"),

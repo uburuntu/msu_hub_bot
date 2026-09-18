@@ -163,3 +163,27 @@ def test_health_requires_recent_successful_poll(monkeypatch, tmp_path):
     assert ready()
     heartbeat_path().write_text("800")
     assert not ready()
+
+
+async def test_web_listener_starts_after_readiness_and_drains_before_database_close(app_settings, boundaries, monkeypatch):
+    from aiogram.methods import SetChatMenuButton
+    from msu_hub_bot import app
+
+    events = []
+    listener = AsyncMock()
+    listener.start.side_effect = lambda: events.append("web-start")
+    listener.close.side_effect = lambda: events.append("web-close")
+    monkeypatch.setattr(app, "WebServer", lambda *args, **kwargs: listener)
+    app_settings.web_app_url = "https://app.example.invalid"
+    session, client, db = boundaries
+    db.check.side_effect = lambda: events.append("database-ready")
+    db.close.side_effect = lambda: events.append("database-close")
+    application = await app.Application.create(app_settings)
+    await application.start()
+    assert application.dispatcher.workflow_data["reminders"] is application.reminders
+    assert events == ["database-ready", "web-start"]
+    menu = next(method for method in session.methods if isinstance(method, SetChatMenuButton))
+    assert menu.menu_button.web_app.url == app_settings.web_app_url
+    await application.close()
+    assert events[-2:] == ["web-close", "database-close"]
+    client.aclose.assert_awaited_once()

@@ -320,6 +320,11 @@ async def main():
     check_animation()
     check_youtube_runtime()
     check_chess()
+    from msu_hub_bot.web import server as web_server
+
+    static = Path(web_server.__file__).with_name("static")
+    assert (static / "index.html").is_file(), "Mini App HTML missing from image"
+    assert list((static / "assets").glob("*.js")), "Mini App bundle missing from image"
     from msu_hub_bot.app import Application
     from msu_hub_bot.settings import settings
 
@@ -336,8 +341,8 @@ async def main():
         def count(event):
             return sum(len(router.observers[event].handlers) for router in app.dispatcher.chain_tail)
 
-        assert count("message") == 266
-        assert count("callback_query") == 21
+        assert count("message") == 269
+        assert count("callback_query") == 22
         assert count("edited_message") == 149
         from PIL import ImageFont
 

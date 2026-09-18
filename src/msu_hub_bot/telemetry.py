@@ -46,6 +46,7 @@ class Boundary(StrEnum):
     STORAGE = "storage.operation"
     JOB = "job.run"
     TELEGRAM = "telegram.request"
+    WEB = "web.request"
 
 
 class Outcome(StrEnum):
@@ -91,6 +92,7 @@ OPERATIONS = frozenset(
     {
         "dispatch",
         "http.request",
+        "web.request",
         "jdoodle.execute",
         "wit.recognize",
         "wolfram.query",

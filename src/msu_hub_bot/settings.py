@@ -59,11 +59,14 @@ class Settings(BaseSettings):
     supabase_email: str = ""
     supabase_password: str = ""
     supabase_schema: str = "msu_hub_api"
+    storage_contract: Literal["application-documents-v1"] = "application-documents-v1"
     proxy: str = ""
     cert: str = ""
     pkey: str = ""
     logs_file: str = ".local/logs/{name}.log"
     health_check_url: str = ""
+    web_app_url: str = ""
+    web_port: int = Field(default=8081, ge=1, le=65535)
     dumps_chat_id: int = 0
     events_chat_id: int = 0
     error_chat_id: int = 0
@@ -123,6 +126,18 @@ class Settings(BaseSettings):
             raise ValueError("Invalid HUB_SUPABASE_URL")
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.supabase_schema):
             raise ValueError("Invalid HUB_SUPABASE_SCHEMA")
+        if self.web_app_url:
+            web = urlsplit(self.web_app_url)
+            if (
+                web.scheme != "https"
+                or not web.hostname
+                or web.username is not None
+                or web.password is not None
+                or web.query
+                or web.fragment
+                or web.path not in {"", "/"}
+            ):
+                raise ValueError("Invalid HUB_WEB_APP_URL: expected an HTTPS origin")
 
     def require(self, *names: str) -> Any:
         missing = [name for name in names if not getattr(self, name)]

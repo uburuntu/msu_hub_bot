@@ -67,6 +67,10 @@ def is_added_route(handler):
         "process_meme",
         "Reactions.process",
         "Reactions.process_cb",
+        "Remind.process",
+        "Remind.process_cb",
+        "process_app",
+        "process_app_start",
     }
 
 
@@ -75,7 +79,7 @@ def test_every_route_preserves_order_and_aliases():
     counts = Counter(route["event"] for route in CONTRACT["routes"])
     for kind, count in counts.items():
         actual = routes(root, "error" if kind == "errors" else kind)
-        extra = {"message": 5, "edited_message": 1, "callback_query": 2}.get(kind, 0)
+        extra = {"message": 8, "edited_message": 1, "callback_query": 3}.get(kind, 0)
         assert len(actual) == count + extra
         retained = [handler for handler in actual if not is_added_route(handler)]
         expected = [route for route in CONTRACT["routes"] if route["event"] == kind]
@@ -441,3 +445,21 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
     assert "settings.load" in payload and "archive.write" in payload and "ignored" in payload
     assert "supabase" in payload
     assert private_text not in payload
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("/remind in 15m чай", "Remind.process"),
+        ("/НАПОМНИ через 1ч чай", "Remind.process"),
+        ("/app", "process_app"),
+        ("/start app_synthetic", "process_app_start"),
+        ("/start", "process_start"),
+    ],
+)
+async def test_reminder_and_mini_app_entry_points(chess_selection_dispatcher, text, expected):
+    bot, dispatcher = chess_selection_dispatcher
+    message = make_message(bot, text=text)
+    message = message.model_copy(update={"chat": message.chat.model_copy(update={"type": "private"})})
+    selected, _ = await dispatcher.feed_update(bot, Update(update_id=90, message=message))
+    assert selected.flags["handler_key"] == expected

@@ -16,6 +16,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode, UpdateType
 from aiogram.filters import Command
+from aiogram.types import MenuButtonWebApp, WebAppInfo
 from aiogram.fsm.storage.base import DefaultKeyBuilder
 from aiogram.fsm.storage.redis import RedisStorage as FSMRedisStorage
 from ccxt.async_support import binance
@@ -25,6 +26,9 @@ from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.factory import create_repository
 from msu_hub_bot.storage.features import FeatureStore, FeatureWorker
 from msu_hub_bot.games import QuizService
+from msu_hub_bot.reminders import ReminderService
+from msu_hub_bot.web.links import WebAppLinks
+from msu_hub_bot.web.server import WebServer
 from msu_hub_bot.execution.executor import TPExecutor
 from msu_hub_bot.providers.dvach import Api2chAsync
 from msu_hub_bot.uptime import HealthCheck
@@ -79,6 +83,9 @@ class Application:
     features: FeatureStore
     feature_worker: FeatureWorker
     quiz: QuizService
+    reminders: ReminderService
+    web_apps: WebAppLinks
+    web: WebServer | None = None
     _producer: asyncio.Task[None] | None = None
     _feature_task: asyncio.Task[None] | None = None
     _closed: bool = False
@@ -122,6 +129,9 @@ class Application:
             features = FeatureStore(database)
             feature_worker = FeatureWorker(features, telemetry=telemetry)
             quiz = QuizService(bot, features, feature_worker)
+            reminders = ReminderService(bot, features, feature_worker)
+            web_apps = WebAppLinks(bot.token, settings.web_app_url)
+            web = WebServer(bot, reminders, database, web_apps, telemetry, port=settings.web_port) if settings.web_app_url else None
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
             vk_api = VkApi(token=settings.vk_user_token)
@@ -168,6 +178,8 @@ class Application:
                 redis=redis,
                 supervisor=supervisor,
                 quiz=quiz,
+                reminders=reminders,
+                web_apps=web_apps,
                 events_isolation=isolation,
                 vk_api=vk_api,
                 dvach=dvach,
@@ -203,7 +215,24 @@ class Application:
                     if isinstance(command, str)
                 }
             )
-            return cls(bot, dispatcher, supervisor, database, client, redis, fsm, stack, health, telemetry, features, feature_worker, quiz)
+            return cls(
+                bot,
+                dispatcher,
+                supervisor,
+                database,
+                client,
+                redis,
+                fsm,
+                stack,
+                health,
+                telemetry,
+                features,
+                feature_worker,
+                quiz,
+                reminders,
+                web_apps,
+                web,
+            )
         except BaseException:
             await stack.aclose()
             raise
@@ -221,7 +250,13 @@ class Application:
         await self.database.check()
         await self.features.check()
         await cast(Awaitable[bool], self.redis_client.ping())
-        await self.bot.me()
+        identity = await self.bot.me()
+        self.web_apps.username = identity.username or ""
+        if self.web is not None:
+            await self.web.start()
+            await self.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="MSU Hub", web_app=WebAppInfo(url=self.web_apps.url)), request_timeout=15
+            )
         await self.bot.delete_webhook(drop_pending_updates=False)
         await self.health.start()
         self._producer = asyncio.create_task(self._deletion_loop(), name="scheduled-deletions")
@@ -238,6 +273,8 @@ class Application:
         self.supervisor.close_updates()
         self.feature_worker.stop()
         try:
+            if self.web is not None:
+                await self.web.close()
             if self._producer is not None:
                 self._producer.cancel()
                 await asyncio.gather(self._producer, return_exceptions=True)

@@ -55,6 +55,8 @@ def validate_environment(values, *, historical=False):
             raise DeploymentError("Invalid runtime configuration")
     if values.get("HUB_STORAGE_BACKEND", "supabase") != "supabase":
         raise DeploymentError("Invalid storage backend")
+    if values.get("HUB_STORAGE_CONTRACT", "relational-v1") not in {"relational-v1", "application-documents-v1"}:
+        raise DeploymentError("Invalid storage contract")
     schema = values.get("HUB_SUPABASE_SCHEMA", "hub_api" if historical else "")
     if not SCHEMA_RE.fullmatch(schema):
         raise DeploymentError("Invalid or missing Supabase schema")
@@ -176,7 +178,7 @@ def unique_object(pairs):
     return result
 
 
-def compose_document(image, env_path):
+def compose_document(image, env_path, *, web=False):
     return {
         "services": {
             "bot": {
@@ -190,7 +192,7 @@ def compose_document(image, env_path):
                 "mem_limit": "4g",
                 "memswap_limit": "4g",
                 "pids_limit": 128,
-                "networks": ["msu_db"],
+                "networks": ["msu_db", *(["msu_hub_web"] if web else [])],
                 "read_only": True,
                 "tmpfs": ["/tmp:mode=1777,size=512m", "/work:mode=1777,size=512m"],
                 "security_opt": ["no-new-privileges:true"],
@@ -200,7 +202,7 @@ def compose_document(image, env_path):
                 "logging": {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}},
             }
         },
-        "networks": {"msu_db": {"external": True}},
+        "networks": {name: {"external": True} for name in ["msu_db", *(["msu_hub_web"] if web else [])]},
     }
 
 
@@ -235,7 +237,7 @@ class Deployer:
         if not isinstance(backend, str) or backend not in {"edgedb", "supabase"}:
             raise DeploymentError("Invalid stored storage backend")
         if backend == "edgedb":
-            return backend, None
+            return backend, None, None
         try:
             release = state.get("release")
             if not isinstance(release, str) or not re.fullmatch(r"[0-9a-f]{40}-[0-9]+", release):
@@ -258,7 +260,7 @@ class Deployer:
             schema = environment.get("HUB_SUPABASE_SCHEMA", "hub_api")
             if environment.get("HUB_STORAGE_BACKEND", "supabase") != backend or state.get("supabase_schema", schema) != schema:
                 raise ValueError("Inconsistent storage identity")
-            return backend, schema
+            return backend, schema, environment.get("HUB_STORAGE_CONTRACT", "relational-v1")
         except (OSError, ValueError, DeploymentError):
             raise DeploymentError("Invalid protected release configuration") from None
 
@@ -405,7 +407,12 @@ for path in Path('/proc').iterdir():
         environment = dict(payload["environment"])
         environment["HUB_LOGS_FILE"] = "/tmp/msu_hub_bot.log"
         write_private(directory / "runtime.env", "HUB_CONFIG_JSON=" + json.dumps(environment, ensure_ascii=True) + "\n")
-        write_private(directory / "compose.json", json.dumps(compose_document(payload["image"], directory / "runtime.env"), indent=2))
+        write_private(
+            directory / "compose.json",
+            json.dumps(
+                compose_document(payload["image"], directory / "runtime.env", web=bool(environment.get("HUB_WEB_APP_URL"))), indent=2
+            ),
+        )
         state = {
             "release": release,
             "storage_backend": "supabase",
