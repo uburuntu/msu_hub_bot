@@ -229,6 +229,42 @@ Presentation caches are disposable; rebuilding one must never change the
 selected question, votes or scores. Both games use only the feature store for
 persistence, with no Redis scoring adapter or dual writes.
 
+### Public chess matches
+
+`games/chess_play/service.py` owns `chess_play` documents in the bot's
+`Scope("global")`. Matches and ratings share this scope so settlement can update
+one match and both players atomically, including games played in different chats.
+
+| Collection | Key and contents | Lifecycle |
+| --- | --- | --- |
+| `chats` | Chat ID; pointer to its active invitation or match. | No expiry while active; expires after 30 days once released. |
+| `matches` | `chat_id:token`; players, move history, clocks, message/topic, result and rating settlement. | No expiry while unresolved; cleanup after settlement and the 24-hour result window. |
+| `ratings` | User ID; global Elo and display-label snapshot. | Permanent. |
+
+Creating an invitation reserves the chat and queues publication recovery in one
+transaction. The initial photo is sent once. An uncertain response leaves a
+one-minute window for a matching bot-authored board callback to recover the
+message binding; otherwise the invitation is abandoned. A restart never creates
+a second board. Later renders edit the saved message and can safely retry.
+
+Joining freezes both starting ratings. Each action checks the board revision,
+actor and absolute deadline before a conditional write. The ten-minute clocks
+gain five seconds per legal move; no process timer owns game state. The shared
+worker adjudicates deadlines and refreshes clock captions approximately every
+five seconds. Delayed display updates never extend a player's time.
+
+Finishing releases the chat before result delivery. Settlement applies the Elo
+delta calculated from the starting pair to each player's current rating and
+records the before/after values in the match in the same transaction. Concurrent
+matches cannot overwrite each other's points; replay cannot settle a match
+twice. Cleanup waits for settlement and removes only that match, leaving ratings
+intact. Rendering failures do not stop clocks or prevent scoring.
+
+`/chess_rating` paginates the global ranking. Since the document API is ordered
+by key, ranking requires a complete bounded-time scan; failure returns an
+unavailable response instead of a partial ranking. Chess actions never modify
+the user's active FSM conversation.
+
 ### Moving from Redis-backed quizzes
 
 Install the feature schema and bounded maintenance described below before
