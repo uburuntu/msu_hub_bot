@@ -272,6 +272,7 @@ class Application:
         watchdog.start()
         self.supervisor.close_updates()
         self.feature_worker.stop()
+        drain_deadline = asyncio.get_running_loop().time() + DRAIN_SECONDS
         try:
             if self.web is not None:
                 await self.web.close()
@@ -280,7 +281,7 @@ class Application:
                 await asyncio.gather(self._producer, return_exceptions=True)
             await self.health.stop()
             try:
-                await self.supervisor.drain(timeout=DRAIN_SECONDS, cancel_timeout=5)
+                await self.supervisor.drain(timeout=max(0, drain_deadline - asyncio.get_running_loop().time()), cancel_timeout=5)
             except DrainTimeout:
                 logger.error("Application workers exceeded the shutdown deadline")
                 hard_exit(1)

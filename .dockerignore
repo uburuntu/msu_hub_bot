@@ -8,6 +8,7 @@
 !web/**
 web/node_modules/
 web/dist/
+web/coverage/
 !LICENSE
 !THIRD_PARTY_NOTICES.md
 !licenses/
