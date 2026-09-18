@@ -136,9 +136,11 @@ SQL ledger revisions and RPC API versions remain independent.
 ## Validation and application
 
 Run the Python checks appropriate to the code change and the real PostgreSQL
-suite for every schema change. The SQL suite requires `psql` and a newly created,
-empty disposable database whose name starts with `hub_test_`; it refuses existing
-application/Auth schemas. An illustrative local connection is shown below:
+suite for every schema change. The SQL suite requires `psql` and a fresh,
+disposable PostgreSQL instance with an empty database whose name starts with
+`hub_test_`; it refuses existing application/Auth schemas. Migration tests also
+exercise cluster-wide roles, so a second database in an already tested instance
+is not a fresh fixture. An illustrative local connection is shown below:
 
 ```sh
 uv sync --locked
