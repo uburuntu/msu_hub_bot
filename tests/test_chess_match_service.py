@@ -16,6 +16,8 @@ from msu_hub_bot.games.chess_play import service as service_module
 from msu_hub_bot.games.chess_play.records import ChatMatch, Rating, SavedMatch, elo_delta
 from msu_hub_bot.games.chess_play.service import PUBLICATION_WINDOW, RESULT_WINDOW, SCOPE, ChessMatchService
 from msu_hub_bot.storage.features import FeatureStore, FeatureWorker, InvalidPayload
+from msu_hub_bot.storage.features import jobs as feature_jobs
+from msu_hub_bot.storage.features import store as feature_store
 from quiz_helpers import FeatureFixture, PNG
 from telegram_helpers import RecordingSession, make_message
 
@@ -123,6 +125,15 @@ async def rig(monkeypatch):
     monkeypatch.setattr(service_module, "render_match", lambda game: PNG)
     backend = FeatureFixture()
     backend.now = NOW
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return backend.now.replace(tzinfo=None) if tz is None else backend.now.astimezone(tz)
+
+    # Retry scheduling, record expiry and the fake database share one clock.
+    monkeypatch.setattr(feature_jobs, "datetime", Clock)
+    monkeypatch.setattr(feature_store, "datetime", Clock)
     bot = Bot("123456789:" + "a" * 35, session=MatchSession())
     value = SimpleNamespace(backend=backend, bot=bot)
     restart(value)
@@ -233,7 +244,9 @@ async def test_lost_commit_response_replays_exact_request_without_second_move(ri
     assert commits[-1] == commits[-2]
 
 
-async def test_concurrent_matches_settle_additively_once_and_can_go_negative(rig):
+@pytest.mark.parametrize("clock_age", [timedelta(), timedelta(minutes=5)], ids=["current-clock", "older-clock"])
+async def test_concurrent_matches_settle_additively_once_and_can_go_negative(rig, clock_age):
+    rig.backend.now -= clock_age
     tx = rig.service._tx()
     tx.expect_absent("ratings", "42")
     tx.put(rig.service.ratings, "42", Rating(user_id=42, name="Player", rating=1, extension={"kept": True}))
