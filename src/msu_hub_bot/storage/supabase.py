@@ -9,13 +9,21 @@ import re
 import time
 from collections.abc import Callable
 from datetime import datetime
-from enum import StrEnum
 from typing import TypeVar
 
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, StrictInt, TypeAdapter, ValidationError
 from yarl import URL
 
+from msu_hub_bot.storage.application import ApplicationDocuments
+from msu_hub_bot.storage.errors import (
+    RepositoryAuthError as RepositoryAuthError,
+    RepositoryError as RepositoryError,
+    RepositoryFailure as RepositoryFailure,
+    RepositoryProtocolError as RepositoryProtocolError,
+    RepositoryUnavailable as RepositoryUnavailable,
+)
+from msu_hub_bot.storage.features import FeatureStore
 from msu_hub_bot.storage.models import (
     ArchivedUpdate,
     ChatObservation,
@@ -38,39 +46,6 @@ from msu_hub_bot.telemetry import Backend, Boundary, Outcome, Telemetry
 _Result = TypeVar("_Result")
 _Record = TypeVar("_Record", bound=BaseModel)
 _JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
-_SETTINGS = TypeAdapter(dict[str, JsonValue])
-
-
-class RepositoryFailure(StrEnum):
-    AUTH = "authentication"
-    DENIED = "permission_denied"
-    UNAVAILABLE = "unavailable"
-    TIMEOUT = "timeout"
-    INVALID_RESPONSE = "invalid_response"
-    REJECTED = "request_rejected"
-    CLOSED = "closed"
-
-
-class RepositoryError(Exception):
-    """Only local classifications and HTTP status may escape the transport."""
-
-    def __init__(self, code: RepositoryFailure, status: int | None = None) -> None:
-        self.code = code
-        self.status = status
-        super().__init__(f"Database operation failed: {code.value}" + (f" (HTTP {status})" if status is not None else ""))
-
-
-class RepositoryUnavailable(RepositoryError):
-    pass
-
-
-class RepositoryAuthError(RepositoryError):
-    pass
-
-
-class RepositoryProtocolError(RepositoryError):
-    def __init__(self) -> None:
-        super().__init__(RepositoryFailure.INVALID_RESPONSE)
 
 
 class _Token(BaseModel):
@@ -98,25 +73,6 @@ def _record(model: type[_Record], value: JsonValue) -> _Record:
 
 def _optional(model: type[_Record], value: JsonValue) -> _Record | None:
     return None if value is None else _record(model, value)
-
-
-def _records(model: type[_Record], value: JsonValue) -> list[_Record]:
-    if not isinstance(value, list):
-        raise RepositoryProtocolError()
-    return [_record(model, item) for item in value]
-
-
-def _settings(value: JsonValue) -> dict[str, JsonValue]:
-    try:
-        return _SETTINGS.validate_python(value, strict=True)
-    except ValidationError:
-        raise RepositoryProtocolError() from None
-
-
-def _boolean(value: JsonValue) -> bool:
-    if not isinstance(value, bool):
-        raise RepositoryProtocolError()
-    return value
 
 
 def _void(value: JsonValue) -> None:
@@ -197,6 +153,7 @@ class SupabaseRepository:
             trust_env=False,
             cookie_jar=aiohttp.DummyCookieJar(),
         )
+        self.documents = ApplicationDocuments(FeatureStore(self), self._settings_chat)
 
     async def close(self) -> None:
         self._closed = True
@@ -324,19 +281,24 @@ class SupabaseRepository:
             trace=False,
         )
 
-    async def ensure_chat(self, chat: ChatObservation) -> ChatRecord:
-        return await self._rpc(
-            "ensure_chat", {"p_chat": _observation(chat)}, lambda value: _record(ChatRecord, value), operation="database.write"
-        )
+    async def ensure_chat(self, chat: ChatObservation, *, refresh: bool = True) -> ChatRecord:
+        payload: dict[str, JsonValue] = {"p_chat": _observation(chat)}
+        if not refresh:
+            payload["p_refresh"] = False
+        return await self._rpc("ensure_chat", payload, lambda value: _record(ChatRecord, value), operation="database.write", trace=refresh)
 
     async def get_chat(self, chat_id: int) -> ChatRecord | None:
         return await self._rpc("get_chat", {"p_chat_id": chat_id}, lambda value: _optional(ChatRecord, value))
 
+    async def _settings_chat(self, chat_id: int) -> ChatRecord | None:
+        return await self._rpc("get_chat", {"p_chat_id": chat_id}, lambda value: _optional(ChatRecord, value), trace=False)
+
     async def load_settings(self, chat: ChatObservation) -> dict[str, JsonValue]:
-        return await self._rpc("load_settings", {"p_chat": _observation(chat)}, _settings, trace=False)
+        observed = await self.ensure_chat(chat, refresh=False)
+        return await self.documents.load_settings(observed)
 
     async def patch_settings(self, chat_id: int, changes: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        return await self._rpc("patch_settings", {"p_chat_id": chat_id, "p_changes": changes}, _settings, operation="database.write")
+        return await self.documents.patch_settings(chat_id, changes)
 
     async def archive_update(self, update: ArchivedUpdate) -> None:
         payload: dict[str, JsonValue] = update.model_dump(mode="json")
@@ -366,46 +328,25 @@ class SupabaseRepository:
         )
 
     async def list_directory(self) -> list[DirectoryRecord]:
-        # The RPC returns one JSONB array, not SETOF rows subject to a REST row cap.
-        return await self._rpc("list_directory", {}, lambda value: _records(DirectoryRecord, value))
+        return await self.documents.list_directory()
 
     async def get_directory(self, chat_id: int) -> DirectoryRecord | None:
-        return await self._rpc("get_directory", {"p_chat_id": chat_id}, lambda value: _optional(DirectoryRecord, value))
+        return await self.documents.get_directory(chat_id)
 
     async def create_directory(self, entry: DirectoryCreate) -> DirectoryRecord:
-        return await self._rpc(
-            "create_directory",
-            {"p_entry": entry.model_dump(mode="json")},
-            lambda value: _record(DirectoryRecord, value),
-            operation="database.write",
-        )
+        return await self.documents.create_directory(entry)
 
     async def patch_directory(self, chat_id: int, changes: DirectoryPatch) -> DirectoryRecord | None:
-        return await self._rpc(
-            "patch_directory",
-            {"p_chat_id": chat_id, "p_changes": changes.model_dump(mode="json", exclude_unset=True)},
-            lambda value: _optional(DirectoryRecord, value),
-            operation="database.write",
-        )
+        return await self.documents.patch_directory(chat_id, changes)
 
     async def delete_directory(self, chat_id: int) -> bool:
-        return await self._rpc("delete_directory", {"p_chat_id": chat_id}, _boolean, operation="database.write")
+        return await self.documents.delete_directory(chat_id)
 
     async def list_vk_subscriptions(self) -> list[VkSubscription]:
-        return await self._rpc("list_vk_subscriptions", {}, lambda value: _records(VkSubscription, value))
+        return await self.documents.list_vk_subscriptions()
 
     async def upsert_vk_subscription(self, owner_id: int, chat_id: int, changes: VkPatch) -> VkSubscription:
-        return await self._rpc(
-            "upsert_vk_subscription",
-            {"p_owner_id": owner_id, "p_chat_id": chat_id, "p_changes": changes.model_dump(mode="json", exclude_unset=True)},
-            lambda value: _record(VkSubscription, value),
-            operation="database.write",
-        )
+        return await self.documents.upsert_vk_subscription(owner_id, chat_id, changes)
 
     async def advance_vk_cursor(self, owner_id: int, chat_id: int, last_post_id: int) -> None:
-        await self._rpc(
-            "advance_vk_cursor",
-            {"p_owner_id": owner_id, "p_chat_id": chat_id, "p_last_post_id": last_post_id},
-            _void,
-            operation="database.write",
-        )
+        await self.documents.advance_vk_cursor(owner_id, chat_id, last_post_id)

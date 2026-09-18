@@ -15,7 +15,8 @@ from aiogram.types import Chat, Message, Update, User
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 
 from msu_hub_bot.storage import supabase as module
-from msu_hub_bot.storage.models import ArchivedUpdate, ChatObservation, DirectoryCreate, DirectoryPatch, UserObservation, VkPatch
+from msu_hub_bot.storage.features import FeatureProtocolError
+from msu_hub_bot.storage.models import ArchivedUpdate, ChatObservation, DirectoryPatch, UserObservation
 from msu_hub_bot.storage.observations import archive_observation
 from msu_hub_bot.telegram.middlewares.settings import SettingsMiddleware
 from msu_hub_bot.telegram.middlewares.updates import UpdatesMiddleware
@@ -63,6 +64,23 @@ def subscription(**changes):
         "with_header": True,
         "is_suspended": False,
         **changes,
+    }
+
+
+def feature(payload, *, name="settings", collection="chats", key="-100"):
+    return {
+        "feature": name,
+        "scope": {"key": "global", "owner": "application"},
+        "collection": collection,
+        "key": key,
+        "etag": str(UUID(int=1)),
+        "payload_version": 1,
+        "payload": payload,
+        "parent": None,
+        "status": None,
+        "expires_at": None,
+        "created_at": NOW.isoformat(),
+        "updated_at": NOW.isoformat(),
     }
 
 
@@ -147,9 +165,15 @@ async def test_middleware_and_api_telemetry_have_distinct_owners(configured, mon
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     sink = Capture()
     telemetry = Telemetry(config(), transport=sink)
-    responses = [Response(token()), Response({})]
+    responses = [Response(token()), Response(chat()), Response(feature({}))]
     if change_settings:
-        responses.append(Response({"with_nsfw": True}))
+        responses.extend(
+            [
+                Response(chat()),
+                Response(feature({})),
+                Response({"outcome": "committed", "records": [feature({"with_nsfw": True})]}),
+            ]
+        )
     responses.append(Response(None, status=204, raw=b""))
     repo, _ = configured(responses, telemetry=telemetry)
     preferences = SettingsMiddleware(repo, telemetry=telemetry, backend=Backend.SUPABASE)
@@ -197,14 +221,14 @@ async def test_middleware_and_api_telemetry_have_distinct_owners(configured, mon
                             for point in metric.sum.data_points:
                                 operation = next(attr.value.string_value for attr in point.attributes if attr.key == "operation")
                                 counts[operation] += point.as_int
-    assert counts["settings.load"] == counts["archive.write"] == counts["database.read"] == counts["database.auth"] == 1
+    assert counts["settings.load"] == counts["archive.write"] == counts["database.auth"] == 1
+    assert counts["database.read"] == 1 + 2 * int(change_settings)
     assert counts["settings.save"] == int(change_settings)
-    assert counts["database.write"] == 1 + int(change_settings)
+    assert counts["database.write"] == 2 + int(change_settings)
     spans = sink.spans()
     if change_settings:
         by_operation = {next(attr.value.string_value for attr in span.attributes if attr.key == "operation"): span for span in spans}
-        assert set(by_operation) == {"settings.save", "database.write"}
-        assert by_operation["database.write"].parent_span_id == by_operation["settings.save"].span_id
+        assert set(by_operation) == {"settings.save"}
     else:
         assert spans == []
     assert CANARY not in sink.serialized()
@@ -358,7 +382,7 @@ async def test_http_errors_are_safe_and_never_retry_a_write(configured, status):
     repo, session = configured([Response(token()), failure])
     try:
         with pytest.raises(module.RepositoryError) as caught:
-            await repo.patch_settings(-100, {"private": CANARY})
+            await repo.feature_request("commit", {"operation_id": "synthetic-action", "private": CANARY})
         assert len(session.calls) == 2
         assert caught.value.status == status
         assert CANARY not in "".join(traceback.format_exception(caught.value))
@@ -385,7 +409,7 @@ async def test_rpc_unauthorized_refreshes_only_on_next_operation(configured):
     repo, session = configured([Response(token()), Response(None, status=401), Response(token("two")), Response(HEALTH)])
     try:
         with pytest.raises(module.RepositoryAuthError):
-            await repo.delete_directory(-100)
+            await repo.feature_request("commit", {"operation_id": "synthetic-action"})
         assert len(session.calls) == 2
         await repo.check()
         assert session.calls[2][0].endswith("grant_type=refresh_token")
@@ -486,44 +510,91 @@ async def test_oversized_response_is_rejected_without_partial_results(configured
         await repo.close()
 
 
-async def test_scalar_arrays_include_more_than_rest_default_row_cap(configured):
-    records = [directory(-i) for i in range(1, 1006)]
-    repo, session = configured([Response(token()), Response(records), Response([subscription(chat_id=-i) for i in range(1, 1006)])])
+async def test_application_listings_page_beyond_rest_default_row_cap(configured):
+    directories = sorted([feature(directory(-i), name="ecosystem", key=str(-i)) for i in range(1, 1006)], key=lambda row: row["key"])
+    subscriptions = sorted(
+        [feature(subscription(chat_id=-i), name="vk", collection="subscriptions", key=f"-200:{-i}") for i in range(1, 1006)],
+        key=lambda row: row["key"],
+    )
+    responses = [Response(token())] + [
+        Response(rows[start : start + 200]) for rows in (directories, subscriptions) for start in range(0, 1005, 200)
+    ]
+    repo, session = configured(responses)
     try:
         assert len(await repo.list_directory()) == 1005
         assert len(await repo.list_vk_subscriptions()) == 1005
-        assert len(session.calls) == 3
+        assert len(session.calls) == 13
         assert all("Range" not in kwargs["headers"] for _, kwargs in session.calls)
+        assert all(url.endswith("/feature_list_v1") for url, _ in session.calls[1:])
     finally:
         await repo.close()
 
 
-async def test_sparse_observations_and_patches_preserve_presence(configured):
+async def test_settings_first_contact_is_atomic_without_refreshing_stale_chat_fields(configured):
+    values = {"auto_speech_recognition": True, "auto_video_links": True, "with_nsfw": False, "future": {"keep": None}}
     repo, session = configured(
         [
             Response(token()),
-            Response({"unknown": [1, None]}),
+            Response(chat(metadata={"settings": {"future": {"keep": None}}})),
+            Response(None),
+            Response({"outcome": "committed", "records": [feature(values)]}),
+        ]
+    )
+    try:
+        result = await repo.load_settings(ChatObservation(chat_id=-100, type="supergroup", title="Old snapshot", observed_at=NOW))
+        assert result == values
+        assert [url.rsplit("/", 1)[-1] for url, _ in session.calls[1:]] == ["ensure_chat_v1", "feature_get_v1", "feature_commit_v1"]
+        assert session.calls[1][1]["json"]["p_refresh"] is False
+        request = session.calls[-1][1]["json"]["p_request"]
+        assert request["scope"] == {"key": "global", "owner": "application"}
+        assert request["puts"][0]["payload"] == values
+        assert request["puts"][0]["expires_at"] is None
+    finally:
+        await repo.close()
+
+
+async def test_document_patch_replays_uncertain_feature_commit_without_losing_sparse_fields(configured):
+    original = directory(username_alias="friends", members=51, future={"keep": CANARY})
+    updated = original | {"username_alias": None}
+    repo, session = configured(
+        [
+            Response(token()),
+            Response(feature(original, name="ecosystem")),
+            aiohttp.ServerDisconnectedError(CANARY),
+            Response({"outcome": "replayed", "records": [feature(updated, name="ecosystem")]}),
+        ]
+    )
+    try:
+        result = await repo.patch_directory(-100, DirectoryPatch(username_alias=None))
+        assert result.username_alias is None and result.members == 51
+        assert result.id == UUID(original["id"]) and result.created == NOW
+        assert session.calls[2][1]["json"] == session.calls[3][1]["json"]
+        request = session.calls[-1][1]["json"]["p_request"]
+        payload = request["puts"][0]["payload"]
+        assert datetime.fromisoformat(payload["created"]) == NOW
+        assert payload | {"created": updated["created"]} == updated
+        assert request["guards"] == [{"collection": "chats", "key": "-100", "etag": str(UUID(int=1))}]
+    finally:
+        await repo.close()
+
+
+async def test_sparse_observations_preserve_presence(configured):
+    repo, session = configured(
+        [
+            Response(token()),
             Response(chat()),
-            Response(directory()),
-            Response(subscription()),
             Response(None),
         ]
     )
     try:
-        assert await repo.load_settings(ChatObservation(chat_id=-100, type="supergroup", observed_at=NOW)) == {"unknown": [1, None]}
         await repo.ensure_chat(ChatObservation(chat_id=-100, type="supergroup", username=None, observed_at=NOW))
-        await repo.patch_directory(-100, DirectoryPatch(username_alias=None))
-        await repo.upsert_vk_subscription(-200, -100, VkPatch(description=None))
         update = ArchivedUpdate(
             update_id=45, kind="message", handled=True, data={}, users=[UserObservation(user_id=1, is_bot=False, first_name="Name")]
         )
         await repo.archive_update(update)
         sparse = session.calls[1][1]["json"]["p_chat"]
-        assert sparse == {"chat_id": -100, "type": "supergroup", "observed_at": NOW.isoformat()}
-        assert session.calls[2][1]["json"]["p_chat"]["username"] is None
-        assert session.calls[3][1]["json"]["p_changes"] == {"username_alias": None}
-        assert session.calls[4][1]["json"]["p_changes"] == {"description": None}
-        archived = session.calls[5][1]["json"]["p_update"]
+        assert sparse == {"chat_id": -100, "type": "supergroup", "username": None, "observed_at": NOW.isoformat()}
+        archived = session.calls[2][1]["json"]["p_update"]
         assert archived["id"] == str(update.id) and "received_at" in archived
         assert "username" not in archived["users"][0] and "observed_at" in archived["users"][0]
         assert not any("bot_id" in kwargs["json"] for _, kwargs in session.calls)
@@ -536,34 +607,31 @@ async def test_remaining_repository_operations_return_typed_values(configured):
         [
             Response(token()),
             Response(chat(metadata=["legacy", None])),
-            Response(directory()),
-            Response(directory()),
-            Response(True),
-            Response(None, status=204, raw=b""),
             Response({"users": 2, "chats": 1, "updates": 10, "handled_updates": 4}),
         ]
     )
     try:
         assert (await repo.get_chat(-100)).metadata == ["legacy", None]
-        assert (await repo.get_directory(-100)).name == "Друзья"
-        assert (await repo.create_directory(DirectoryCreate(chat_id=-100, name="Друзья"))).chat_id == -100
-        assert await repo.delete_directory(-100) is True
-        await repo.advance_vk_cursor(-200, -100, 2**40)
         assert (await repo.statistics(NOW)).handled_updates == 4
-        assert session.calls[-2][1]["json"]["p_last_post_id"] == 2**40
         assert session.calls[-1][1]["json"] == {"p_since": NOW.isoformat()}
     finally:
         await repo.close()
 
 
 @pytest.mark.parametrize(
-    "method,value",
-    [("get_chat", []), ("get_directory", {}), ("list_directory", {}), ("list_vk_subscriptions", None), ("delete_directory", 1)],
+    "method,value,error",
+    [
+        ("get_chat", [], module.RepositoryProtocolError),
+        ("get_directory", {}, FeatureProtocolError),
+        ("list_directory", {}, FeatureProtocolError),
+        ("list_vk_subscriptions", None, FeatureProtocolError),
+        ("delete_directory", 1, FeatureProtocolError),
+    ],
 )
-async def test_wrong_rpc_shapes_fail_loudly(configured, method, value):
+async def test_wrong_rpc_shapes_fail_loudly(configured, method, value, error):
     repo, _ = configured([Response(token()), Response(value)])
     try:
-        with pytest.raises(module.RepositoryProtocolError):
+        with pytest.raises(error):
             await getattr(repo, method)(*(() if method.startswith("list_") else (-100,)))
     finally:
         await repo.close()
