@@ -15,14 +15,14 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods import EditMessageCaption, EditMessageMedia, TelegramMethod
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Message
+from aiogram.utils.formatting import Text
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import LRUCache
-from redis.exceptions import RedisError
 
 from msu_hub_bot.commands.quiz_view import View
 from msu_hub_bot.games.definitions import DEFINITIONS, Definition
-from msu_hub_bot.games.models import ChatState, RoundState, Vote
-from msu_hub_bot.games.scores import DAY_ZONE, ScoreWindowExpired, save_scores, score_expiry
+from msu_hub_bot.games.models import ChatState, RoundState, Score, Vote
+from msu_hub_bot.games.scores import DAY_ZONE, SCORE_BATCH_SIZE, apply_batch, ranking
 from msu_hub_bot.storage.features import (
     Collection,
     Conflict,
@@ -30,16 +30,14 @@ from msu_hub_bot.storage.features import (
     FeatureStore,
     FeatureWorker,
     JobContext,
-    JobExpired,
     JobHold,
     JobRetry,
     Record,
     RecordKey,
     Scope,
+    Transaction,
 )
-from msu_hub_bot.storage.features.store import Transaction
 from msu_hub_bot.storage.supabase import RepositoryError, RepositoryUnavailable
-from msu_hub_bot.telegram.storage import RedisStorage
 
 logger = logging.getLogger(__name__)
 SEND_TIMEOUT = 15
@@ -57,6 +55,7 @@ class Collections:
     chats: Collection[ChatState]
     rounds: Collection[RoundState]
     votes: Collection[Vote]
+    scores: Collection[Score]
 
 
 @dataclass
@@ -76,8 +75,8 @@ class LocalLock:
 class QuizService:
     """Database state is authoritative; restarting loses only rendering caches."""
 
-    def __init__(self, bot: Bot, redis: RedisStorage, store: FeatureStore, worker: FeatureWorker) -> None:
-        self.bot, self.redis, self.store, self.worker = bot, redis, store, worker
+    def __init__(self, bot: Bot, store: FeatureStore, worker: FeatureWorker) -> None:
+        self.bot, self.store, self.worker = bot, store, worker
         self.clock: Callable[[], datetime] = lambda: datetime.now(UTC)
         self.collections: dict[str, Collections] = {}
         self._locks: dict[tuple[str, int], LocalLock] = {}
@@ -88,10 +87,10 @@ class QuizService:
                 store.collection(feature, "chats", ChatState, retention=timedelta(days=30)),
                 store.collection(feature, "rounds", RoundState, retention=None),
                 store.collection(feature, "votes", Vote, retention=None),
+                store.collection(feature, "scores", Score, retention=None),
             )
             worker.register(feature, "deadline", self._retryable(self._deadline), max_attempts=1024)
             worker.register(feature, "settle", self._retryable(self._settle), max_attempts=1024)
-            worker.register(feature, "score_expiry", self._retryable(self._score_expiry), max_attempts=1024)
             worker.register(feature, "render", self._retryable(self._render), max_attempts=1024)
             worker.register(feature, "cleanup", self._retryable(self._cleanup), max_attempts=1024)
 
@@ -100,7 +99,7 @@ class QuizService:
         async def run(context: JobContext) -> None:
             try:
                 await handler(context)
-            except Conflict, RepositoryUnavailable, TimeoutError, RedisError, TelegramAPIError:
+            except Conflict, RepositoryUnavailable, TimeoutError, TelegramAPIError:
                 # These jobs only perform conditional database writes, idempotent
                 # score settlement or edits of one known Telegram message.
                 raise JobRetry("Quiz work can safely be replayed") from None
@@ -144,6 +143,10 @@ class QuizService:
 
     async def round(self, feature: str, chat_id: int, token: str) -> Record[RoundState] | None:
         return await self.collections[feature].rounds.get(self._scope(chat_id), token)
+
+    async def ranking(self, feature: str, chat_id: int) -> Text:
+        day = self.clock().astimezone(DAY_ZONE).date()
+        return await ranking(self.collections[feature].scores, self._scope(chat_id), day)
 
     async def votes(self, feature: str, scope: Scope, token: str) -> list[Record[Vote]]:
         result: list[Record[Vote]] = []
@@ -306,7 +309,7 @@ class QuizService:
                 return
             chat = await collections.chats.get(scope, "state")
             state = record.value.model_copy(deep=True)
-            state.phase, state.closed_at, state.score_status = "abandoned", self.clock(), "expired"
+            state.phase, state.closed_at, state.score_status = "abandoned", self.clock(), "skipped"
             tx = self._tx(feature, scope)
             tx.expect(record)
             tx.put(collections.rounds, token, state, status="abandoned")
@@ -454,12 +457,6 @@ class QuizService:
             run_at=self.clock(),
             serial_key=f"scores:{state.score_day.isoformat()}",
         )
-        tx.schedule(
-            f"score_expiry:{token}",
-            "score_expiry",
-            record=RecordKey("rounds", token),
-            run_at=score_expiry(state.score_day),
-        )
         self._schedule_render(tx, record)
         # Use the new closing time; the input record was still open.
         tx.schedule(
@@ -481,74 +478,49 @@ class QuizService:
             await self._close(record, record.value.deadline_at)
 
     async def _settle(self, context: JobContext) -> None:
-        job = context.job
-        record = await self.collections[job.feature].rounds.get(job.scope, job.record.key)
+        job, collections = context.job, self.collections[context.job.feature]
+        record = await collections.rounds.get(job.scope, job.record.key)
         if record is None or record.value.phase != "closed" or record.value.score_status != "pending":
             return
         state = record.value
         if state.score_day is None or state.question is None:
             raise JobHold("Quiz settlement has incomplete state")
-        expired = self.clock() >= score_expiry(state.score_day)
-        if not expired:
-            votes = await self.votes(job.feature, job.scope, record.key)
-            if len(votes) != state.vote_count:
-                raise JobHold("Quiz settlement has incomplete votes")
-            players = [
-                (vote.value.user_id, vote.value.name, vote.value.username, 1 if vote.value.choice == state.question.answer else -1)
-                for vote in votes
-            ]
-            if not await context.current():
-                return
-            try:
-                async with asyncio.timeout(5):
-                    await save_scores(job.feature, state.chat_id, players, self.redis, state.score_day, round_token=state.token)
-            except ScoreWindowExpired:
-                expired = True
-        for _ in range(8):
-            record = await self.collections[job.feature].rounds.get(job.scope, job.record.key)
-            if record is None or record.value.score_status != "pending" or not await context.current():
-                return
-            changed = record.value.model_copy(deep=True)
-            changed.score_status = "expired" if expired else "recorded"
-            tx = self._tx(job.feature, job.scope)
-            tx.expect(record)
-            tx.put(self.collections[job.feature].rounds, record.key, changed, status="closed")
-            tx.cancel_job(f"score_expiry:{record.key}")
-            self._schedule_render(tx, record)
-            self._schedule_cleanup(tx, record)
-            try:
-                await self._commit(tx)
-                if expired:
-                    raise JobExpired("Quiz score window expired")
-                return
-            except Conflict:
-                continue
-        raise Conflict()
-
-    async def _score_expiry(self, context: JobContext) -> None:
-        job = context.job
-        for _ in range(8):
-            record = await self.collections[job.feature].rounds.get(job.scope, job.record.key)
+        day, question = state.score_day, state.question
+        # Closure freezes votes. Validate the whole set before any batch, then
+        # guard every consumed vote alongside its score and the progress cursor.
+        votes = sorted(await self.votes(job.feature, job.scope, record.key), key=lambda vote: vote.key)
+        if len(votes) != state.vote_count or any(vote.key != f"{record.key}:{vote.value.user_id}" for vote in votes):
+            raise JobHold("Quiz settlement has incomplete votes")
+        while True:
+            record = await collections.rounds.get(job.scope, job.record.key)
             if record is None or record.value.phase != "closed" or record.value.score_status != "pending":
                 return
-            if record.value.score_day is None or self.clock() < score_expiry(record.value.score_day):
-                raise JobRetry("Quiz scoring window is still open")
-            if not await context.current():
-                return
-            changed = record.value.model_copy(deep=True)
-            changed.score_status = "expired"
+            state = record.value
+            if state.score_day != day or state.question != question or state.vote_count != len(votes):
+                raise JobHold("Quiz settlement snapshot changed")
+            count = state.score_count
+            if count > len(votes) or state.score_cursor != (votes[count - 1].key if count else None):
+                raise JobHold("Quiz settlement progress is inconsistent")
+            batch = votes[count : count + SCORE_BATCH_SIZE]
+            changed = state.model_copy(deep=True)
+            changed.score_count += len(batch)
+            if batch:
+                changed.score_cursor = batch[-1].key
+            finished = changed.score_count == len(votes)
+            if finished:
+                changed.score_status = "recorded"
             tx = self._tx(job.feature, job.scope)
             tx.expect(record)
-            tx.put(self.collections[job.feature].rounds, record.key, changed, status="closed")
-            tx.cancel_job(f"settle:{record.key}")
-            self._schedule_render(tx, record)
-            self._schedule_cleanup(tx, record)
-            try:
-                await self._commit(tx)
+            await apply_batch(collections.scores, tx, day, batch, question.answer)
+            tx.put(collections.rounds, record.key, changed, status="closed")
+            if finished:
+                self._schedule_render(tx, record)
+                self._schedule_cleanup(tx, record)
+            if not await context.current():
                 return
-            except Conflict:
-                continue
-        raise Conflict()
+            await self._commit(tx)
+            if finished:
+                return
 
     @staticmethod
     def keyboard(definition: Definition, state: RoundState, view: View) -> InlineKeyboardMarkup | None:
@@ -680,7 +652,6 @@ class QuizService:
                 tx.cancel_job(f"render:{record.key}")
                 tx.cancel_job(f"deadline:{record.key}")
                 tx.cancel_job(f"settle:{record.key}")
-                tx.cancel_job(f"score_expiry:{record.key}")
                 tx.cancel_job(f"cleanup:{record.key}")
                 tx.delete(record)
             await self._commit(tx)

@@ -45,7 +45,9 @@ class RoundState(Payload):
     deadline_at: AwareDatetime | None = None
     closed_at: AwareDatetime | None = None
     score_day: date | None = None
-    score_status: Literal["pending", "recorded", "expired"] = "pending"
+    score_status: Literal["pending", "recorded", "skipped"] = "pending"
+    score_cursor: str | None = None
+    score_count: int = Field(default=0, ge=0)
     vote_count: int = Field(default=0, ge=0)
     page: int = Field(default=0, ge=0)
 
@@ -56,3 +58,12 @@ class Vote(Payload):
     name: str = Field(max_length=256)
     username: str | None = Field(default=None, max_length=64)
     accepted_at: AwareDatetime
+
+
+class Score(Payload):
+    """A player's daily points and most recently scored display name."""
+
+    user_id: int
+    points: int = Field(ge=0)
+    name: str = Field(max_length=256)
+    username: str | None = Field(default=None, max_length=64)

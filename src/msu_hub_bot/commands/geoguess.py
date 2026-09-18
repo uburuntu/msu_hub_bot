@@ -1,31 +1,12 @@
 """Photo geography quizzes with durable votes and a daily chat leaderboard."""
 
 import asyncio
-from datetime import date
 
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, Message
 
 from msu_hub_bot.games.quiz import QuizService
-from msu_hub_bot.games import scores
-from msu_hub_bot.games.scores import DAY_ZONE as DAY_ZONE, today as today
 from msu_hub_bot.telegram.context import bot_for
-from msu_hub_bot.telegram.storage import RedisStorage
-
-
-def score_key(chat_id: int, day: date | None = None) -> str:
-    return scores.score_key("geoguess", chat_id, day or today())
-
-
-async def save_scores(
-    chat_id: int,
-    players: list[tuple[int, str, str | None, int]],
-    redis: RedisStorage,
-    day: date | None = None,
-    *,
-    round_token: str,
-) -> None:
-    await scores.save_scores("geoguess", chat_id, players, redis, day or today(), round_token=round_token)
 
 
 class GeoguessCallback(CallbackData, prefix="geoguess"):
@@ -48,10 +29,10 @@ class Geoguess:
         return await quiz.callback("geoguess", query, callback_data.round, callback_data.choice)
 
     @staticmethod
-    async def top(message: Message, redis: RedisStorage) -> Message:
+    async def top(message: Message, quiz: QuizService) -> Message:
         try:
             async with asyncio.timeout(5):
-                body = await scores.ranking("geoguess", message, redis, today())
+                body = await quiz.ranking("geoguess", message.chat.id)
             text, entities = body.render()
             method = message.reply(text, entities=entities, parse_mode=None)
         except Exception:

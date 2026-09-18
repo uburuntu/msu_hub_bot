@@ -121,7 +121,7 @@ class Application:
             stack.push_async_callback(database.close)
             features = FeatureStore(database)
             feature_worker = FeatureWorker(features, telemetry=telemetry)
-            quiz = QuizService(bot, redis, features, feature_worker)
+            quiz = QuizService(bot, features, feature_worker)
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
             vk_api = VkApi(token=settings.vk_user_token)
