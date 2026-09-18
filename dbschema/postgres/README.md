@@ -29,6 +29,9 @@ All tables below belong to `msu_hub_private`. No automatic expiry applies unless
 | `users` | Imported identity or observed Telegram user. Seen timestamps expand; sufficiently recent observations merge known profile fields without clearing absent fields. | Administrative removal only; no runtime delete. |
 | `chats` | Imported identity, observation, explicit ensure or initial settings lookup. Seen/profile rules mirror users; settings lookup preserves existing profiles. | Administrative removal only; related settings, memberships and topics restrict deletion. |
 | `chat_settings` | Imported preferences or lazy initialization from object-valued legacy metadata. Patches merge supplied keys and update the timestamp; legacy metadata stays intact. | No expiry or runtime delete. |
+| `feature_records` | Typed, versioned documents and child records written by guarded transactions. Ownership is either principal-derived bot scope or explicit application scope. | Optional expiry; permanent records use SQL NULL. Reads hide expired records immediately. Physical cleanup protects unfinished job dependencies. |
+| `feature_jobs` | Durable schedules with leased execution, generation fencing, optional serial ordering and explicit retry/hold outcomes. | Unfinished work is retained; terminal jobs expire after seven days. |
+| `feature_operations` | Canonical request hashes and response envelopes deduplicate transactions; receipts contain no payload bodies. | Seven days after creation. Replay reconstructs payloads from the matching caller request. |
 | `chat_users` | Observed user/chat relationship, joins/leaves or membership updates. Tracks seen bounds and explicitly observed status/permissions. | Leaving updates status, retaining the row; no automatic deletion. This is not a complete current roster. |
 | `chat_topics` | Observed forum thread; service events supply title/profile and closed/reopened status. Sparse observations preserve known values. | Closing changes a flag; no deletion synchronization or expiry. |
 | `updates` | Receipt after handling, with kind, routing outcome and event data. Message bodies become references; duplicate new bot/update IDs are ignored. | Expires 30 days after receipt `created`. |
@@ -42,6 +45,12 @@ All tables below belong to `msu_hub_private`. No automatic expiry applies unless
 | `schema_migrations` | Successful administrative migrations append version/application time. | Permanent migration ledger. |
 
 ## Retention and recovery
+
+The [feature persistence guide](../../docs/feature-persistence.md) defines typed
+models, concurrency, upgrades and job recovery. Its separate administrative
+`retain_features` helper performs bounded record/job/receipt cleanup without
+changing the message-retention function. Enabling consumers requires installing
+the schema, scheduling this helper and reviewing backup/maintenance coverage.
 
 Update receipts expire 30 days after `created`; normalized messages expire 30 days after `sent_at`; reaction snapshots expire 30 days after `event_at`. Each message body belongs only to its normalized row: receipts contain message references, and normalized parent messages contain references to nested messages. Fresh replies, callbacks and edits cannot extend an older message body's lifetime. Non-message event payloads remain in their receipts. The administrative `msu_hub_private.retain_messages(batch, now)` function deletes at most the requested batch from each expiring table; repeat bounded batches until every deletion count is zero. It neither schedules itself nor deletes users, chats, settings, directory entries, subscriptions or Redis state. Backups and the preserved source database have separate recovery policies.
 

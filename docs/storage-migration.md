@@ -10,7 +10,7 @@ The target JSON contains:
 
 - `connection`: explicit `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` and optional TLS environment values.
 - `expected_database` and `expected_system_identifier`: the intended database name and PostgreSQL cluster identity from `pg_control_system()`.
-- `expected_schema_version`: the applied SQL migration number, defaulting to `4`. This differs from the public RPC contract version, which remains `1`.
+- `expected_schema_version`: the applied SQL migration number, defaulting to `5`. This differs from the public RPC contract version, which remains `1`.
 - Optional `psql_command`: normally `["psql"]`. A local container transport may use `["docker", "exec", "-i", "-e", "PGPASSWORD", "-e", "PGUSER", "-e", "PGDATABASE", "supabase-db", "psql"]`. Forward environment variable names, never their values. The container must receive every connection variable it needs.
 
 The administrative identity needs access to cluster identity, application tables and private observation helpers. Never give these privileges or platform credentials to the bot. The target guard checks the cluster, database, SQL revision and configured bot principal before transfer.

@@ -9,8 +9,9 @@ operator guide. Application CD never applies SQL or upgrades Supabase.
 
 ## Adding a field
 
-For example, an optional user-selected timezone needs a database change and an
-application change, released in that order:
+For a feature document, follow [payload evolution](feature-persistence.md#evolving-models):
+ordinary fields do not require SQL. The procedure below applies to a new relational
+column, such as an observed user attribute, and releases the database change first:
 
 1. Trace the field through `src/msu_hub_bot/storage/models.py`, observations, repository
    methods, SQL input allowlists, returned JSON, tests and recovery mappings.
@@ -25,7 +26,7 @@ application change, released in that order:
 3. Add a nullable column without changing existing callers, for example:
 
    ```sql
-   ALTER TABLE msu_hub_private.users ADD COLUMN timezone text;
+   ALTER TABLE msu_hub_private.users ADD COLUMN is_premium boolean;
    ```
 
    Extend only the necessary private helper and reviewed RPC. Preserve old
@@ -75,6 +76,10 @@ changed columns/functions, including installed operator tools:
 - Review backup/restore verification and durable-table coverage when adding
   relations. Decide explicitly whether they belong in the mutation journal or
   in retention. Message bodies must not enter durable profiles or tombstones.
+- Feature storage also has a separate bounded `msu_hub_private.retain_features`
+  helper. Schedule and verify it explicitly when enabling feature consumers;
+  `retain_messages` does not clean feature records, terminal jobs or operation
+  receipts. Preserve pending dependencies and validate its own ownership/grants.
 
 ## Other common changes
 

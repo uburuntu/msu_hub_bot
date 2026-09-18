@@ -231,6 +231,42 @@ async def test_expired_message_body_never_enters_archive_request(configured):
         await repo.close()
 
 
+async def test_feature_api_reuses_authenticated_transport(configured):
+    from msu_hub_bot.storage.features import FeatureStore
+
+    repo, session = configured([Response(token()), Response({"version": 1})])
+    try:
+        await FeatureStore(repo).check()
+        url, request = session.calls[-1]
+        assert url.endswith("/rest/v1/rpc/feature_health_v1")
+        assert request["json"] == {"p_request": {}}
+        assert request["headers"]["Authorization"] == "Bearer access-one"
+        assert request["headers"]["Content-Profile"] == "msu_hub_api"
+    finally:
+        await repo.close()
+
+
+async def test_uncertain_feature_commit_is_not_retried_by_transport(configured):
+    repo, session = configured([Response(token()), aiohttp.ClientConnectionError(CANARY)])
+    try:
+        with pytest.raises(module.RepositoryUnavailable) as caught:
+            await repo.feature_request("commit", {"operation_id": "synthetic-action"})
+        assert len(session.calls) == 2
+        assert CANARY not in str(caught.value)
+    finally:
+        await repo.close()
+
+
+async def test_feature_transport_rejects_unknown_rpc_before_authentication(configured):
+    repo, session = configured([])
+    try:
+        with pytest.raises(ValueError, match="Unknown feature storage operation"):
+            await repo.feature_request("arbitrary_rpc", {})
+        assert session.calls == []
+    finally:
+        await repo.close()
+
+
 async def test_password_auth_health_reuses_token_and_scopes_requests(configured):
     repo, session = configured([Response(token()), Response(HEALTH), Response(None)])
     try:

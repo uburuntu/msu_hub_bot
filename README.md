@@ -100,6 +100,10 @@ own routing support and delivery, and providers, storage, media and execution
 have separate service boundaries. Release tooling lives in `tools/deployment/`;
 database history and operational contracts live in `dbschema/` and `docs/`.
 
+For contributor-owned persistence, use the [typed feature store](docs/feature-persistence.md).
+It provides versioned documents, atomic changes and durable jobs; chess and geoguess
+share a quiz service that keeps rounds and votes across process restarts.
+
 Ruff exceptions are limited to specific files. Strict mypy coverage expands
 monotonically as modules are typed; new application modules must be included.
 
