@@ -10,8 +10,7 @@ import pytest
 from aiogram import Bot
 from aiogram.types import BufferedInputFile, CallbackQuery
 
-from msu_hub_bot.telegram.runtime import Supervisor
-from msu_hub_bot.commands import crypto, geoguess, stats, weather
+from msu_hub_bot.commands import crypto, stats, weather
 from telegram_helpers import RecordingSession, make_message
 
 
@@ -44,7 +43,8 @@ def test_callback_wires_remain_compatible(family, wire, fields):
         ("antibot.AntiBot", {"action": "ban", "chat_id": -100, "user_id": 7}, {"bot": None, "redis": None}),
         ("crypto.Crypto", {"ticker": "BTC"}, {"crypto_exchange": None}),
         ("dvach.Dvach", {"board": "b", "url": "update"}, {"dvach": None, "bot": None}),
-        ("geoguess.Geoguess", {"round": "token", "choice": "finish"}, {"redis": None, "supervisor": None}),
+        ("geoguess.Geoguess", {"round": "token", "choice": "finish"}, {"quiz": None}),
+        ("chess.Chess", {"round": "token", "choice": "finish"}, {"quiz": None}),
         ("minecraft.MinecraftStatus", {"url": "example.org"}, {}),
         ("rolls.Randoms", {"begin": 1, "end": 100, "count": 3}, {}),
         ("rolls.Rolls", {"digits": 3, "count": 1}, {}),
@@ -142,6 +142,8 @@ async def test_weather_map_snapshots_upload_and_keeps_topic(monkeypatch):
 
 
 async def test_geoguess_timeout_reaches_transport():
+    from msu_hub_bot.games.quiz import QuizService, SEND_TIMEOUT
+
     class Session(RecordingSession):
         async def make_request(self, bot, method, timeout=None):
             self.timeout = timeout
@@ -149,36 +151,8 @@ async def test_geoguess_timeout_reaches_transport():
 
     session = Session()
     bot = Bot("123456789:" + "a" * 35, session=session)
-    await geoguess._send(make_message(bot).reply("Synthetic"))
-    assert session.timeout == geoguess.SEND_TIMEOUT
+    quiz = object.__new__(QuizService)
+    quiz.bot = bot
+    await quiz._send(make_message(bot).reply("Synthetic"))
+    assert session.timeout == SEND_TIMEOUT
     assert "request_timeout" not in session.methods[-1].model_extra
-
-
-async def test_geoguess_finish_is_owned_by_supervisor(monkeypatch):
-    session = RecordingSession()
-    bot = Bot("123456789:" + "a" * 35, session=session)
-    message = make_message(bot)
-    round_ = geoguess.Round(token="test", message=message)
-    geoguess.Geoguess.rounds[message.chat.id] = round_
-    supervisor = Supervisor()
-    entered, release = asyncio.Event(), asyncio.Event()
-
-    async def finish(*args):
-        entered.set()
-        await release.wait()
-
-    monkeypatch.setattr(geoguess.Geoguess, "finish", finish)
-    query = CallbackQuery.model_validate(
-        {"id": "test", "chat_instance": "test", "from_user": {"id": 42, "is_bot": False, "first_name": "User"}, "message": message},
-        context={"bot": bot},
-    )
-    worker = asyncio.create_task(
-        geoguess.Geoguess.process_cb(query, geoguess.GeoguessCallback(round="test", choice="finish"), None, supervisor)
-    )
-    await entered.wait()
-    assert supervisor.job_count == 1 and round_.closed
-    release.set()
-    await worker
-    await supervisor.drain()
-    assert supervisor.job_count == 0
-    geoguess.Geoguess.rounds.clear()

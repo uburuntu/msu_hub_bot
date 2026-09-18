@@ -26,7 +26,7 @@ def boundaries(monkeypatch):
         proxy="",
     )
     redis = SimpleNamespace(ping=AsyncMock(return_value=True), aclose=AsyncMock())
-    database = SimpleNamespace(check=AsyncMock(), close=AsyncMock())
+    database = SimpleNamespace(check=AsyncMock(), close=AsyncMock(), feature_request=AsyncMock(return_value={"version": 1}))
     monkeypatch.setattr(preflight, "settings", settings)
     monkeypatch.setattr(preflight, "Redis", Mock(return_value=redis))
     monkeypatch.setattr(preflight, "create_repository", Mock(return_value=database))
@@ -43,6 +43,7 @@ async def test_preflight_only_gets_identity_and_closes_all_clients(boundaries, m
     factory.assert_called_once_with(proxy=None, timeout=15)
     assert [type(method) for method in session.methods] == [GetMe]
     database.check.assert_awaited_once_with()
+    database.feature_request.assert_awaited_once_with("health", {})
     assert session.closed
     redis.aclose.assert_awaited_once()
     database.close.assert_awaited_once()

@@ -30,6 +30,7 @@ def boundaries(monkeypatch):
     session = RecordingSession()
     client = AsyncMock()
     db = AsyncMock()
+    db.feature_request.side_effect = lambda operation, request: {"version": 1} if operation == "health" else []
     monkeypatch.setattr(app, "AiohttpSession", lambda **kwargs: session)
     monkeypatch.setattr(app, "Redis", lambda **kwargs: client)
     monkeypatch.setattr(app, "create_repository", lambda *args, **kwargs: db)
@@ -50,11 +51,14 @@ async def test_composition_startup_and_idempotent_shutdown(app_settings, boundar
     assert [type(method) for method in session.methods] == [GetMe, DeleteWebhook]
     assert session.methods[-1].drop_pending_updates is False
     assert application._producer is not None
+    assert application._feature_task is not None
+    assert application.dispatcher.workflow_data["quiz"] is application.quiz
     await application.close()
     await application.close()
     client.aclose.assert_awaited_once()
     db.close.assert_awaited_once()
     assert session.closed and application._producer.done()
+    assert application._feature_task.done()
 
 
 async def test_partial_allocation_failure_closes_opened_clients(app_settings, boundaries, monkeypatch):
@@ -84,6 +88,20 @@ async def test_startup_failure_runs_owned_cleanup(app_settings, boundaries):
     assert session.closed
     client.aclose.assert_awaited_once()
     assert session.methods == []
+
+
+async def test_missing_feature_schema_stops_startup_before_telegram(app_settings, boundaries):
+    from msu_hub_bot.app import Application
+    from msu_hub_bot.storage.features import FeatureProtocolError
+
+    session, client, db = boundaries
+    db.feature_request.side_effect = lambda operation, request: {"version": 0}
+    application = await Application.create(app_settings)
+    with pytest.raises(FeatureProtocolError):
+        await application.run()
+    assert session.closed and session.methods == []
+    client.aclose.assert_awaited_once()
+    db.close.assert_awaited_once()
 
 
 async def test_polling_explicitly_subscribes_to_all_kinds_and_preserves_backlog(app_settings, boundaries, monkeypatch):

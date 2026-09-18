@@ -23,6 +23,8 @@ from redis.asyncio import Redis
 
 from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.factory import create_repository
+from msu_hub_bot.storage.features import FeatureStore, FeatureWorker
+from msu_hub_bot.games import QuizService
 from msu_hub_bot.execution.executor import TPExecutor
 from msu_hub_bot.providers.dvach import Api2chAsync
 from msu_hub_bot.uptime import HealthCheck
@@ -44,8 +46,6 @@ from msu_hub_bot.telegram.state import (
 from msu_hub_bot.telegram.storage import RedisStorage
 from msu_hub_bot.telegram.wrapper import BotWrapper
 from msu_hub_bot.providers.vk.api import VkApi
-from msu_hub_bot.commands.geoguess import Geoguess
-from msu_hub_bot.commands.chess import Chess
 from msu_hub_bot.events import EcosystemManager, EventsMiddleware
 from msu_hub_bot.routing import build_router
 from msu_hub_bot.providers.jdoodle import ManyJDoodle
@@ -76,7 +76,11 @@ class Application:
     stack: AsyncExitStack
     health: HealthCheck
     telemetry: Telemetry
+    features: FeatureStore
+    feature_worker: FeatureWorker
+    quiz: QuizService
     _producer: asyncio.Task[None] | None = None
+    _feature_task: asyncio.Task[None] | None = None
     _closed: bool = False
 
     @classmethod
@@ -115,6 +119,9 @@ class Application:
             redis = RedisStorage(client, prefix=settings.name, supervisor=supervisor, telemetry=telemetry)
             database = create_repository(settings, telemetry=telemetry)
             stack.push_async_callback(database.close)
+            features = FeatureStore(database)
+            feature_worker = FeatureWorker(features, telemetry=telemetry)
+            quiz = QuizService(bot, redis, features, feature_worker)
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
             vk_api = VkApi(token=settings.vk_user_token)
@@ -134,8 +141,6 @@ class Application:
             backend = Backend(settings.storage_backend)
             preferences = SettingsMiddleware(database, telemetry=telemetry, backend=backend)
             stack.push_async_callback(preferences.close)
-            stack.push_async_callback(Geoguess.shutdown)
-            stack.push_async_callback(Chess.shutdown)
             ecosystem = EcosystemManager(bot, database)
             events = EventsMiddleware(bot, database, settings.events_chat_id, em=ecosystem)
 
@@ -162,6 +167,7 @@ class Application:
                 db=database,
                 redis=redis,
                 supervisor=supervisor,
+                quiz=quiz,
                 events_isolation=isolation,
                 vk_api=vk_api,
                 dvach=dvach,
@@ -197,7 +203,7 @@ class Application:
                     if isinstance(command, str)
                 }
             )
-            return cls(bot, dispatcher, supervisor, database, client, redis, fsm, stack, health, telemetry)
+            return cls(bot, dispatcher, supervisor, database, client, redis, fsm, stack, health, telemetry, features, feature_worker, quiz)
         except BaseException:
             await stack.aclose()
             raise
@@ -213,11 +219,13 @@ class Application:
     async def start(self) -> None:
         await self.telemetry.start()
         await self.database.check()
+        await self.features.check()
         await cast(Awaitable[bool], self.redis_client.ping())
         await self.bot.me()
         await self.bot.delete_webhook(drop_pending_updates=False)
         await self.health.start()
         self._producer = asyncio.create_task(self._deletion_loop(), name="scheduled-deletions")
+        self._feature_task = self.supervisor.create_job(self.feature_worker.run, trace=False)
 
     async def close(self, *, hard_exit: Callable[[int], Any] = os._exit) -> None:
         if self._closed:
@@ -228,6 +236,7 @@ class Application:
         watchdog.daemon = True
         watchdog.start()
         self.supervisor.close_updates()
+        self.feature_worker.stop()
         try:
             if self._producer is not None:
                 self._producer.cancel()

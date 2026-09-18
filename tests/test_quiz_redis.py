@@ -11,6 +11,7 @@ import pytest
 from redis.asyncio import Redis
 
 from msu_hub_bot.commands import chess, geoguess
+from msu_hub_bot.games import scores as score_storage
 from msu_hub_bot.telegram.runtime import Supervisor
 from msu_hub_bot.telegram.storage import RedisStorage
 
@@ -32,15 +33,18 @@ async def scores(monkeypatch, game):
         pytest.fail("Quiz Redis contracts require a loopback Redis endpoint")
     client = Redis.from_url(url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
     namespace = f"hub_test_quiz:{uuid4().hex}:"
-    original_key = game.score_key
+    original_key = score_storage.score_key
     keys = set()
 
-    def score_key(chat_id, day=None):
-        key = namespace + original_key(chat_id, day)
+    def shared_key(feature, chat_id, day=None):
+        key = namespace + original_key(feature, chat_id, day)
         keys.update((key, key + ":names", key + ":usernames", key + ":rounds"))
         return key
 
-    monkeypatch.setattr(game, "score_key", score_key)
+    def score_key(chat_id, day=None):
+        return shared_key("chess" if game is chess else "geoguess", chat_id, day)
+
+    monkeypatch.setattr(score_storage, "score_key", shared_key)
     try:
         await client.ping()
         yield SimpleNamespace(
