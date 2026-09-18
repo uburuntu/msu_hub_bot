@@ -11,6 +11,11 @@ from test_postgres_storage import PRINCIPAL, STRANGER, literal, namespace_snapsh
 SCOPE = {"key": "chat:-101", "owner": "bot"}
 
 
+@pytest.fixture
+def db(application_db):
+    return application_db
+
+
 def when(days=0, seconds=0):
     return (datetime.now(UTC) + timedelta(days=days, seconds=seconds)).isoformat()
 

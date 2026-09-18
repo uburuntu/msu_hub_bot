@@ -272,7 +272,11 @@ def migration_target(db, directory):
         connection["PGUSER"] = unquote(parsed.username)
     if parsed.password:
         connection["PGPASSWORD"] = unquote(parsed.password)
-    return Postgres({"connection": connection, "expected_database": database, "expected_system_identifier": cluster}, directory, 999)
+    return Postgres(
+        {"connection": connection, "expected_database": database, "expected_system_identifier": cluster, "expected_schema_version": 5},
+        directory,
+        999,
+    )
 
 
 def test_administrative_copy_import_preserves_exact_values_and_resumes(db, tmp_path):

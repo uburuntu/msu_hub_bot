@@ -2,6 +2,8 @@
 
 import os
 import shutil
+from urllib.parse import urlsplit
+from uuid import uuid4
 
 import pytest
 
@@ -37,6 +39,8 @@ def postgres():
         $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     """)
     for schema in SCHEMAS:
+        if int(schema.name[:3]) > 5:
+            break
         if schema.name == "003_application_namespaces.sql":
             db.namespace_upgrade = exercise_namespace_migration(db, schema.read_text())
         elif schema.name == "004_reactions.sql":
@@ -51,12 +55,49 @@ def postgres():
 @pytest.fixture
 def db(postgres):
     # The session fixture refuses existing schemas before installing the test schema.
-    postgres.run("""
-        TRUNCATE msu_hub_private.chat_users,msu_hub_private.chat_topics,msu_hub_private.chat_settings,
+    reset_database(postgres, legacy=True)
+    return postgres
+
+
+def reset_database(database, *, legacy):
+    retired = "msu_hub_private.chat_settings,msu_hub_private.directory,msu_hub_private.vk_subscriptions," if legacy else ""
+    database.run(f"""
+        TRUNCATE {retired} msu_hub_private.chat_users,msu_hub_private.chat_topics,
             msu_hub_private.reaction_actors,msu_hub_private.reaction_counts,
             msu_hub_private.feature_records,msu_hub_private.feature_jobs,msu_hub_private.feature_operations,
             msu_hub_private.messages,msu_hub_private.updates,msu_hub_private.users,msu_hub_private.chats,
-            msu_hub_private.directory,msu_hub_private.vk_subscriptions,msu_hub_private.mutation_journal,msu_hub_private.principals;
+            msu_hub_private.mutation_journal,msu_hub_private.principals;
         INSERT INTO msu_hub_private.principals(auth_user_id,bot_id) VALUES ('00000000-0000-0000-0000-000000000001',999);
     """)
-    return postgres
+
+
+@pytest.fixture(scope="session")
+def application_postgres(postgres):
+    """Keep the historical RPC suite and complete schema independently executable."""
+    from test_application_postgres import exercise_application_migrations
+    from test_postgres_storage import Database, SCHEMAS
+
+    parsed = urlsplit(postgres.dsn)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        pytest.fail("PostgreSQL contracts require a PostgreSQL URI for the isolated upgrade database")
+    original = postgres.run("SELECT current_database();").stdout.strip()
+    name = "hub_test_documents_" + uuid4().hex[:12]
+    prefix = f"{parsed.scheme}://{parsed.netloc}/"
+    suffix = "?" + parsed.query if parsed.query else ""
+    admin = Database(prefix + "postgres" + suffix)
+    upgraded = Database(prefix + name + suffix)
+    quoted_original = '"' + original.replace('"', '""') + '"'
+    admin.run(f'CREATE DATABASE "{name}" TEMPLATE {quoted_original};')
+    try:
+        reset_database(upgraded, legacy=True)
+        upgrades = [schema for schema in SCHEMAS if int(schema.name[:3]) > 5]
+        upgraded.application_upgrade = exercise_application_migrations(upgraded, upgrades)
+        yield upgraded
+    finally:
+        admin.run(f'DROP DATABASE "{name}";')
+
+
+@pytest.fixture
+def application_db(application_postgres):
+    reset_database(application_postgres, legacy=False)
+    return application_postgres
