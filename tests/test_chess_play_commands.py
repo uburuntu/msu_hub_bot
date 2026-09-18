@@ -10,12 +10,26 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import AnswerCallbackQuery, EditMessageText
 from aiogram.types import CallbackQuery, Update, User
 
-from msu_hub_bot.commands.chess_play import ChessRating, RatingCallback
+from msu_hub_bot.commands.chess_play import ChessPlay, ChessRating, RatingCallback
 from msu_hub_bot.commands.chess_play_view import PlayCallback
 from msu_hub_bot.games.chess_play.records import RatedPlayer, RatingPage
 from msu_hub_bot.telegram.state import ReleasableEventIsolation, StateContextMiddleware, TopicFSMContextMiddleware
 from telegram_helpers import make_bot, make_message
 from test_dispatch_contract import Selection, router
+
+
+async def test_unavailable_store_replies_without_exposing_exception_data():
+    bot = make_bot()
+    service = AsyncMock()
+    service.start.side_effect = RuntimeError("SYNTHETIC_PRIVATE_DETAIL")
+    try:
+        await ChessPlay.process(make_message(bot), service)
+        assert len(bot.session.methods) == 1
+        assert "Не удалось открыть" in bot.session.methods[0].text
+        assert "SYNTHETIC_PRIVATE_DETAIL" not in bot.session.methods[0].text
+        service.start.assert_awaited_once()
+    finally:
+        await bot.session.close()
 
 
 @pytest.mark.parametrize("state", ["StickerPack:name", "Prog:code", "Posting:text"])

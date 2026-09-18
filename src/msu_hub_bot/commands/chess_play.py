@@ -10,6 +10,7 @@ from aiogram.utils.formatting import Bold, Text
 
 from msu_hub_bot.commands.chess_play_view import PlayCallback
 from msu_hub_bot.commands.quiz_view import user_label
+from msu_hub_bot.games.chess_play.models import GameError
 from msu_hub_bot.games.chess_play.service import ChessMatchService
 from msu_hub_bot.telegram.context import bot_for
 
@@ -21,7 +22,15 @@ class ChessPlay:
 
     @staticmethod
     async def process(message: Message, chess_matches: ChessMatchService) -> Message | None:
-        return await chess_matches.start(message)
+        try:
+            return await chess_matches.start(message)
+        except GameError as error:
+            answer = str(error)
+        except Exception:
+            logger.exception("Chess match unavailable")
+            answer = "Не удалось открыть партию. Попробуй чуть позже."
+        async with asyncio.timeout(15):
+            return await bot_for(message)(message.reply(answer), request_timeout=15)
 
     @staticmethod
     async def callback(query: CallbackQuery, callback_data: PlayCallback, chess_matches: ChessMatchService) -> None:
