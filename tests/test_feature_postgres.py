@@ -509,3 +509,84 @@ async def test_python_facade_and_worker_roundtrip_persist_across_new_instances(d
     assert final is not None and final.value.model_dump() == {"count": 1, "future": {"preserved": True}}
     assert final.etag != loaded.etag and final.expires_at is None
     assert db.value("SELECT to_jsonb(state) FROM msu_hub_private.feature_jobs;") == "complete"
+
+
+@pytest.mark.parametrize("feature", ["chess", "geoguess"])
+async def test_quiz_restart_settlement_and_cleanup_use_real_feature_transactions(db, monkeypatch, feature):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from aiogram.methods import SendPhoto
+    from quiz_helpers import GameSession, PHOTO, PNG, PUZZLE, ScoreStore, click, edits, restart, settle, start, text_of
+    from telegram_helpers import make_message
+
+    from msu_hub_bot.games import definitions, scores
+    from msu_hub_bot.games.quiz import RESULT_TTL
+    from msu_hub_bot.telegram.wrapper import BotWrapper
+
+    class Backend:
+        now = datetime.now(UTC)
+
+        async def feature_request(self, operation, value):
+            return await asyncio.to_thread(call, db, operation, value)
+
+    monkeypatch.setattr("msu_hub_bot.games.quiz.EDIT_INTERVAL", 0)
+    monkeypatch.setattr(definitions, "random_puzzle", AsyncMock(return_value=PUZZLE))
+    monkeypatch.setattr(definitions, "random_photo", AsyncMock(return_value=PHOTO))
+    monkeypatch.setattr(definitions, "render_board", Mock(return_value=PNG))
+    backend = Backend()
+    session = GameSession(backend)
+    bot = BotWrapper("123456789:" + "a" * 35, session=session)
+    client = ScoreStore()
+    rig = SimpleNamespace(
+        feature=feature,
+        backend=backend,
+        session=session,
+        bot=bot,
+        client=client,
+        redis=SimpleNamespace(redis=AsyncMock(return_value=client)),
+        message=make_message(bot, message_id=10, date=backend.now, is_topic_message=True, message_thread_id=17),
+    )
+    restart(rig)
+    try:
+        record = await start(rig)
+        assert record is not None and record.value.question is not None
+        question = record.value.question.model_dump()
+        message_id = record.value.message_id
+        await click(rig, record, record.value.question.answer)
+        await click(rig, record, (record.value.question.answer + 1) % 6, user_id=43)
+        rig.worker.stop()
+        restart(rig)
+        definitions.random_puzzle.side_effect = AssertionError("A restored game must not fetch another question")
+        definitions.random_photo.side_effect = AssertionError("A restored game must not fetch another question")
+        restored = await rig.quiz.round(feature, record.value.chat_id, record.key)
+        assert restored.value.question.model_dump() == question
+        assert restored.value.message_id == message_id and restored.value.thread_id == 17
+        voters = await rig.quiz.votes(feature, record.scope, record.key)
+        assert [(v.value.user_id, v.value.choice) for v in voters] == [(42, question["answer"]), (43, (question["answer"] + 1) % 6)]
+        await click(rig, restored, "finish")
+        await settle(rig)
+        closed = await rig.quiz.round(feature, record.value.chat_id, record.key)
+        assert closed.value.phase == "closed" and closed.value.score_status == "recorded"
+        assert closed.value.message_id == message_id
+        score_key = scores.score_key(feature, closed.value.chat_id, closed.value.score_day)
+        assert client.scores[score_key] == {"42": 1, "43": 0}
+        client.eval.assert_awaited_once()
+        assert "Угадали 1 из 2" in text_of(edits(rig)[-1])
+        assert {method.message_id for method in edits(rig)} == {message_id}
+        assert len([method for method in session.methods if isinstance(method, SendPhoto)]) == 1
+
+        # Advance the service clock and make only this synthetic cleanup job due.
+        backend.now = closed.value.closed_at + RESULT_TTL + timedelta(seconds=1)
+        db.run(f"""UPDATE msu_hub_private.feature_jobs SET run_at=clock_timestamp()-interval '1 second'
+            WHERE feature='{feature}' AND record_key='{record.key}' AND kind='cleanup';""")
+        await settle(rig)
+        assert await rig.quiz.round(feature, record.value.chat_id, record.key) is None
+        assert await rig.quiz.votes(feature, record.scope, record.key) == []
+        assert db.value("SELECT count(*) FROM msu_hub_private.feature_jobs WHERE terminal_at IS NULL;") == 0
+        chat = await rig.quiz.collections[feature].chats.get(record.scope, "state")
+        assert chat.value.recent == [record.value.question.identity]
+        assert client.scores[score_key] == {"42": 1, "43": 0}
+    finally:
+        rig.worker.stop()
+        await session.close()
