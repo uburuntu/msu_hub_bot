@@ -147,7 +147,7 @@ uv run --no-sync ruff format --check src tests tools
 uv run --no-sync mypy
 uv run --no-sync pytest -q
 HUB_TEST_POSTGRES_DSN=postgresql:///hub_test_schema_change \
-  uv run --no-sync pytest -q tests/test_postgres_storage.py
+  uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py
 ```
 
 The ordinary suite skips real SQL without that variable; CI has a dedicated
