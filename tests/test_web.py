@@ -170,6 +170,26 @@ def creation(**changes):
     return {"request_id": str(uuid4()), "text": "30m meeting <&>", "schedule": "in 1h", "timezone": "Europe/Moscow", **changes}
 
 
+async def test_web_telemetry_exports_verified_identity_without_request_contents(rig):
+    from telemetry_helpers import Capture, config
+
+    capture = Capture()
+    telemetry = Telemetry(config(), transport=capture)
+    rig.server.telemetry = telemetry
+    await telemetry.start()
+    try:
+        response = await rig.api("POST", "/api/reminders", body=creation(text="private-reminder-canary"))
+        assert response.status == 201
+    finally:
+        await telemetry.close()
+    spans = [span for span in capture.spans() if span.name == "web.request"]
+    assert len(spans) == 1
+    assert any(item.key == "user_id" and item.value.int_value == 42 for item in spans[0].attributes)
+    serialized = capture.serialized()
+    for private in (TOKEN, "Owner <&>", "private-reminder-canary", "Authorization", signed(), "app.example"):
+        assert private not in serialized
+
+
 def assert_headers(response):
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Referrer-Policy"] == "no-referrer"
@@ -250,6 +270,27 @@ async def test_expired_launch_explains_how_to_reopen_without_creating_a_record(r
     assert response.status == 422 and result["error"]["code"] == "launch"
     assert "исходного чата" in result["error"]["message"]
     assert not rig.backend.records and not rig.bot.session.methods
+
+
+@pytest.mark.parametrize("action", ["reschedule", "retry"])
+async def test_removed_owner_cannot_change_or_retry_group_reminder_but_can_cancel(rig, action):
+    token = rig.links.launch(42, Destination(-123, 17), now=NOW)
+    item = await (await rig.api("POST", "/api/reminders", body=creation(launch=token))).json()
+    if action == "retry":
+        record = await rig.reminders.get(42, item["key"])
+        await rig.reminders._terminal(record, "uncertain", failure="uncertain")
+        item = await (await rig.api("GET", f"/api/reminders/{item['key']}")).json()
+    rig.membership["allowed"] = False
+    body = {"etag": item["etag"], **({"schedule": "in 2h", "text": "Changed text"} if action == "reschedule" else {})}
+    response = await rig.api("POST", f"/api/reminders/{item['key']}/{action}", body=body)
+    assert response.status == 403 and (await response.json())["error"]["code"] == "membership"
+    current = await rig.reminders.get(42, item["key"])
+    assert current.value.text == item["text"] and current.etag == item["etag"]
+    membership_calls = len([method for method in rig.bot.session.methods if isinstance(method, GetChatMember)])
+    response = await rig.api("POST", f"/api/reminders/{item['key']}/cancel", body={"etag": item["etag"]})
+    assert response.status == 200 and (await response.json())["status"] == "cancelled"
+    assert len([method for method in rig.bot.session.methods if isinstance(method, GetChatMember)]) == membership_calls
+    assert len([method for method in rig.bot.session.methods if isinstance(method, SendMessage)]) == 1
 
 
 async def test_list_get_and_changes_cannot_access_another_authors_record(rig):

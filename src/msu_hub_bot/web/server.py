@@ -271,6 +271,14 @@ class WebServer:
             # The reminder is committed; an uncertain acknowledgement is never resent.
             logger.warning("Mini App reminder acknowledgement unavailable")
 
+    async def _can_write(self, user_id: int, destination: Destination) -> bool:
+        if destination.chat_id > 0:
+            return destination.chat_id == user_id
+        member = await self.bot.get_chat_member(destination.chat_id, user_id)
+        return member.status in {"creator", "administrator", "member", "restricted"} and not (
+            isinstance(member, ChatMemberRestricted) and (not member.is_member or not member.can_send_messages)
+        )
+
     async def _create(self, request: web.Request) -> web.Response:
         user, body = request[USER], await self._body(request, Creation)
         destination = self.links.destination(user.id, body.launch, now=self.clock())
@@ -280,12 +288,8 @@ class WebServer:
         )
         if old is not None:
             return web.json_response(self._item(old))
-        if destination.chat_id < 0:
-            member = await self.bot.get_chat_member(destination.chat_id, user.id)
-            if member.status not in {"creator", "administrator", "member", "restricted"} or (
-                isinstance(member, ChatMemberRestricted) and (not member.is_member or not member.can_send_messages)
-            ):
-                return error(403, "membership", "Создать напоминание можно в своём чате.")
+        if not await self._can_write(user.id, destination):
+            return error(403, "membership", "Создать напоминание можно в своём чате.")
         schedule = self._schedule(body.schedule, body.text, body.timezone)
         record, created = await self.reminders.create_with_status(
             author_id=user.id,
@@ -306,6 +310,8 @@ class WebServer:
         current = await self.reminders.get(user.id, key)
         if current.etag != str(body.etag):
             raise Conflict
+        if action != "cancel" and not await self._can_write(user.id, Destination(current.value.chat_id, current.value.thread_id)):
+            return error(403, "membership", "Изменить или повторить напоминание можно, пока ты можешь писать в этот чат.")
         if isinstance(body, Reschedule):
             schedule = self._schedule(body.schedule, body.text or current.value.text, body.timezone)
             record = await self.reminders.reschedule(user.id, key, schedule, expected_etag=str(body.etag))
