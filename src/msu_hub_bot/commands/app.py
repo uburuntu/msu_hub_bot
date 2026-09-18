@@ -13,6 +13,8 @@ def is_app_start(message: Message, command: CommandObject) -> bool:
 
 
 async def process_app(message: Message, web_apps: WebAppLinks) -> Message:
+    if message.sender_chat is not None or message.from_user is None or message.from_user.is_bot:
+        return await message.reply("Открой /app от личного аккаунта: напоминания будут доступны только тебе.")
     button = web_apps.button(message, now=datetime.now(UTC))
     if button is None:
         return await message.reply("Приложение пока недоступно. Напоминания работают через /remind.")
