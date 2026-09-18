@@ -17,9 +17,8 @@ anyone finishes the round or its ten-minute timer expires.
 
 `/geoguess_top` and `/chess_top` show separate daily chat rankings (Moscow time):
 a correct answer earns one point; an error loses one, with a floor of zero.
-Scores expire after the following day. Active rounds and result navigation live
-in memory; navigation is available for up to 24 hours within a bounded cache
-and ends on restart. The displayed result and saved daily scores remain.
+Rounds, votes and scores survive restarts in Supabase. Result navigation stays
+available for 24 hours after closure; daily scores are retained permanently.
 Lichess access is anonymous and subject to its shared request limits.
 
 `/reactions` shows the chat's reaction receivers, givers, popular posts and emoji
@@ -102,7 +101,7 @@ database history and operational contracts live in `dbschema/` and `docs/`.
 
 For contributor-owned persistence, use the [typed feature store](docs/feature-persistence.md).
 It provides versioned documents, atomic changes and durable jobs; chess and geoguess
-share a quiz service that keeps rounds and votes across process restarts.
+share a quiz service that keeps rounds, votes and daily scores across process restarts.
 
 Ruff exceptions are limited to specific files. Strict mypy coverage expands
 monotonically as modules are typed; new application modules must be included.

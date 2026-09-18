@@ -140,9 +140,17 @@ scheduled jobs can reference them.
 
 `games/quiz.py` supplies the shared activity lifecycle; `games/definitions.py`
 adapts providers and the existing bounded caption renderers. Each game's
-namespace has `chats`, `rounds` and `votes` collections. One active round belongs
-to a chat; its saved topic controls delivery. Every accepted vote is a separate
-immutable user/round record, with an explicit 10,000-participant limit.
+namespace has four collections, all scoped to the bot and chat:
+
+| Collection | Contents | Lifecycle |
+| --- | --- | --- |
+| `chats` | Active round pointer and bounded recent-question history. | Expires after 30 days without writes. |
+| `rounds` | Frozen question, answer order, message/topic binding, deadlines and settlement progress. | No expiry while active or awaiting settlement; closed rounds are cleaned after settlement and the 24-hour result window, abandoned publications after recovery resolves. |
+| `votes` | One immutable answer and display-label snapshot per user/round, parented by round token. | Deleted with the completed round. |
+| `scores` | Daily totals and latest scoring display-label snapshot per user, parented by Moscow calendar day. | Permanent; round/vote cleanup does not delete scores. |
+
+One active round belongs to a chat; its saved topic controls delivery. Every
+accepted vote is a separate record, with an explicit 10,000-participant limit.
 
 Rounds preserve the exact question, answer order, attribution, message binding,
 deadline and votes. A restart resumes the ten-minute deadline and keeps result
@@ -152,19 +160,46 @@ can recover the binding during the publication window. Otherwise the incomplete
 round is abandoned and cleaned; already accepted votes are never acknowledged
 from process memory alone.
 
-Scores remain in Redis. PostgreSQL settlement jobs retry the same immutable
-round token and vote set; jobs are ordered per game/chat/Moscow day because
-penalties floored at zero depend on order. Automatic closure uses the original
-deadline's day, including after downtime. Redis's own clock rejects writes past
-the existing day-plus-two midnight expiry. An expiry job resolves unsettled
-rounds and releases cleanup. This is recoverable coordination, not an atomic
-transaction across two databases; loss of Redis itself remains a separate
-durability boundary.
+Settlement freezes the score day and vote set. Jobs are ordered per
+game/chat/Moscow day because penalties floored at zero depend on round order.
+Automatic closure uses the original deadline's day, including after downtime.
+Each transaction guards the round, up to 30 votes and their score records,
+writes new totals and advances the round's saved cursor together. A crash or lost response
+cannot leave a committed score without the progress that prevents replay.
+There is no separate scoring expiry: held work requires repair, and its round
+and votes remain until settlement resolves.
 
-Completed rounds and votes are deleted by bounded cleanup after the result
-window and settlement resolution. Recent-question history expires after 30 days
-without writes. Presentation caches are disposable; rebuilding one must never
-change the selected question, votes or scores.
+`/chess_top` and `/geoguess_top` scan today's score records in bounded pages and
+keep only the ten best entries in memory. A failed or timed-out scan produces an
+unavailable response, never a ranking made from only the pages retrieved.
+Rankings can reflect committed batches while a round is settling; the result
+message marks scoring complete only after every accepted vote is accounted for.
+Older daily totals stay available in storage, including player labels, although
+the commands show only the current Moscow day.
+
+Presentation caches are disposable; rebuilding one must never change the
+selected question, votes or scores. Both games use only the feature store for
+persistence, with no Redis scoring adapter or dual writes.
+
+### Moving from Redis-backed quizzes
+
+Install the feature schema and bounded maintenance described below before
+deploying these games. Stop the old poller before starting the new release.
+There is no import or compatibility path for earlier in-memory rounds or Redis
+rankings: the games start with fresh rounds and scores. Existing Telegram
+messages stay visible; callbacks without a saved round cannot resume the game.
+
+Old score keys use
+`msu_hub:{chess|geoguess}:{chat_id}:{YYYY-MM-DD}:scores` and the `:names`,
+`:usernames`, `:rounds` suffixes. Their existing expiry is midnight Moscow time
+two calendar days after the score day. Allow that expiry to remove them; no
+cleanup script, namespace reset or `FLUSHDB` is needed. Redis remains in use by
+other bot features.
+
+Validate both games through voting, closure and their daily ranking, then
+restart and verify an active round and completed result navigation. An older
+application image cannot read the new round or score records; rolling it back
+does not convert those records into Redis data.
 
 ### Schema and runtime
 

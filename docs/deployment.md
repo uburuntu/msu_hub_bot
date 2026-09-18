@@ -125,8 +125,10 @@ Build and image-validation steps receive no project token. See the
 ## Database configuration
 
 `HUB_STORAGE_BACKEND` defaults to `supabase`, the only supported application backend.
-Redis remains required for topic conversations, scheduled deletions and game
-scores. Keep its namespace and database unchanged during application upgrades.
+Redis remains required for topic conversations and scheduled deletions. Keep
+its namespace and database unchanged during application upgrades. Chess and
+geoguess use Supabase for all persistent state, including daily scores; see
+[quiz storage and cutover](feature-persistence.md#chess-and-geoguess).
 
 Supabase requires
 `HUB_SUPABASE_URL`, a publishable `HUB_SUPABASE_KEY`, and a dedicated Auth account
@@ -239,8 +241,8 @@ stopped. Then deploy or roll back normally and verify one healthy poller.
 The command reads only `HUB_NAME` and `HUB_REDIS_*` from the deployment envelope
 or environment. It opens only Redis: no Telegram requests, Supabase connection or
 schema migration. `legacy` matches the namespace's chat/user FSM state/data;
-`v3` matches its `fsm3` topic FSM state/data. Settings, delayed deletions,
-GeoGuess scores and other namespaces remain intact. Never use `FLUSHDB` for
+`v3` matches its `fsm3` topic FSM state/data. Settings, delayed deletions and
+other namespaces remain intact. Never use `FLUSHDB` for
 this operation. Startup, Deploy and Rollback do not run the reset automatically.
 
 ## Moving VPSs
