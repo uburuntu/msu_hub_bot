@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery
 from msu_hub_bot.commands.remind import Remind, ReminderCallback, keyboard
 from msu_hub_bot.reminders import ReminderError, ReminderService, Schedule, parse_schedule
 from msu_hub_bot.reminders.service import MAX_DELIVERY_ATTEMPTS, TERMINAL_RETENTION
-from msu_hub_bot.storage.features import FeatureStore, FeatureWorker
+from msu_hub_bot.storage.features import Conflict, FeatureStore, FeatureWorker
 from msu_hub_bot.storage.supabase import RepositoryFailure, RepositoryUnavailable
 from msu_hub_bot.telegram.filters import MetaInfo
 from quiz_helpers import FeatureFixture
@@ -148,7 +148,7 @@ async def test_reschedule_and_cancel_fence_old_work_and_stale_buttons(rig):
     record = await create(rig)
     changed = await rig.service.reschedule(42, record.key, Schedule(due_at=NOW + timedelta(days=3000)), expected_etag=record.etag)
     assert changed.value.text == record.value.text and changed.expires_at is None
-    with pytest.raises(ReminderError):
+    with pytest.raises(Conflict):
         await rig.service.cancel(42, record.key, expected_etag=record.etag)
     cancelled = await rig.service.cancel(42, record.key, expected_etag=changed.etag)
     assert cancelled.value.status == "cancelled"

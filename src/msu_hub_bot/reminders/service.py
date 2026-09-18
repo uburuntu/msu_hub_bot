@@ -157,7 +157,7 @@ class ReminderService:
     @staticmethod
     def _revision(record: Record[Reminder], expected_etag: str | None) -> None:
         if expected_etag is not None and record.etag != expected_etag:
-            raise ReminderError("Напоминание уже изменилось. Открой свежий список: /remind list.")
+            raise Conflict()
 
     async def reschedule(
         self,

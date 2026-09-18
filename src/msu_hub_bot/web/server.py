@@ -82,6 +82,7 @@ class WebServer:
         self.runner: web.AppRunner | None = None
         self.accepting = True
         self._requests = asyncio.Semaphore(32)
+        self._label_queries = asyncio.Semaphore(8)
 
     @web.middleware
     async def _boundary(self, request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]) -> web.StreamResponse:
@@ -175,7 +176,8 @@ class WebServer:
     async def _label(self, user_id: int, destination: Destination) -> str:
         if destination.chat_id == user_id:
             return "Личные сообщения" + (f" · тема {destination.thread_id}" if destination.thread_id else "")
-        chat = await self.database.get_chat(destination.chat_id)
+        async with self._label_queries:
+            chat = await self.database.get_chat(destination.chat_id)
         label = chat.full_name if chat is not None else None
         return (label or "Чат") + (f" · тема {destination.thread_id}" if destination.thread_id else "")
 
@@ -210,11 +212,14 @@ class WebServer:
         if not 1 <= limit <= 100:
             raise ValueError
         records = await self.reminders.list(user.id, after=request.query.get("after"), limit=limit)
-        labels: dict[Destination, str] = {}
-        for record in records:
-            destination = Destination(record.value.chat_id, record.value.thread_id)
-            if destination not in labels:
-                labels[destination] = await self._label(user.id, destination)
+        destinations = list(dict.fromkeys(Destination(record.value.chat_id, record.value.thread_id) for record in records))
+        tasks = [asyncio.create_task(self._label(user.id, destination)) for destination in destinations]
+        try:
+            labels = dict(zip(destinations, await asyncio.gather(*tasks), strict=True))
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         return web.json_response(
             {
                 "items": [

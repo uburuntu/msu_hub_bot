@@ -17,7 +17,7 @@ from aiohttp import web
 from aiogram.methods import GetChatMember, SendMessage
 from aiogram.types import ChatMemberLeft, ChatMemberMember, User
 
-from msu_hub_bot.reminders import ReminderService
+from msu_hub_bot.reminders import ReminderService, Schedule
 from msu_hub_bot.storage.errors import RepositoryFailure, RepositoryUnavailable
 from msu_hub_bot.storage.features import FeatureStore, FeatureWorker
 from msu_hub_bot.telemetry import Telemetry
@@ -100,6 +100,15 @@ def test_launch_buttons_keep_private_only_webapp_protocol_and_request_ids_separa
     assert private.web_app.url.startswith("https://app.example/?launch=")
     assert links.request_message_id(42, "request") == links.request_message_id(42, "request") < 0
     assert links.request_message_id(43, "request") != links.request_message_id(42, "request")
+
+
+def test_anonymous_and_bot_messages_never_mint_personal_launch_links():
+    links = WebAppLinks(TOKEN, "https://app.example")
+    links.username = "test_bot"
+    anonymous = make_message(sender_chat={"id": -123, "type": "supergroup", "title": "Synthetic"})
+    bot_message = make_message(from_user={"id": 42, "is_bot": True, "first_name": "Bot"})
+    assert links.button(anonymous, now=NOW) is None
+    assert links.button(bot_message, now=NOW) is None
 
 
 @pytest.mark.parametrize(
@@ -267,6 +276,84 @@ async def test_reschedule_uses_etag_preserves_text_and_cancel_does_not_send_agai
     response = await rig.api("POST", path + "/cancel", body={"etag": updated["etag"]})
     assert (await response.json())["status"] == "cancelled"
     assert len([m for m in rig.bot.session.methods if isinstance(m, SendMessage)]) == 1
+
+
+async def test_revision_race_after_http_read_still_returns_conflict(rig, monkeypatch):
+    item = await (await rig.api("POST", "/api/reminders", body=creation())).json()
+    original = rig.reminders.cancel
+
+    async def racing_cancel(author_id, key, **kwargs):
+        await rig.reminders.reschedule(author_id, key, Schedule(due_at=NOW + timedelta(hours=3)))
+        return await original(author_id, key, **kwargs)
+
+    monkeypatch.setattr(rig.reminders, "cancel", racing_cancel)
+    response = await rig.api("POST", f"/api/reminders/{item['key']}/cancel", body={"etag": item["etag"]})
+    assert response.status == 409 and (await response.json())["error"]["code"] == "conflict"
+    assert (await rig.reminders.get(42, item["key"])).value.status == "pending"
+
+
+async def test_listing_resolves_unique_destinations_with_bounded_parallel_queries(rig, monkeypatch):
+    for index in range(20):
+        await rig.reminders.create(
+            author_id=42,
+            author_name="Owner",
+            chat_id=-1000 - index // 2,
+            thread_id=17,
+            source_message_id=index,
+            schedule=Schedule(due_at=NOW + timedelta(hours=1), text="Synthetic"),
+        )
+    active, peak, calls = 0, 0, []
+    release = asyncio.Event()
+
+    async def lookup(chat_id):
+        nonlocal active, peak
+        calls.append(chat_id)
+        active += 1
+        peak = max(peak, active)
+        if active == 8:
+            release.set()
+        try:
+            await release.wait()
+            await asyncio.sleep(0)
+            return SimpleNamespace(full_name=f"Chat {chat_id}")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(rig.server.database, "get_chat", lookup)
+    async with asyncio.timeout(2):
+        response = await rig.api("GET", "/api/reminders?limit=100")
+    items = (await response.json())["items"]
+    assert len(items) == 20 and len(calls) == len(set(calls)) == 10
+    assert peak == 8 and active == 0
+    assert all(item["destination_label"] == f"Chat {item['chat_id']} · тема 17" for item in items)
+
+
+async def test_label_storage_failure_returns_unavailable_and_cancels_remaining_queries(rig, monkeypatch):
+    for index in range(10):
+        await rig.reminders.create(
+            author_id=42,
+            author_name="Owner",
+            chat_id=-1000 - index,
+            thread_id=None,
+            source_message_id=index,
+            schedule=Schedule(due_at=NOW + timedelta(hours=1), text="Synthetic"),
+        )
+    active, calls = 0, 0
+
+    async def lookup(chat_id):
+        nonlocal active, calls
+        calls += 1
+        if calls == 1:
+            raise RepositoryUnavailable(RepositoryFailure.UNAVAILABLE)
+        active += 1
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(rig.server.database, "get_chat", lookup)
+    response = await rig.api("GET", "/api/reminders")
+    assert response.status == 503 and active == 0
 
 
 async def test_confirmation_failure_is_best_effort_and_never_replayed(rig, monkeypatch, caplog):

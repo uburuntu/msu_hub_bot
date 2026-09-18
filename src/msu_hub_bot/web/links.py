@@ -71,7 +71,7 @@ class WebAppLinks:
             raise LaunchError() from None
 
     def button(self, message: Message, *, now: datetime, label: str = "Открыть приложение") -> InlineKeyboardButton | None:
-        if not self.url or message.from_user is None:
+        if not self.url or message.from_user is None or message.from_user.is_bot or message.sender_chat is not None:
             return None
         launch = self.launch(message.from_user.id, Destination(message.chat.id, message.message_thread_id), now=now)
         if message.chat.type == "private":
