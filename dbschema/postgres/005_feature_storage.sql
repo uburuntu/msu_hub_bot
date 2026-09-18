@@ -24,7 +24,7 @@ CREATE TABLE msu_hub_private.feature_records (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (owner_id,feature,scope_key,collection,key)
 );
-CREATE INDEX feature_records_parent ON msu_hub_private.feature_records(owner_id,feature,scope_key,collection,parent,key);
+CREATE INDEX feature_records_parent ON msu_hub_private.feature_records(owner_id,feature,scope_key,collection,parent);
 CREATE INDEX feature_records_status ON msu_hub_private.feature_records(owner_id,feature,scope_key,collection,status,key);
 CREATE INDEX feature_records_expiry ON msu_hub_private.feature_records(expires_at) WHERE expires_at IS NOT NULL;
 
