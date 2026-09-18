@@ -161,6 +161,18 @@ async def test_retry_exhaustion_holds_unfinished_work_instead_of_pretending_comp
     assert backend.actions() == ["check", "hold"]
 
 
+@pytest.mark.parametrize(("attempts", "action"), [(8, "retry"), (1024, "hold")])
+async def test_feature_retry_limit_overrides_default_without_becoming_unbounded(attempts, action):
+    backend, worker = configured([raw_job(attempts=attempts)], max_attempts=8)
+
+    async def handler(_):
+        raise JobRetry()
+
+    worker.register("sample", "finish", handler, max_attempts=1024)
+    await worker.run_once()
+    assert backend.actions() == ["check", action]
+
+
 async def test_elapsed_semantic_retry_horizon_expires_without_external_effect():
     backend, worker = configured([raw_job(retry_until=(datetime.now(UTC) - timedelta(seconds=1)).isoformat())])
     handler = AsyncMock()
