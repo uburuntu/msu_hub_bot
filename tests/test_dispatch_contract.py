@@ -10,7 +10,7 @@ import pytest
 from aiogram import BaseMiddleware, Dispatcher
 from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, Update, User
+from aiogram.types import CallbackQuery, InaccessibleMessage, Update, User
 
 from msu_hub_bot.commands.chess import ChessCallback
 from msu_hub_bot.commands.geoguess import GeoguessCallback
@@ -345,6 +345,87 @@ async def test_chess_and_geoguess_callbacks_select_separate_real_routes(chess_se
     assert handler.callback.__qualname__ == expected
     assert handler.flags["handler_key"] == expected
     assert bot.session.methods == []
+
+
+@pytest.mark.parametrize("callback_type,expected", [(ChessCallback, "Chess.process_cb"), (GeoguessCallback, "Geoguess.process_cb")])
+@pytest.mark.parametrize("choice", ["0", "finish", "page_1"])
+@pytest.mark.parametrize("conversation", ["ProgStates:stdin", "StickerStates:name", "MakePostStates:message"])
+async def test_quiz_buttons_preserve_active_conversations_and_other_topics(callback_type, expected, choice, conversation):
+    bot = make_bot()
+    dispatcher = Dispatcher(disable_fsm=True)
+    dispatcher.update.outer_middleware(StateContextMiddleware())
+    fsm = TopicFSMContextMiddleware(MemoryStorage(), ReleasableEventIsolation())
+    dispatcher.update.outer_middleware(fsm)
+    dispatcher.callback_query.middleware(SelectiveIsolationMiddleware())
+    dispatcher.callback_query.middleware(Selection())
+    dispatcher.include_router(router())
+    message = make_message(bot, message_thread_id=17, is_topic_message=True)
+    state = fsm.resolve_context(bot, message.chat.id, 42, thread_id=17)
+    other = fsm.resolve_context(bot, message.chat.id, 42, thread_id=18)
+    await state.set_state(conversation)
+    await state.set_data({"draft": "Keep this input"})
+    await other.set_state("ProgStates:stdin")
+    await other.set_data({"draft": "Another topic"})
+    query = CallbackQuery(
+        id="synthetic",
+        chat_instance="synthetic",
+        from_user=User(id=42, is_bot=False, first_name="Synthetic"),
+        message=message,
+        data=callback_type(round="round-token", choice=choice).pack(),
+    )
+    try:
+        handler, _ = await asyncio.create_task(dispatcher.feed_update(bot, Update(update_id=1, callback_query=query)))
+        assert handler.callback.__qualname__ == expected and handler.flags["fsm_release"] is True
+        assert await state.get_state() == conversation
+        assert await state.get_data() == {"draft": "Keep this input"}
+        assert await other.get_state() == "ProgStates:stdin"
+        assert await other.get_data() == {"draft": "Another topic"}
+        assert bot.session.methods == []
+    finally:
+        await fsm.close()
+        await dispatcher.fsm.close()
+        await bot.session.close()
+
+
+@pytest.mark.parametrize("callback_type", [ChessCallback, GeoguessCallback])
+@pytest.mark.parametrize("missing", ["inaccessible", "inline"])
+async def test_quiz_buttons_without_an_accessible_chat_use_the_expired_fallback(chess_selection_dispatcher, callback_type, missing):
+    bot, dispatcher = chess_selection_dispatcher
+    message = make_message(bot)
+    query = CallbackQuery(
+        id="synthetic",
+        chat_instance="synthetic",
+        from_user=User(id=42, is_bot=False, first_name="Synthetic"),
+        message=InaccessibleMessage(chat=message.chat, message_id=message.message_id, date=0) if missing == "inaccessible" else None,
+        inline_message_id="synthetic" if missing == "inline" else None,
+        data=callback_type(round="round-token", choice="0").pack(),
+    )
+    handler, _ = await asyncio.create_task(dispatcher.feed_update(bot, Update(update_id=1, callback_query=query)))
+    assert handler.callback.__qualname__ == "process_expired_callback"
+
+
+@pytest.mark.parametrize("command", ["/chess", "/chess_top", "/geoguess", "/geoguess_top"])
+async def test_quiz_commands_still_belong_to_active_stdin_until_cancel(command):
+    bot = make_bot()
+    dispatcher = Dispatcher(disable_fsm=True)
+    dispatcher.update.outer_middleware(StateContextMiddleware())
+    fsm = TopicFSMContextMiddleware(MemoryStorage(), ReleasableEventIsolation())
+    dispatcher.update.outer_middleware(fsm)
+    dispatcher.message.middleware(Selection())
+    dispatcher.include_router(router())
+    message = make_message(bot, text=command, message_thread_id=17, is_topic_message=True)
+    state = fsm.resolve_context(bot, message.chat.id, 42, thread_id=17)
+    await state.set_state("ProgStates:stdin")
+    try:
+        handler, _ = await asyncio.create_task(dispatcher.feed_update(bot, Update(update_id=1, message=message)))
+        assert handler.callback.__qualname__ == "ProgCompiler.process_stdin_run"
+        cancel = message.model_copy(update={"text": "/cancel"})
+        handler, _ = await asyncio.create_task(dispatcher.feed_update(bot, Update(update_id=2, message=cancel)))
+        assert handler.callback.__qualname__ == "process_cancel"
+    finally:
+        await fsm.close()
+        await dispatcher.fsm.close()
+        await bot.session.close()
 
 
 @pytest.mark.parametrize("command", ["start", "cancel", "beer", "arxiv", "stt"])

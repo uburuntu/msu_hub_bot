@@ -196,6 +196,9 @@ namespace has four collections, all scoped to the bot and chat:
 
 One active round belongs to a chat; its saved topic controls delivery. Every
 accepted vote is a separate record, with an explicit 10,000-participant limit.
+Game buttons can vote, finish and page through results during an unrelated FSM
+conversation without changing its state or draft. Typed commands still follow
+the conversation's input rules until `/cancel`.
 
 Rounds preserve the exact question, answer order, attribution, message binding,
 deadline and votes. A restart resumes the ten-minute deadline and keeps result

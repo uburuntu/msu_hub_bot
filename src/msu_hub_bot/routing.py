@@ -863,7 +863,7 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
     group("chess").callback_query.register(
         Chess.process_cb,
         Chess.callback_data.filter(),
-        StateFilter(None),
+        fsm_callback_allowed,
         flags={"handler_key": "Chess.process_cb", "fsm_release": True},
     )
     group("chess_play").message.register(
@@ -909,7 +909,7 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
     group("geoguess").callback_query.register(
         Geoguess.process_cb,
         Geoguess.callback_data.filter(),
-        StateFilter(None),
+        fsm_callback_allowed,
         flags={"handler_key": "Geoguess.process_cb", "fsm_release": True},
     )
     group("other").message.register(
