@@ -35,7 +35,16 @@ def compact(value: str, limit: int) -> str:
     return "".join(prefix).rstrip() + ("…" if limit else "")
 
 
-def user_label(user_id: int, name: str, username: str | None) -> Text:
-    label = Text(TextLink(compact(name, 48) or "Игрок", url=f"tg://user?id={user_id}"))
+def _user_label_parts(name: str, username: str | None) -> tuple[str, str]:
     handle = compact(username.lstrip("@"), 32) if username else ""
-    return Text(label, f" (@{handle})") if handle else label
+    return compact(name, 48) or "Игрок", f" (@{handle})" if handle else ""
+
+
+def user_label_size(name: str, username: str | None) -> int:
+    """Measure a caption row without constructing off-page mention entities."""
+    return len(Text(*_user_label_parts(name, username)))
+
+
+def user_label(user_id: int, name: str, username: str | None) -> Text:
+    label, handle = _user_label_parts(name, username)
+    return Text(TextLink(label, url=f"tg://user?id={user_id}"), handle)
