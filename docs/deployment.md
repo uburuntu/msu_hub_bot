@@ -13,6 +13,9 @@ Requirements: Linux x86-64, Python 3, Docker, Compose 2.30 or later, and access 
 Redis and the selected database backend through Docker network `msu_db`. The account
 must be able to use Docker. Passwordless sudo is not required.
 
+The optional [Mini App](mini-app.md) also requires an external `msu_hub_web`
+network shared only with the HTTPS proxy. The bot publishes no host port.
+
 Install the reviewed wrapper as `~/msu_hub_bot/deploy.py` in a mode-700 directory.
 Add a dedicated Ed25519 public key to the deployment account's authorized keys:
 
@@ -90,6 +93,8 @@ Required reviewers are intentionally not enabled.
 | `HUB_*` application configuration from `.env.example`, except telemetry controls below | Production environment secrets |
 | `LOGFIRE_TOKEN` (optional project write token) | Production environment secret; sent only when export is enabled |
 | `HUB_TELEMETRY_ENABLED`, `HUB_TELEMETRY_SAMPLE_RATE` | Production environment variables; defaults `false` and `0.1` |
+| `HUB_WEB_APP_URL` | Production environment variable; HTTPS origin, empty disables the Mini App |
+| `HUB_STORAGE_CONTRACT` | Workflow-owned data compatibility marker; do not override for rollback |
 | `HUB_ENVIRONMENT`, `HUB_RELEASE` | Set by the workflow to `production` and the public release revision |
 | `DEPLOY_SSH_KEY` | Production environment secret; dedicated private deployment key |
 | `SSH_HOST`, `SSH_USER`, `SSH_PORT` | Production environment secrets |
@@ -169,6 +174,11 @@ Use **Actions → Rollback → Run workflow** from main to restore the preceding
 release. `current.json` and `previous.json` record revision, image ID, and release
 directory plus the storage backend and Supabase API schema. Stored runtime configuration is sensitive; do not attach these
 directories to issues or CI artifacts. Container logs are rotated locally.
+
+Rollback also compares `HUB_STORAGE_CONTRACT` from each protected release
+envelope. `application-documents-v1` cannot roll back to a release that writes
+the retired relational settings/registry tables. Such changes retain the same
+database and API schema name but still require separate data reconciliation.
 Failed Docker operations and startup logs are retained privately in the
 release's `failure.log`.
 

@@ -136,6 +136,51 @@ scheduled jobs can reference them.
 
 ## Operations and checks
 
+### Shared application records
+
+`storage/application.py` owns permanent documents in `Scope("global", owner="application")`:
+
+| Feature / collection | Key | Payload |
+| --- | --- | --- |
+| `settings / chats` | Chat ID | `ChatPreferences`: explicit boolean defaults and preserved extra fields. |
+| `ecosystem / chats` | Chat ID | Directory metadata, including its original UUID and creation time. |
+| `vk / subscriptions` | `owner_id:chat_id` | Subscription settings and delivery cursor, including original UUID and creation time. |
+
+The repository's existing methods remain the application interface. Partial
+preference changes preserve unrelated fields; delivery advances VK cursors
+monotonically, while an explicit administration reset may move them backwards.
+Listings paginate completely before applying numeric ordering. Loading saved
+preferences observes a new chat without overwriting newer metadata with an old
+callback's snapshot.
+
+### Reminders
+
+`reminders/service.py` owns `reminders / items` under the bot's `user:<author_id>`
+scope. The stable creation key derives from the author, chat/topic and source
+message; browser requests use a frozen UUID mapped into a separate negative
+message-ID space. Replaying creation returns the original record, including
+after its deadline, rather than moving a relative schedule forward.
+
+The document stores text, author display snapshot, destination, UTC deadline,
+IANA timezone and delivery state. Pending and actively sending reminders have
+no expiry. Delivery, cancellation, failure or uncertain delivery schedules
+cleanup after 30 days; cleanup removes the text. Until then an uncertain send
+stays available for its owner to reconcile or explicitly retry. Changing a reminder never changes its
+owner or destination.
+
+Creation and rescheduling atomically update the document and its delivery job.
+The worker marks sending before contacting Telegram and schedules reconciliation
+for an interrupted attempt. Overdue reminders are delivered after restart; a
+delay greater than one minute is labelled. A definitive rate-limit rejection
+can retry automatically. A lost response cannot prove whether Telegram sent
+the message: mark delivery uncertain and require explicit retry, which may
+duplicate it. Do not infer failure from a timeout and send again blindly.
+
+`/remind` accepts relative English/Russian times and explicit dates, defaults to
+Europe/Moscow, and lists or changes the author's reminders in the current
+chat/topic. Buttons carry exact revisions. The [Mini App](mini-app.md) provides
+an owner-wide list and edits using the same service and revision checks.
+
 ### Chess and geoguess
 
 `games/quiz.py` supplies the shared activity lifecycle; `games/definitions.py`
