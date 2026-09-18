@@ -669,3 +669,79 @@ def test_rollback_refuses_old_table_writers_after_application_document_cutover(t
         deployer.deploy({"action": "rollback"})
     assert not restored
     assert deployer.read_state("current.json") == current
+
+
+def administrative_cutover(tmp_path):
+    previous = stored_supabase(tmp_path)
+    deployment.write_private(tmp_path / "current.json", json.dumps(previous))
+    request = supabase_payload()
+    request["environment"]["HUB_STORAGE_CONTRACT"] = "application-documents-v1"
+    marker = {
+        "previous": previous,
+        "candidate": {key: request[key] for key in ("image", "revision", "archive_sha256", "archive_size")},
+        "administrative_cutover": True,
+    }
+    deployment.write_private(tmp_path / "storage-transition.json", json.dumps(marker))
+    deployer = deployment.Deployer(tmp_path)
+    deployer.run = lambda *args, **kwargs: ""
+    deployer.receive_image = lambda *args: None
+    deployer.compose = lambda *args, **kwargs: None
+    deployer.stop_legacy = lambda: None
+    deployer.stop_replacement = lambda: None
+    deployer.wait_healthy = lambda: None
+    deployer.prune_releases = lambda: None
+    return deployer, request, marker
+
+
+@pytest.mark.parametrize("stage", ["receive", "preflight", "start"])
+def test_administrative_handoff_never_removes_fence_before_health(tmp_path, stage):
+    deployer, request, marker = administrative_cutover(tmp_path)
+    fence = tmp_path / "storage-transition.json"
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt(*args, **kwargs):
+        assert fence.exists()
+        raise Interrupted
+
+    if stage == "receive":
+        deployer.receive_image = interrupt
+    else:
+
+        def compose(state, action, *args, **kwargs):
+            if action == ("run" if stage == "preflight" else "up"):
+                interrupt()
+
+        deployer.compose = compose
+    with pytest.raises(Interrupted):
+        deployer.deploy(request, adopt_transition=marker)
+    with pytest.raises(deployment.DeploymentError, match="administrative recovery"):
+        deployment.Deployer(tmp_path).deploy({"action": "rollback"})
+
+
+def test_administrative_handoff_publishes_before_clearing_fence(tmp_path):
+    deployer, request, marker = administrative_cutover(tmp_path)
+    fence = tmp_path / "storage-transition.json"
+    deployer.wait_healthy = lambda: fence.exists() or pytest.fail("Fence vanished before health")
+    deployer.deploy(request, adopt_transition=marker)
+    assert not fence.exists()
+    assert deployer.read_state("current.json")["revision"] == request["revision"]
+    assert deployer.read_state("previous.json") == marker["previous"]
+
+
+@pytest.mark.parametrize("damage", ["candidate", "previous", "absent", "permissions"])
+def test_administrative_handoff_rejects_mismatched_or_unsafe_marker(tmp_path, damage):
+    deployer, request, marker = administrative_cutover(tmp_path)
+    fence = tmp_path / "storage-transition.json"
+    if damage == "candidate":
+        marker = {**marker, "candidate": {**marker["candidate"], "image": "sha256:" + "f" * 64}}
+    elif damage == "previous":
+        marker = {**marker, "previous": {"empty": True}}
+    elif damage == "absent":
+        fence.unlink()
+    else:
+        fence.chmod(0o644)
+    deployer.run = lambda *args, **kwargs: pytest.fail("Docker reached before fence validation")
+    with pytest.raises(deployment.DeploymentError, match="Administrative transition"):
+        deployer.deploy(request, adopt_transition=marker)

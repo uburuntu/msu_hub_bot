@@ -179,6 +179,13 @@ Rollback also compares `HUB_STORAGE_CONTRACT` from each protected release
 envelope. `application-documents-v1` cannot roll back to a release that writes
 the retired relational settings/registry tables. Such changes retain the same
 database and API schema name but still require separate data reconciliation.
+
+An administrative data cutover keeps its transition marker present throughout
+image verification and preflight. The host Python API can adopt a marker only
+when its protected previous release and complete candidate metadata match and
+the storage contract changes. Ordinary SSH deployment requests cannot request
+this handoff. Never unlink the marker to bypass preflight: interruption in that
+gap would allow an incompatible writer to restart.
 Failed Docker operations and startup logs are retained privately in the
 release's `failure.log`.
 

@@ -375,10 +375,31 @@ for path in Path('/proc').iterdir():
             self.compose(previous, "up", "--detach", "--no-deps", "bot")
             self.wait_healthy()
 
-    def deploy(self, payload, stream=None):
+    def deploy(self, payload, stream=None, *, adopt_transition=None):
         validate_payload(payload)
         transition = self.root / "storage-transition.json"
-        if transition.exists() or transition.is_symlink():
+        fenced = transition.exists() or transition.is_symlink()
+        if adopt_transition is not None:
+            # Administrative Python callers can hand over an already-fenced data
+            # migration. The SSH JSON protocol deliberately exposes no such option.
+            expected = {
+                "previous": self.read_state("current.json"),
+                "candidate": {key: payload.get(key) for key in ("image", "revision", "archive_sha256", "archive_size")},
+                "administrative_cutover": True,
+            }
+            try:
+                valid = (
+                    fenced
+                    and payload["action"] == "deploy"
+                    and expected["previous"] is not None
+                    and adopt_transition == expected
+                    and json.loads(read_private(transition), object_pairs_hook=unique_object) == expected
+                )
+            except (OSError, ValueError):
+                valid = False
+            if not valid:
+                raise DeploymentError("Administrative transition does not match the protected release fence")
+        elif fenced:
             raise DeploymentError("Storage transition requires administrative recovery before deploy or rollback")
         if payload["action"] == "rollback":
             previous, current = self.read_state("previous.json"), self.read_state("current.json")
@@ -441,6 +462,8 @@ for path in Path('/proc').iterdir():
             legacy = self.inspect(LEGACY)
             previous = {"legacy": True, "restart_policy": legacy["HostConfig"]["RestartPolicy"]["Name"]} if legacy else {"empty": True}
         changing_storage = not previous.get("empty") and self.storage_identity(previous) != self.storage_identity(state)
+        if adopt_transition is not None and not changing_storage:
+            raise DeploymentError("Administrative handoff requires a changed storage contract")
         if changing_storage:
             # A candidate can write before health succeeds. Preserve the fence
             # across process interruption and failed release-state publication.
