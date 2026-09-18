@@ -1,0 +1,62 @@
+:root {
+  color-scheme: light;
+  --canvas: #f8f7f3;
+  --canvas-strong: #f0efea;
+  --sidebar: #fbfaf7;
+  --panel: #ffffff;
+  --ink: #2b3029;
+  --muted: #797d73;
+  --faint: #959a90;
+  --line: #e7e8e0;
+  --input-line: #dddfd5;
+  --input: #fff;
+  --amber: #ffc747;
+  --amber-soft: #fff4d5;
+  --amber-line: #f0dfb4;
+  --amber-ink: #8a651c;
+  --intro: #fcf7e9;
+  --focus: #bc891f;
+  --green: #52775e;
+  --green-soft: #edf4ec;
+  --red: #ad594b;
+  --red-soft: #fcf0ec;
+  --safe-top: max(
+    env(safe-area-inset-top, 0px),
+    var(--tg-content-safe-area-inset-top, 0px)
+  );
+  --safe-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    var(--tg-content-safe-area-inset-bottom, 0px)
+  );
+  --safe-left: max(
+    env(safe-area-inset-left, 0px),
+    var(--tg-content-safe-area-inset-left, 0px)
+  );
+  --safe-right: max(
+    env(safe-area-inset-right, 0px),
+    var(--tg-content-safe-area-inset-right, 0px)
+  );
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #1c201c;
+  --canvas-strong: #2b3029;
+  --sidebar: #1f241f;
+  --panel: #242a23;
+  --ink: #edece3;
+  --muted: #abb0a2;
+  --faint: #8b9385;
+  --line: #373d33;
+  --input-line: #495041;
+  --input: #232822;
+  --amber-soft: #3d3522;
+  --amber-line: #62522f;
+  --amber-ink: #e7c775;
+  --intro: #2f2e21;
+  --focus: #e7c775;
+  --green: #acd0a9;
+  --green-soft: #2b3b2b;
+  --red: #eeab96;
+  --red-soft: #41312c;
+}
