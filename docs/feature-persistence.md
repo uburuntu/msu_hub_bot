@@ -136,6 +136,38 @@ scheduled jobs can reference them.
 
 ## Operations and checks
 
+### Chess and geoguess
+
+`games/quiz.py` supplies the shared activity lifecycle; `games/definitions.py`
+adapts providers and the existing bounded caption renderers. Each game's
+namespace has `chats`, `rounds` and `votes` collections. One active round belongs
+to a chat; its saved topic controls delivery. Every accepted vote is a separate
+immutable user/round record, with an explicit 10,000-participant limit.
+
+Rounds preserve the exact question, answer order, attribution, message binding,
+deadline and votes. A restart resumes the ten-minute deadline and keeps result
+navigation available for 24 hours after closure. Uncertain initial photo sends
+are not repeated automatically: a matching bot-authored photo/button callback
+can recover the binding during the publication window. Otherwise the incomplete
+round is abandoned and cleaned; already accepted votes are never acknowledged
+from process memory alone.
+
+Scores remain in Redis. PostgreSQL settlement jobs retry the same immutable
+round token and vote set; jobs are ordered per game/chat/Moscow day because
+penalties floored at zero depend on order. Automatic closure uses the original
+deadline's day, including after downtime. Redis's own clock rejects writes past
+the existing day-plus-two midnight expiry. An expiry job resolves unsettled
+rounds and releases cleanup. This is recoverable coordination, not an atomic
+transaction across two databases; loss of Redis itself remains a separate
+durability boundary.
+
+Completed rounds and votes are deleted by bounded cleanup after the result
+window and settlement resolution. Recent-question history expires after 30 days
+without writes. Presentation caches are disposable; rebuilding one must never
+change the selected question, votes or scores.
+
+### Schema and runtime
+
 Apply the feature schema administratively before deploying consumers. Startup
 checks the feature RPC contract; it never applies migrations. Follow
 [database operations](database-operations.md) to update installed retention

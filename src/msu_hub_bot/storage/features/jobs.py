@@ -138,38 +138,37 @@ class FeatureWorker:
         handler = self._handlers.get((job.feature, job.kind))
         if handler is None:
             raise FeatureProtocolError()
-        with self.telemetry.operation(Boundary.STORAGE, "feature.job", backend=Backend.SUPABASE, trace=False):
-            if not await context.current():
-                # Release only our old claim; the backend preserves a newer generation.
-                await context.status("complete")
-                return
-            if job.retry_until is not None and datetime.now(UTC) >= job.retry_until:
-                await context.status("expire")
-                return
-            try:
-                await self._execute(context, handler)
-            except asyncio.CancelledError:
-                # A killed worker leaves the claim to expire, never acknowledges success.
-                raise
-            except JobExpired:
-                await context.status("expire")
-            except JobRetry:
-                if job.attempts >= self._attempt_limits[(job.feature, job.kind)]:
-                    await context.status("hold")
-                else:
-                    retry = datetime.now(UTC) + timedelta(seconds=min(300, 2 ** min(job.attempts, 8)))
-                    await context.status("retry", run_at=retry)
-            except LeaseLost:
-                await context.status("complete")
-            except JobHold:
-                await context.status("hold")
-            except Exception:
-                # Unexpected exceptions may follow an external side effect; retries
-                # require explicit JobRetry from a handler that can safely replay.
-                logger.warning("Feature job held after an unexpected failure")
+        if not await context.current():
+            # Release only our old claim; the backend preserves a newer generation.
+            await context.status("complete")
+            return
+        if job.retry_until is not None and datetime.now(UTC) >= job.retry_until:
+            await context.status("expire")
+            return
+        try:
+            await self._execute(context, handler)
+        except asyncio.CancelledError:
+            # A killed worker leaves the claim to expire, never acknowledges success.
+            raise
+        except JobExpired:
+            await context.status("expire")
+        except JobRetry:
+            if job.attempts >= self._attempt_limits[(job.feature, job.kind)]:
                 await context.status("hold")
             else:
-                await context.status("complete")
+                retry = datetime.now(UTC) + timedelta(seconds=min(300, 2 ** min(job.attempts, 8)))
+                await context.status("retry", run_at=retry)
+        except LeaseLost:
+            await context.status("complete")
+        except JobHold:
+            await context.status("hold")
+        except Exception:
+            # Unexpected exceptions may follow an external side effect; retries
+            # require explicit JobRetry from a handler that can safely replay.
+            logger.warning("Feature job held after an unexpected failure")
+            await context.status("hold")
+        else:
+            await context.status("complete")
 
     async def run_once(self) -> int:
         async with self._run_lock:
