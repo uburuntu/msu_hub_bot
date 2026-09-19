@@ -26,7 +26,7 @@ export interface Ranking {
   score: number;
 }
 export interface GameSummary {
-  rankings: (Ranking & { played: number; correct: number })[];
+  rankings: (Ranking & { played: number | null; correct: number | null })[];
   history: {
     key: string;
     title: string;

@@ -190,8 +190,8 @@ export class CommunityApi extends ApiClient {
             const entry = object(value);
             return {
               ...ranking(entry),
-              played: integer(entry.played),
-              correct: integer(entry.correct),
+              played: entry.played === null ? null : integer(entry.played),
+              correct: entry.correct === null ? null : integer(entry.correct),
             };
           }),
           history: array(row.history, (value) => {
