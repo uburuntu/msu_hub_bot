@@ -16,6 +16,7 @@ from msu_hub_bot.providers.vk.models import (
     Document,
     Entity,
     Event,
+    GroupAttachment,
     Image,
     Link,
     Market,
@@ -25,6 +26,7 @@ from msu_hub_bot.providers.vk.models import (
     Poll,
     Post,
     Video,
+    VideoPlaylist,
     Wall,
 )
 from msu_hub_bot.providers.vk.utils import bounded_html, href, prepare_vk_text, safe_url
@@ -59,10 +61,32 @@ class VkPost:
 
     def __init__(self, post: Post | dict[str, object], extended: dict[int, Entity] | None = None) -> None:
         self.post = Post.model_validate(post)
+        if not self.post.is_public:
+            raise ValueError("VK post is unavailable")
         self.extended = extended or {}
-        self.repost = VkPost(self.post.copy_history[0], self.extended) if self.post.copy_history else None
+        self.history, self.omitted_history = self._copy_history()
+        self.repost = self.history[0] if self.history else None
         self.is_repost = self.repost is not None
         self.attachments, self.photos_urls, self.gifs_urls, self.previews = self.attachments_handle()
+
+    def _copy_history(self) -> tuple[list[Post], bool]:
+        """Match the API's public-history depth, bounding branching and duplicates."""
+        result: list[Post] = []
+        seen = {(self.post.owner_id, self.post.id)}
+        pending = [(post, 1) for post in reversed(self.post.copy_history)]
+        omitted = False
+        while pending:
+            post, depth = pending.pop()
+            identity = (post.owner_id, post.id)
+            if identity in seen:
+                continue
+            if depth > 2 or not post.is_public or len(result) >= 10:
+                omitted = True
+                continue
+            seen.add(identity)
+            result.append(post)
+            pending.extend((child, depth + 1) for child in reversed(post.copy_history))
+        return result, omitted
 
     @property
     def id(self) -> int:
@@ -111,7 +135,8 @@ class VkPost:
     def header(self, with_header: bool) -> str:
         if self.repost:
             source = "пользователя" if self.repost.owner_id > 0 else "из группы"
-            return f"📢 {href(self.url, 'Репост')} {source} {href(self.repost.owner_url, self.repost.owner_name)}:"
+            owner = self.repost.owner_id
+            return f"📢 {href(self.url, 'Репост')} {source} {href(self._get_url(owner), self._get_name(owner))}:"
         if with_header:
             source = "пользователя" if self.owner_id > 0 else "в группе"
             return f"📋 {href(self.url, 'Пост')} {source} {href(self.owner_url, self.owner_name)}:"
@@ -134,10 +159,31 @@ class VkPost:
         return [cls(item, wall.extended) for item in wall.items]
 
     def render(self, with_header: bool = True) -> str:
-        parts = [prepare_vk_text(self.text)] if self.repost and self.text else []
-        parts.extend([self.header(with_header), prepare_vk_text(self.body_text), self.attachments])
+        parts = [self.header(with_header), prepare_vk_text(self.text), self._details(self.post)]
+        for copied in self.history:
+            url = f"https://vk.com/wall{copied.owner_id}_{copied.id}"
+            parts.extend([f"↪ {href(url, self._get_name(copied.owner_id))}:", prepare_vk_text(copied.text), self._details(copied)])
+        parts.append(self.attachments)
         text = "\n\n".join(part.strip() for part in parts if part.strip())
         return bounded_html(text or href(self.url, "Открыть запись в VK"), self.url)
+
+    def _details(self, post: Post) -> str:
+        parts = []
+        if copyright := post.copyright:
+            parts.append("— Источник: " + href(copyright.link, copyright.name))
+        author = post.signer_id or (post.from_id if post.from_id != post.owner_id else None)
+        if author:
+            parts.append("— Автор: " + href(self._get_url(author), self._get_name(author)))
+        if geo := post.geo:
+            place = geo.place if geo.place and not geo.place.is_deleted else None
+            label = ", ".join(dict.fromkeys(value for value in (place.title, place.city, place.address) if value)) if place else ""
+            point = geo.point
+            if point is not None:
+                url = f"https://maps.google.com/maps?q={point.latitude:g},{point.longitude:g}&z=16"
+                parts.append("📍 " + href(url, label or "Место на карте"))
+            elif label:
+                parts.append("📍 " + escape(label))
+        return "\n".join(parts)
 
     def for_publish(self, with_header: bool = True, with_webpreview: bool = True) -> tuple[str, str, list[str], list[str]]:
         text = self.render(with_header)
@@ -157,8 +203,8 @@ class VkPost:
         photos: list[str] = []
         videos: list[str] = []
         previews: list[tuple[int, str]] = []
-        unsupported = len(self.post.copy_history) > 1 or bool(self.repost and self.repost.post.copy_history)
-        raw_items = (self.repost.post.attachments if self.repost else []) + self.post.attachments
+        unsupported = self.omitted_history
+        raw_items = [raw for post in [*self.history, self.post] for raw in post.attachments]
 
         def preview(priority: int, url: str) -> None:
             if valid := safe_url(url):
@@ -199,6 +245,22 @@ class VkPost:
                         url = f"https://vk.com/{kind}{video.owner_id}_{video.id}"
                         groups["Видео"].append(f"{href(url, video.title)}, {prettify_duration(video.duration)}")
                         preview(3, url)
+                    case "video_playlist":
+                        playlist = VideoPlaylist.model_validate(data)
+                        url = f"https://vk.com/video/playlist/{playlist.owner_id}_{playlist.id}"
+                        groups["Подборки видео"].append(f"{href(url, playlist.title)}, видео: {playlist.count}")
+                        preview(3, url)
+                    case "group":
+                        group = GroupAttachment.model_validate(data)
+                        url = self._get_url(-group.id)
+                        label = group.text or self._get_name(-group.id)
+                        details = [href(url, label)]
+                        if group.status:
+                            details.append(escape(group.status))
+                        if group.size is not None:
+                            details.append(f"участников: {group.size}")
+                        groups["Сообщества"].append(", ".join(details))
+                        preview(6, url)
                     case "audio":
                         audio = Audio.model_validate(data)
                         groups["Аудио"].append(f"{escape(audio.artist)} — {escape(audio.title)}")
@@ -256,10 +318,6 @@ class VkPost:
             except ValidationError, ValueError, TypeError:
                 unsupported = True
         result = "\n\n".join(f"— {title}:\n" + "\n".join(lines) for title, lines in groups.items())
-        if copyright := self.post.copyright:
-            result += "\n\n— Источник: " + href(copyright.link, copyright.name)
-        if signer := self.post.signer_id:
-            result += "\n\n— Автор: " + href(self._get_url(signer), self._get_name(signer))
         if unsupported or len(photos) + len(videos) > 10:
             result += "\n\n" + href(self.url, "Все вложения — в VK →")
         return result, photos, videos, previews

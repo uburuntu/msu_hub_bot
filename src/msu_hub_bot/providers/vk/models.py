@@ -44,6 +44,57 @@ class Video(VkModel):
     first_frame: list[Image] = Field(default_factory=list, max_length=100)
 
 
+class VideoPlaylist(VkModel):
+    id: int = Field(strict=True)
+    owner_id: OwnerID
+    title: str = "Подборка видео"
+    count: int = Field(default=0, ge=0)
+
+
+class GroupAttachment(VkModel):
+    id: PositiveID
+    text: str = ""
+    status: str = ""
+    size: int | None = Field(default=None, ge=0)
+
+
+class Coordinates(VkModel):
+    latitude: float = Field(ge=-90, le=90, allow_inf_nan=False, strict=True)
+    longitude: float = Field(ge=-180, le=180, allow_inf_nan=False, strict=True)
+
+
+class Place(VkModel):
+    title: str = ""
+    address: str = ""
+    city: str = ""
+    latitude: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False, strict=True)
+    longitude: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False, strict=True)
+    is_deleted: StrictInt | StrictBool = False
+
+
+class Geo(VkModel):
+    coordinates: Annotated[str, Field(max_length=128)] | Coordinates | None = None
+    place: Place | None = None
+    showmap: StrictInt | StrictBool | None = None
+
+    @property
+    def point(self) -> Coordinates | None:
+        if self.showmap == 0:
+            return None
+        if isinstance(self.coordinates, Coordinates):
+            return self.coordinates
+        if isinstance(self.coordinates, str):
+            try:
+                latitude, longitude = map(float, self.coordinates.split())
+                return Coordinates(latitude=latitude, longitude=longitude)
+            except ValueError, TypeError:
+                pass
+        place = self.place
+        if place and not place.is_deleted and place.latitude is not None and place.longitude is not None:
+            return Coordinates(latitude=place.latitude, longitude=place.longitude)
+        return None
+
+
 class Audio(VkModel):
     artist: str = ""
     title: str = "Аудио"
@@ -159,6 +210,7 @@ class Post(VkModel):
     owner_id: OwnerID
     date: int = Field(default=0, ge=0)
     text: str = Field(default="", max_length=100_000)
+    access_key: str | None = None
     attachments: list[object] = Field(default_factory=list, max_length=100)
     copy_history: list["Post"] = Field(default_factory=list, max_length=10)
     friends_only: StrictInt | StrictBool = False
@@ -168,10 +220,29 @@ class Post(VkModel):
     donut: Donut = Field(default_factory=Donut)
     copyright: Copyright | None = None
     signer_id: int | None = None
+    from_id: int | None = None
+    geo: Geo | None = None
+
+    @field_validator("geo", mode="before")
+    @classmethod
+    def usable_geo(cls, value: object) -> Geo | None:
+        try:
+            return Geo.model_validate(value) if value is not None else None
+        except ValidationError:
+            # Optional location changes must not hide an otherwise usable post.
+            return None
 
     @property
     def is_public(self) -> bool:
-        return not (self.friends_only or self.is_deleted or self.is_archived or self.donut.is_donut) and self.post_type == "post"
+        return not (
+            self.access_key or self.friends_only or self.is_deleted or self.is_archived or self.donut.is_donut
+        ) and self.post_type in {
+            "post",
+            "copy",
+            "photo",
+            "video",
+            "clip",
+        }
 
 
 class Wall(VkModel):

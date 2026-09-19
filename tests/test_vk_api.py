@@ -158,3 +158,66 @@ async def test_post_identifiers_have_bounded_canonical_grammar(identifier):
     with pytest.raises(VkError):
         await api.get_wall_post(identifier)
     assert "session" not in api.__dict__
+
+
+@pytest.mark.parametrize("post_type", ["post", "copy", "photo", "video", "clip"])
+async def test_documented_published_formats_pass_all_public_source_guards(post_type):
+    api = VkApi("synthetic-token")
+    api.request = AsyncMock(side_effect=[{"groups": [{"id": 10, "is_closed": 0}]}, wall(post(post_type=post_type))])
+    assert len((await api.get_wall_post("-10_1"))[0]) == 1
+
+
+@pytest.mark.parametrize("post_type", ["postpone", "suggest", "post_ads", "reply", "unknown-future-format"])
+async def test_unpublished_and_non_wall_formats_stay_excluded(post_type):
+    api = VkApi("synthetic-token")
+    api.request = AsyncMock(side_effect=[{"groups": [{"id": 10, "is_closed": 0}]}, wall(post(post_type=post_type))])
+    assert (await api.get_wall_post("-10_1"))[0] == []
+
+
+@pytest.mark.parametrize("nested", [False, True])
+async def test_every_copied_source_is_checked_even_after_first_public_copy(nested):
+    api = VkApi("synthetic-token")
+    private = post(owner_id=30, text="Private geo or attachment", geo={"coordinates": "55 37"})
+    public = post(owner_id=20)
+    copies = [public, private]
+    if nested:
+        public["copy_history"] = [private]
+        copies = [public]
+    api.request = AsyncMock(
+        side_effect=[
+            {"groups": [{"id": 10, "is_closed": 0}]},
+            wall(post(copy_history=copies)),
+            [{"id": 20, "is_closed": False}],
+            [{"id": 30, "is_closed": True}],
+        ]
+    )
+    assert (await api.get_wall_post("-10_1"))[0] == []
+    assert api.request.await_args_list[-1].kwargs["user_ids"] == "30"
+
+
+@pytest.mark.parametrize("copied", [False, True])
+async def test_private_post_access_key_is_rejected_even_on_an_open_wall(copied):
+    protected = post(access_key="synthetic-private-post-key")
+    item = post(copy_history=[protected | {"owner_id": 20}]) if copied else protected
+    api = VkApi("synthetic-token")
+    api.request = AsyncMock(side_effect=[{"groups": [{"id": 10, "is_closed": 0}]}, wall(item)])
+    assert (await api.get_wall_post("-10_1"))[0] == []
+    assert api.request.await_count == 2
+
+
+async def test_public_attachment_access_key_is_not_treated_as_a_private_post():
+    item = post(
+        access_key="",
+        attachments=[
+            {
+                "type": "photo",
+                "photo": {"access_key": "synthetic-public-photo-key", "sizes": [{"url": "https://sun9.userapi.com/public.jpg"}]},
+            }
+        ],
+    )
+    api = VkApi("synthetic-token")
+    api.request = AsyncMock(side_effect=[{"groups": [{"id": 10, "is_closed": 0}]}, wall(item)])
+    items, extended = await api.get_wall_post("-10_1")
+    from msu_hub_bot.providers.vk.posts import VkPost
+
+    assert VkPost(items[0], extended).for_publish(with_webpreview=False)[2] == ["https://sun9.userapi.com/public.jpg"]
