@@ -279,6 +279,20 @@ def test_hidden_map_keeps_only_the_public_place_label():
     assert not any("maps.google.com" in url for url in visible.links)
 
 
+@pytest.mark.parametrize("field", ["from_id", "signer_id"])
+@pytest.mark.parametrize("value", [{"id": 42}, "changed optional author", True, 0])
+def test_malformed_optional_author_does_not_hide_public_text_or_media(field, value):
+    parsed = parse_post(
+        text="Keep the post",
+        attachments=[attachment("photo", {"sizes": [{"url": "https://sun9.userapi.com/public.jpg"}]})],
+        **{field: value},
+    )
+    rendered, _, photos, _ = parsed.for_publish(with_webpreview=False)
+    assert "Keep the post" in check_html(rendered).text
+    assert "— Автор:" not in rendered
+    assert photos == ["https://sun9.userapi.com/public.jpg"]
+
+
 def test_nested_and_sibling_copies_preserve_text_media_and_attribution():
     parsed = parse_post(
         text="Outer text",

@@ -223,6 +223,11 @@ class Post(VkModel):
     from_id: int | None = None
     geo: Geo | None = None
 
+    @field_validator("from_id", "signer_id", mode="before")
+    @classmethod
+    def usable_author(cls, value: object) -> int | None:
+        return value if type(value) is int and value != 0 else None
+
     @field_validator("geo", mode="before")
     @classmethod
     def usable_geo(cls, value: object) -> Geo | None:
