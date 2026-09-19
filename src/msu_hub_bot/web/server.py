@@ -19,6 +19,8 @@ from aiogram.types import ChatMemberRestricted, LinkPreviewOptions
 from aiohttp import web
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from msu_hub_bot.community.reposts import RepostError, Reposts
+from msu_hub_bot.providers.vk.api import VkApi
 from msu_hub_bot.reminders import ReminderService, Schedule, parse_schedule
 from msu_hub_bot.reminders.models import Reminder, ReminderError
 from msu_hub_bot.reminders.presentation import confirmation, keyboard
@@ -29,6 +31,8 @@ from msu_hub_bot.telemetry import Boundary, Outcome, Telemetry
 
 from .auth import AuthenticationError, WebUser, authenticate
 from .links import Destination, LaunchError, WebAppLinks
+from .access import AccessDenied
+from .community import CommunityAPI
 
 logger = logging.getLogger(__name__)
 USER = web.RequestKey("user", WebUser)
@@ -72,6 +76,7 @@ class WebServer:
         *,
         port: int = 8081,
         static_path: Path | None = None,
+        vk_api: VkApi | None = None,
     ) -> None:
         self.bot, self.reminders, self.database, self.links, self.telemetry = bot, reminders, database, links, telemetry
         self.port = port
@@ -83,6 +88,7 @@ class WebServer:
         self.accepting = True
         self._requests = asyncio.Semaphore(32)
         self._label_queries = asyncio.Semaphore(8)
+        self.community = CommunityAPI(self, Reposts(reminders.store, vk_api))
 
     @web.middleware
     async def _boundary(self, request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]) -> web.StreamResponse:
@@ -112,8 +118,12 @@ class WebServer:
             response = error(401, "authentication", "Сессия закончилась. Закрой и открой приложение через бота.")
         except LaunchError as exc:
             response = error(422, "launch", str(exc))
+        except AccessDenied as exc:
+            response = error(403, "access", str(exc))
+        except RepostError as exc:
+            response = error(422, "repost", str(exc))
         except Conflict:
-            response = error(409, "conflict", "Напоминание уже изменилось. Обнови его и попробуй снова.")
+            response = error(409, "conflict", "Запись уже изменилась или существует. Обнови её и попробуй снова.")
         except ReminderError as exc:
             response = error(422, "reminder", str(exc))
         except ValidationError, ValueError, json.JSONDecodeError, RecursionError:
@@ -145,6 +155,7 @@ class WebServer:
         app.router.add_post("/api/reminders", self._create)
         app.router.add_get("/api/reminders/{key}", self._get)
         app.router.add_post("/api/reminders/{key}/{action:reschedule|cancel|retry}", self._change)
+        self.community.register(app)
         app.router.add_get("/", self._index)
         if (self.static_path / "assets").is_dir():
             app.router.add_static("/assets", self.static_path / "assets", show_index=False, follow_symlinks=False)
@@ -192,7 +203,7 @@ class WebServer:
                     "thread_id": destination.thread_id,
                     "label": await self._label(user.id, destination),
                 },
-                "default_timezone": "Europe/Moscow",
+                "default_timezone": await self.community.preferences.timezone(user.id),
                 "now": self.clock().isoformat(),
             }
         )
@@ -233,7 +244,7 @@ class WebServer:
         record = await self.reminders.get(request[USER].id, request.match_info["key"])
         return web.json_response(self._item(record))
 
-    async def _body[M: Input](self, request: web.Request, model: type[M]) -> M:
+    async def _body[M: BaseModel](self, request: web.Request, model: type[M]) -> M:
         if request.content_type != "application/json":
             raise ValueError
 

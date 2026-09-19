@@ -196,7 +196,7 @@ async def test_vk_advances_are_monotonic_under_contention_without_creating_missi
     await documents.advance_vk_cursor(-200, -100, 123)
     assert not writes(backend)
     created = await documents.upsert_vk_subscription(-200, -100, VkPatch())
-    assert created.last_post_id == 0 and not created.with_reposts and created.with_header and not created.is_suspended
+    assert created.last_post_id == 0 and not created.with_reposts and created.with_header and created.is_suspended
     await asyncio.gather(*(documents.advance_vk_cursor(-200, -100, value) for value in [10, 100, 50, 1000, 200]))
     [updated] = await documents.list_vk_subscriptions()
     assert updated.last_post_id == 1000 and updated.id == created.id
@@ -222,7 +222,7 @@ async def test_lost_create_response_replays_exact_request_including_generated_id
 @pytest.mark.parametrize("future", [False, True])
 async def test_invalid_and_future_documents_are_never_replaced(collection, key, payload, method, future):
     backend, documents, observed = setup()
-    seed(backend, getattr(documents, collection), key, payload, payload_version=2 if future else 1)
+    seed(backend, getattr(documents, collection), key, payload, payload_version=getattr(documents, collection).version + 1 if future else 1)
     args = (observed,) if method == "load_settings" else (-100,) if method == "get_directory" else ()
     with pytest.raises(FutureVersion if future else InvalidPayload) as caught:
         await getattr(documents, method)(*args)

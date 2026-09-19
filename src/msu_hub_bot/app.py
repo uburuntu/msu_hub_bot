@@ -134,11 +134,15 @@ class Application:
             chess_matches = ChessMatchService(bot, features, feature_worker)
             reminders = ReminderService(bot, features, feature_worker)
             web_apps = WebAppLinks(bot.token, settings.web_app_url)
-            web = WebServer(bot, reminders, database, web_apps, telemetry, port=settings.web_port) if settings.web_app_url else None
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
             vk_api = VkApi(token=settings.vk_user_token)
             stack.push_async_callback(vk_api.close)
+            web = (
+                WebServer(bot, reminders, database, web_apps, telemetry, port=settings.web_port, vk_api=vk_api)
+                if settings.web_app_url
+                else None
+            )
             dvach = Api2chAsync()
             stack.push_async_callback(dvach.close)
             wit = Wit(settings.wit_tokens, executor=executor, telemetry=telemetry)

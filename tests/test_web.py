@@ -501,3 +501,86 @@ async def test_listener_start_failure_closes_partial_runner(rig, monkeypatch):
         await server.start()
     runner.cleanup.assert_awaited_once()
     assert server.runner is None and not server.accepting
+
+
+async def _community_access(rig, monkeypatch, *, admin=True, member=True, bot_admin=True):
+    from aiogram.types import ChatMemberOwner
+
+    original = rig.bot.session.make_request
+
+    async def request(bot, method, timeout=None):
+        if isinstance(method, GetChatMember):
+            rig.bot.session.methods.append(method)
+            user = User(id=method.user_id, first_name="Synthetic", is_bot=method.user_id == bot.id)
+            if method.user_id == bot.id:
+                return ChatMemberOwner(user=user, is_anonymous=False) if bot_admin else ChatMemberMember(user=user)
+            if not member:
+                return ChatMemberLeft(user=user)
+            return ChatMemberOwner(user=user, is_anonymous=False) if admin else ChatMemberMember(user=user)
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(rig.bot.session, "make_request", request)
+    return rig.links.launch(42, Destination(-123, 17), now=NOW)
+
+
+async def test_preferences_are_owner_scoped_persistent_and_revision_guarded(rig):
+    blank = await (await rig.api("GET", "/api/preferences")).json()
+    assert blank == {"timezone": "Europe/Moscow", "etag": None}
+    body = {"timezone": "Europe/London", "etag": None}
+    response = await rig.api("PATCH", "/api/preferences", body=body)
+    value = await response.json()
+    assert response.status == 200 and value["timezone"] == "Europe/London"
+    assert (await rig.api("PATCH", "/api/preferences", body=body)).status == 409
+    assert (await (await rig.api("GET", "/api/preferences", user_id=43)).json()) == blank
+    assert (await (await rig.api("GET", "/api/session")).json())["default_timezone"] == "Europe/London"
+    assert (await rig.api("PATCH", "/api/preferences", body={"etag": value["etag"], "timezone": "bad/zone"})).status == 422
+
+
+@pytest.mark.parametrize("admin,member,bot_admin", [(False, True, True), (True, False, True), (True, True, False)])
+async def test_community_mutations_recheck_human_and_bot_admin_on_every_request(rig, monkeypatch, admin, member, bot_admin):
+    launch = await _community_access(rig, monkeypatch, admin=admin, member=member, bot_admin=bot_admin)
+    response = await rig.api("POST", f"/api/reposts?launch={launch}", body={"request_id": str(uuid4()), "source": "-10"})
+    assert response.status == 403 and not rig.backend.records
+    response = await rig.api("PATCH", f"/api/chats/-123/settings?launch={launch}", body={"etag": None, "with_nsfw": True})
+    assert response.status == 403 and not rig.backend.records
+    assert not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)
+
+
+async def test_reposts_bind_destination_preserve_cursor_and_archive_without_deleting(rig, monkeypatch):
+    launch = await _community_access(rig, monkeypatch)
+    body = {"request_id": str(uuid4()), "source": "https://vk.com/club10", "title": "Synthetic", "include_keywords": ["news"]}
+    responses = await asyncio.gather(*(rig.api("POST", f"/api/reposts?launch={launch}", body=body) for _ in range(3)))
+    assert all(response.status == 201 for response in responses)
+    rows = [await response.json() for response in responses]
+    item = rows[0]
+    assert len({row["key"] for row in rows}) == 1
+    assert item["is_suspended"] and (item["chat_id"], item["thread_id"]) == (-123, 17)
+    assert (await rig.api("POST", f"/api/reposts?launch={launch}", body=body | {"title": "Changed"})).status == 409
+    other_topic = rig.links.launch(42, Destination(-123, 18), now=NOW)
+    path = f"/api/reposts/{item['key']}"
+    assert (await rig.api("PATCH", f"{path}?launch={other_topic}", body={"etag": item["etag"], "archived": True})).status == 422
+    response = await rig.api("PATCH", f"{path}?launch={launch}", body={"etag": item["etag"], "archived": True})
+    changed = await response.json()
+    assert changed["archived"] and changed["is_suspended"] and changed["last_post_id"] == item["last_post_id"]
+    assert changed["include_keywords"] == ["news"] and len(rig.backend.records) == 2
+    assert (await rig.api("PATCH", f"{path}?launch={launch}", body={"etag": changed["etag"], "is_suspended": False})).status == 422
+    assert not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)
+
+
+async def test_launch_does_not_authorize_another_chat_or_another_users_topic(rig, monkeypatch):
+    launch = await _community_access(rig, monkeypatch)
+    assert (await rig.api("GET", f"/api/chats/-999/settings?launch={launch}")).status == 403
+    assert (await rig.api("GET", f"/api/reposts?launch={launch}", user_id=43)).status == 422
+    body = {"request_id": str(uuid4()), "source": "-10", "thread_id": 999}
+    assert (await rig.api("POST", f"/api/reposts?launch={launch}", body=body)).status == 422
+    assert not rig.backend.records
+
+
+async def test_preview_has_no_publication_and_rejects_arbitrary_sources(rig, monkeypatch):
+    launch = await _community_access(rig, monkeypatch)
+    for source in ("https://internal.example/path", "https://vk.com.evil.example/club10", "https://secret@vk.com/club10"):
+        assert (await rig.api("POST", f"/api/reposts/preview?launch={launch}", body={"source": source})).status == 422
+    response = await rig.api("POST", f"/api/reposts/preview?launch={launch}", body={"source": "-10"})
+    data = await response.json()
+    assert response.status == 200 and not data["automatic_posting"] and not data["available"]
+    assert not rig.backend.records and not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)

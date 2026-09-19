@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
 from msu_hub_bot.storage.errors import RepositoryError, RepositoryFailure, RepositoryUnavailable
 from msu_hub_bot.storage.features import Collection, Conflict, FeatureProtocolError, FeatureStore, InvalidPayload, Payload, Scope
@@ -41,6 +41,26 @@ class DirectoryDocument(DirectoryRecord, Payload):
 class VkDocument(VkSubscription, Payload):
     model_config = Payload.model_config
 
+    thread_id: int | None = Field(default=None, gt=0)
+    title: str = Field(default="", max_length=160)
+    include_keywords: list[str] = Field(default_factory=list, max_length=20)
+    exclude_keywords: list[str] = Field(default_factory=list, max_length=20)
+    archived: bool = False
+    created_by: int | None = Field(default=None, gt=0)
+    updated_by: int | None = Field(default=None, gt=0)
+    creation_request_id: str | None = None
+    creation_fingerprint: str | None = None
+
+
+def vk_key(owner_id: int, chat_id: int, thread_id: int | None = None) -> str:
+    original = f"{_key(owner_id)}:{_key(chat_id)}"
+    return original if thread_id is None else f"{original}:topic:{thread_id}"
+
+
+def upgrade_vk(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Add topic configuration without changing original flags, cursor or identity."""
+    return {"thread_id": None, "title": "", "include_keywords": [], "exclude_keywords": [], "archived": False} | value
+
 
 def _key(value: int) -> str:
     try:
@@ -60,7 +80,7 @@ def _identity[M: Payload](record: Record[M]) -> None:
     value = record.value
     if isinstance(value, DirectoryDocument) and record.key != str(value.chat_id):
         raise FeatureProtocolError()
-    if isinstance(value, VkDocument) and record.key != f"{value.owner_id}:{value.chat_id}":
+    if isinstance(value, VkDocument) and record.key != vk_key(value.owner_id, value.chat_id, value.thread_id):
         raise FeatureProtocolError()
 
 
@@ -72,7 +92,7 @@ class ApplicationDocuments:
         self.chat_lookup = chat_lookup
         self.settings = store.collection("settings", "chats", ChatPreferences, retention=None)
         self.directory = store.collection("ecosystem", "chats", DirectoryDocument, retention=None)
-        self.subscriptions = store.collection("vk", "subscriptions", VkDocument, retention=None)
+        self.subscriptions = store.collection("vk", "subscriptions", VkDocument, retention=None, version=2, upgrades={1: upgrade_vk})
 
     @staticmethod
     async def _commit(tx: Transaction) -> CommitResult:
@@ -204,7 +224,7 @@ class ApplicationDocuments:
             last_post_id=0,
             with_reposts=False,
             with_header=True,
-            is_suspended=False,
+            is_suspended=True,
         )
         value = await self._change(
             self.subscriptions, key, lambda current: _validate(VkDocument, (current or created).model_dump(mode="json") | patch)
