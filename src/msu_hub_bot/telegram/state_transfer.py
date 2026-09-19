@@ -85,7 +85,9 @@ async def restore_state(store: FeatureStore, snapshot: StateSnapshot, *, bot_id:
         transaction.put(conversations, key, value, expires_at=value.expiry())
         record = await conversations.get(scope, key)
         if record is not None:
-            if record.value != value or record.expires_at != value.expiry():
+            current = record.value.model_copy(deep=True)
+            current.prune_expired()
+            if current != value or record.expires_at != value.expiry():
                 raise Conflict()
             existing += 1
             continue

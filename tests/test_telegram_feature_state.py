@@ -359,6 +359,17 @@ async def test_restore_repeat_skips_identical_documents_without_rescheduling_job
     assert [op for op, _ in backend.calls] == ["get", "get"]
 
 
+async def test_restore_replay_accepts_elapsed_field_deadline_without_rewriting_existing_record():
+    value = conversation(state="Input", state_expires_at=PAST, data={"live": CANARY}, data_expires_at=FUTURE)
+    source = snapshot(conversations=[value.model_dump(mode="json")])
+    stored = record(value, expires_at=FUTURE.isoformat())
+    backend = Backend(("get", stored))
+    result = await restore_state(FeatureStore(backend), source, bot_id=KEY.bot_id, apply=True)
+    assert result.existing == 1 and result.conversations == 0
+    assert [op for op, _ in backend.calls] == ["get"]
+    assert stored["payload"]["state"] == "Input"
+
+
 async def test_restore_preflight_finds_later_conflict_before_first_write():
     source = snapshot(deletions=[{"chat_id": KEY.chat_id, "message_id": 11, "run_at": PAST.isoformat()}])
     backend = Backend(("get", None), ("get", record(deletion(complete=True))))
