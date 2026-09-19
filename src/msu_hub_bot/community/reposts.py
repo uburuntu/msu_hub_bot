@@ -9,7 +9,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, TypeAdapter, field_validator
 
 from msu_hub_bot.providers.vk.api import VkApi
 from msu_hub_bot.storage.application import APPLICATION, ApplicationDocuments, VkDocument, upgrade_vk, vk_key
@@ -67,15 +67,27 @@ class _Resolution(BaseModel):
     object_id: int = Field(gt=0)
 
 
+class _Donut(BaseModel):
+    is_donut: bool = False
+
+
 class _Post(BaseModel):
     id: int = Field(gt=0)
     owner_id: int
     text: str = ""
     copy_history: list[dict[str, object]] = Field(default_factory=list)
+    friends_only: int = 0
+    donut: _Donut = Field(default_factory=_Donut)
 
 
 class _Wall(BaseModel):
     items: list[_Post] = Field(max_length=3)
+
+
+class _Source(BaseModel):
+    id: int = Field(gt=0)
+    # Require explicit evidence. Missing privacy metadata is not public access.
+    is_closed: StrictInt | StrictBool
 
 
 class RepostRequest(Payload):
@@ -133,20 +145,19 @@ class Reposts:
             raise FeatureProtocolError()
 
     async def list(self, chat_id: int, thread_id: int | None) -> list[Record[VkDocument]]:
-        # Original application documents predate parent indexes. Bound the scan
-        # explicitly until a future storage contract supports indexed discovery.
         result: list[Record[VkDocument]] = []
         after = None
         for _ in range(25):
-            rows = await self.items.list(APPLICATION, after=after, limit=200)
+            rows = await self.items.list(APPLICATION, parent=f"chat:{chat_id}:topic:{thread_id or 0}", after=after, limit=200)
             for row in rows:
                 self._identity(row)
-                if (row.value.chat_id, row.value.thread_id) == (chat_id, thread_id):
-                    result.append(row)
+                if (row.value.chat_id, row.value.thread_id) != (chat_id, thread_id):
+                    raise FeatureProtocolError()
+                result.append(row)
             if len(rows) < 200:
                 return sorted(result, key=lambda row: (row.value.archived, row.value.title.casefold(), row.key))
             after = rows[-1].key
-        raise RepostError("Список слишком большой. Администратору нужно настроить индекс подписок.")
+        raise RepostError("В этой теме слишком много подписок для одного списка.")
 
     async def create(self, user_id: int, chat_id: int, thread_id: int | None, body: RepostCreate) -> Record[VkDocument]:
         request_key = f"{user_id}:{body.request_id}"
@@ -238,6 +249,8 @@ class Reposts:
             return base | {"available": False, "reason": "Доступ к VK не настроен. Подписку можно сохранить на паузе."}
         try:
             async with asyncio.timeout(6), self._providers:
+                if not await self._public_source(owner_id):
+                    return base | {"available": False, "reason": "Предпросмотр доступен только для подтверждённо открытых страниц VK."}
                 raw: object = await self.api.request("wall.get", owner_id=owner_id, count=3, filter="all")
             wall = _Wall.model_validate(raw)
             if any(post.owner_id != owner_id for post in wall.items):
@@ -256,5 +269,18 @@ class Reposts:
                     "selected": body.selects(post.text, bool(post.copy_history)),
                 }
                 for post in wall.items
+                if not post.friends_only and not post.donut.is_donut
             ],
         }
+
+    async def _public_source(self, owner_id: int) -> bool:
+        assert self.api is not None
+        if owner_id < 0:
+            raw: object = await self.api.request("groups.getById", group_ids=str(-owner_id))
+            # VK 5.124 returns a list; newer API versions wrap it in groups.
+            if isinstance(raw, dict):
+                raw = raw.get("groups")
+        else:
+            raw = await self.api.request("users.get", user_ids=str(owner_id))
+        sources = TypeAdapter(list[_Source]).validate_python(raw)
+        return len(sources) == 1 and sources[0].id == abs(owner_id) and sources[0].is_closed == 0

@@ -121,7 +121,10 @@ class ApplicationDocuments:
                 tx.expect_absent(collection.name, key)
             else:
                 tx.expect(previous)
-            tx.put(collection, key, value)
+            if isinstance(value, VkDocument):
+                tx.put(collection, key, value, parent=f"chat:{value.chat_id}:topic:{value.thread_id or 0}")
+            else:
+                tx.put(collection, key, value)
             try:
                 result = await self._commit(tx)
             except Conflict:

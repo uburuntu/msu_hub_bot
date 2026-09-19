@@ -55,7 +55,7 @@ class GameSummaries:
             note += " Показана ограниченная выборка; полный список доступен в командах бота."
         return {
             "rankings": [
-                {"user_id": value.user_id, "name": value.name, "score": value.points, "played": 0, "correct": 0} for value in leaders
+                {"user_id": value.user_id, "name": value.name, "score": value.points, "played": None, "correct": None} for value in leaders
             ],
             "history": [
                 {
@@ -96,7 +96,8 @@ class GameSummaries:
             note += " Показана ограниченная выборка."
         return {
             "rankings": [
-                {"user_id": value.user_id, "name": value.name, "score": value.rating, "played": 0, "correct": 0} for value in ratings[:20]
+                {"user_id": value.user_id, "name": value.name, "score": value.rating, "played": None, "correct": None}
+                for value in ratings[:20]
             ],
             "history": [
                 {
