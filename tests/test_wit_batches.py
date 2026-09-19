@@ -149,3 +149,78 @@ async def test_busy_automatic_speech_skips_and_explicit_speech_uses_central_feed
         assert await client.process_stt(incoming, SimpleNamespace(auto_speech_recognition=True)) is True
     audio.download.assert_not_awaited()
     client._recognize_chunks.assert_not_awaited()
+
+
+async def test_recognition_capacity_is_shared_across_messages_and_tokens(monkeypatch):
+    monkeypatch.setattr(wit, "RECOGNITION_CONCURRENCY", 2)
+    client = wit.Wit(["first", "second"])
+    active, peak = 0, 0
+    release = asyncio.Event()
+    full = asyncio.Event()
+
+    async def speech(chunk, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 2:
+            full.set()
+        try:
+            await release.wait()
+            return chunk.getvalue().decode()
+        finally:
+            active -= 1
+
+    for instance in client.instances:
+        instance.speech = speech
+    tasks = [asyncio.create_task(client._recognize_chunks((b"a", b"b", b"c"))) for _ in range(3)]
+    try:
+        await asyncio.wait_for(full.wait(), 1)
+        await asyncio.sleep(0)
+        assert active == 2
+        release.set()
+        assert await asyncio.gather(*tasks) == ["a | b | c"] * 3
+        assert peak == 2 and active == 0
+    finally:
+        release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_recognition_deadline_includes_capacity_wait_and_drains_children(monkeypatch):
+    monkeypatch.setattr(wit, "RECOGNITION_CONCURRENCY", 1)
+    monkeypatch.setattr(wit, "RECOGNITION_TIMEOUT", 0.02)
+    client = wit.Wit(["synthetic"])
+    opened, settled = [], []
+
+    async def speech(chunk, **kwargs):
+        opened.append(chunk)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            assert not chunk.closed
+            settled.append(chunk)
+
+    client.instances[0].speech = speech
+    with pytest.raises(wit.WitAPIError) as caught:
+        await client._recognize_chunks((b"one", b"two", b"three"))
+    assert caught.value.code == 408
+    assert len(opened) == len(settled) == 1
+    assert all(chunk.closed for chunk in opened)
+    assert not client._recognition_slots.locked()
+
+
+async def test_whole_speech_deadline_includes_preprocessing(monkeypatch):
+    monkeypatch.setattr(wit, "SPEECH_REQUEST_TIMEOUT", 0.02)
+    settled = asyncio.Event()
+
+    async def prepare(*args):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled.set()
+
+    client = wit.Wit(["synthetic"], executor=SimpleNamespace(run=prepare))
+    client.instances[0].speech = AsyncMock()
+    with pytest.raises(wit.WitAPIError) as caught:
+        await client.stt(io.BytesIO(b"audio"), 30)
+    assert caught.value.code == 408 and settled.is_set()
+    client.instances[0].speech.assert_not_awaited()

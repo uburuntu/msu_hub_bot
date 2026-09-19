@@ -78,3 +78,5 @@ Regression checks cover saturation without downloading, cancellation and
 timeout recovery, native process-tree cleanup, resource ownership, malformed
 inputs and normal conversions. Pathological regex checks run under an
 independent process watchdog so a GIL regression cannot freeze the test runner.
+
+Speech recognition shares three outgoing chunk slots across all messages and configured Wit tokens. The 180-second recognition deadline includes waiting for capacity and provider throttling; the complete download/preparation/recognition pipeline has a 240-second deadline. Chunk order and the existing unrecognized-fragment markers are preserved. Failed or timed-out batches never emit a misleading partial transcript, and all child requests settle before audio buffers are released.

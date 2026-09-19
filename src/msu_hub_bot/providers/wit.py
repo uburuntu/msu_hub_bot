@@ -29,6 +29,9 @@ from msu_hub_bot.media.ffmpeg import ffmpeg
 
 CHUNK_PREPARATION_TIMEOUT = 120
 MAX_PCM_BYTES = 64 * 1024 * 1024
+RECOGNITION_CONCURRENCY = 3
+RECOGNITION_TIMEOUT = 180
+SPEECH_REQUEST_TIMEOUT = 240
 
 
 class WitAPIError(ExternalServiceError):
@@ -111,6 +114,8 @@ class Wit(ManyWitAPI):
     def __init__(self, tokens: List[str], executor: TPExecutor | None = None, *, telemetry: Telemetry | None = None) -> None:
         super().__init__(tokens, telemetry=telemetry)
         self.executor = executor
+        # Share capacity across messages and tokens, including provider rate-limit waits.
+        self._recognition_slots = asyncio.Semaphore(RECOGNITION_CONCURRENCY)
 
     @staticmethod
     def to_raw_chunks(file: io.BytesIO, duration: int, max_size: int = 20_000, overlap: int = 100) -> List[io.BytesIO]:
@@ -177,22 +182,30 @@ class Wit(ManyWitAPI):
     async def stt(self, file: io.BytesIO, duration: int) -> Optional[str]:
         if self.executor is None:
             raise RuntimeError("Speech executor is not configured")
-        chunks, timeouted = await self.executor.run(self._prepare_audio, file, duration)
-        if timeouted:
-            return None
-        return await self._recognize_chunks(chunks)
+        try:
+            async with asyncio.timeout(SPEECH_REQUEST_TIMEOUT):
+                chunks, timeouted = await self.executor.run(self._prepare_audio, file, duration)
+                if timeouted:
+                    return None
+                return await self._recognize_chunks(chunks)
+        except TimeoutError:
+            raise WitAPIError(408, "Speech deadline exceeded") from None
 
     async def _recognize_chunks(self, chunks: tuple[bytes, ...] | None) -> Optional[str]:
         if not chunks or any(not chunk for chunk in chunks):
             return None
-        with ExitStack() as buffers:
-            audio = [buffers.enter_context(io.BytesIO(chunk)) for chunk in chunks]
-            texts: List[str] = await gather_complete(
-                *[
-                    self.instance.speech(chunk, content_type="audio/raw;encoding=signed-integer;bits=16;rate=16000;endian=little")
-                    for chunk in audio
-                ]
-            )
+
+        async def recognize(chunk: io.BytesIO) -> str:
+            async with self._recognition_slots:
+                return await self.instance.speech(chunk, content_type="audio/raw;encoding=signed-integer;bits=16;rate=16000;endian=little")
+
+        try:
+            async with asyncio.timeout(RECOGNITION_TIMEOUT):
+                with ExitStack() as buffers:
+                    audio = [buffers.enter_context(io.BytesIO(chunk)) for chunk in chunks]
+                    texts = await gather_complete(*(recognize(chunk) for chunk in audio))
+        except TimeoutError:
+            raise WitAPIError(408, "Recognition deadline exceeded") from None
 
         if texts and texts[-1] == "":
             texts.pop()
@@ -227,16 +240,17 @@ class Wit(ManyWitAPI):
         if self.executor is None:
             raise RuntimeError("Speech executor is not configured")
         try:
-            chunks, timeouted = await run_downloaded(self.executor, dest, self._prepare_audio, int(dest.duration), bot=bot_for(message))
+            async with asyncio.timeout(SPEECH_REQUEST_TIMEOUT):
+                chunks, timeouted = await run_downloaded(self.executor, dest, self._prepare_audio, int(dest.duration), bot=bot_for(message))
+                text = None if timeouted else await self._recognize_chunks(chunks)
+        except TimeoutError:
+            raise WitAPIError(408, "Speech deadline exceeded") from None
         except DownloadUnavailable, DownloadTooLarge:
             return True
         except ExecutorBusy:
             if explicit:
                 raise
             return True
-        if timeouted:
-            return True
-        text = await self._recognize_chunks(chunks)
         if not text:
             return True
 
