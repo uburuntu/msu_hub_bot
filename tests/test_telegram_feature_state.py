@@ -272,7 +272,7 @@ async def test_success_and_terminal_delete_errors_complete_with_bounded_audit_re
     backend, service, bot, context = deletion_service(("get", record(value)), ("commit", committed(deletion(complete=True))))
     bot.delete_message.side_effect = error
     await service._execute(context)
-    bot.delete_message.assert_awaited_once_with(KEY.chat_id, 11)
+    bot.delete_message.assert_awaited_once_with(KEY.chat_id, 11, request_timeout=15)
     put = backend.calls[-1][1]["puts"][0]
     assert put["payload"]["complete"] is True
     assert NOW + timedelta(days=6) < datetime.fromisoformat(put["expires_at"]) < NOW + timedelta(days=8)
@@ -451,3 +451,25 @@ def test_snapshot_accepts_a_bounded_stdin_pipe_without_host_permission_changes()
     )
     assert result.stdout.strip() == "1 0" and not result.stderr
     assert CANARY not in result.stdout
+
+
+async def test_deletion_network_timeout_is_forwarded_to_telegram_and_retried():
+    from aiogram import Bot
+    from telegram_helpers import RecordingSession
+
+    class StalledDeletion(RecordingSession):
+        async def make_request(self, bot, method, timeout=None):
+            assert isinstance(method, DeleteMessage)
+            assert timeout == 15
+            raise TelegramNetworkError(method, "Synthetic request deadline")
+
+    backend, service, _, context = deletion_service(("get", record(deletion())))
+    bot = Bot(f"{KEY.bot_id}:" + "a" * 35, session=StalledDeletion())
+    service.bot = bot
+    try:
+        with pytest.raises(JobRetry):
+            await service._execute(context)
+    finally:
+        await bot.session.close()
+    assert [operation for operation, _ in backend.calls] == ["get"]
+    context.status.assert_not_awaited()

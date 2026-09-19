@@ -136,7 +136,8 @@ async def test_rescheduling_during_inflight_delete_never_completes_replacement(a
     deletions, worker, bot = service(db)
     await deletions.mark_message_to_delete_raw(-101, 50, 0)
 
-    async def reschedule(chat_id, message_id):
+    async def reschedule(chat_id, message_id, *, request_timeout):
+        assert request_timeout == 15
         await deletions.mark_message_to_delete_raw(chat_id, message_id, 3600)
         return True
 

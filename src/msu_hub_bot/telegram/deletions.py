@@ -24,6 +24,9 @@ from msu_hub_bot.storage.features import (
 from msu_hub_bot.telegram.fsm_storage import FEATURE, MAX_CONFLICT_RETRIES, commit_state_change
 
 
+DELETE_REQUEST_TIMEOUT = 15
+
+
 class Deletion(Payload):
     bot_id: int = Field(strict=True)
     chat_id: int = Field(strict=True)
@@ -90,7 +93,7 @@ class MessageDeletions:
         if value.run_at > datetime.now(UTC):
             raise JobRetry()
         try:
-            await self.bot.delete_message(value.chat_id, value.message_id)
+            await self.bot.delete_message(value.chat_id, value.message_id, request_timeout=DELETE_REQUEST_TIMEOUT)
         except TelegramRetryAfter as error:
             await context.status("retry", run_at=datetime.now(UTC) + timedelta(seconds=max(1, error.retry_after)))
             return
