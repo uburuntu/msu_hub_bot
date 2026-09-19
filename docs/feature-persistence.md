@@ -299,3 +299,5 @@ Test upgrades, preserved extras, concurrent changes, replayed commits, expired
 records, stale leases/generations and interrupted external effects. The real
 PostgreSQL suite validates authentication and transaction guarantees. Inspect
 held work and retry pressure through redacted diagnostics, never payload logs.
+See [queue operations](operations.md) for registered feature/kind metrics,
+snapshot freshness and the feature-owned reconciliation procedure.
