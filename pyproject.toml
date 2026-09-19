@@ -119,6 +119,7 @@ files = [
     "src/msu_hub_bot/games/definitions.py",
     "src/msu_hub_bot/games/quiz.py",
     "src/msu_hub_bot/games/scores.py",
+    "src/msu_hub_bot/games/raffle.py",
     "src/msu_hub_bot/games/chess_play/__init__.py",
     "src/msu_hub_bot/games/chess_play/models.py",
     "src/msu_hub_bot/games/chess_play/records.py",

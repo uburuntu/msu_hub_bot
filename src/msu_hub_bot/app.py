@@ -26,6 +26,7 @@ from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.factory import create_repository
 from msu_hub_bot.storage.features import FeatureStore, FeatureWorker
 from msu_hub_bot.games import QuizService
+from msu_hub_bot.games.raffle import RaffleStore
 from msu_hub_bot.games.chess_play.service import ChessMatchService
 from msu_hub_bot.reminders import ReminderService
 from msu_hub_bot.web.links import WebAppLinks
@@ -131,6 +132,7 @@ class Application:
             features = FeatureStore(database)
             feature_worker = FeatureWorker(features, telemetry=telemetry)
             quiz = QuizService(bot, features, feature_worker)
+            raffles = RaffleStore(bot.id, features)
             chess_matches = ChessMatchService(bot, features, feature_worker)
             reminders = ReminderService(bot, features, feature_worker)
             web_apps = WebAppLinks(bot.token, settings.web_app_url)
@@ -185,6 +187,7 @@ class Application:
                 redis=redis,
                 supervisor=supervisor,
                 quiz=quiz,
+                raffles=raffles,
                 chess_matches=chess_matches,
                 reminders=reminders,
                 web_apps=web_apps,
