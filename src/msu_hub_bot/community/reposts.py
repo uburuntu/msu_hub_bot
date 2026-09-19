@@ -5,13 +5,13 @@ import hashlib
 import json
 import re
 from datetime import UTC, datetime
-from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from msu_hub_bot.providers.vk.api import VkApi
+from msu_hub_bot.providers.vk.api import VkApi, public_source
+from msu_hub_bot.providers.vk.models import Resolution, Wall
 from msu_hub_bot.storage.application import APPLICATION, ApplicationDocuments, VkDocument, upgrade_vk, vk_key
 from msu_hub_bot.storage.features import Conflict, FeatureProtocolError, FeatureStore, Payload, Record
 
@@ -62,34 +62,6 @@ class RepostUpdate(RepostOptions):
     archived: bool = False
 
 
-class _Resolution(BaseModel):
-    type: Literal["user", "group", "page"]
-    object_id: int = Field(gt=0)
-
-
-class _Donut(BaseModel):
-    is_donut: bool = False
-
-
-class _Post(BaseModel):
-    id: int = Field(gt=0)
-    owner_id: int
-    text: str = ""
-    copy_history: list[dict[str, object]] = Field(default_factory=list)
-    friends_only: int = 0
-    donut: _Donut = Field(default_factory=_Donut)
-
-
-class _Wall(BaseModel):
-    items: list[_Post] = Field(max_length=3)
-
-
-class _Source(BaseModel):
-    id: int = Field(gt=0)
-    # Require explicit evidence. Missing privacy metadata is not public access.
-    is_closed: StrictInt | StrictBool
-
-
 class RepostRequest(Payload):
     target_key: str
     fingerprint: str
@@ -133,7 +105,7 @@ class Reposts:
         try:
             async with asyncio.timeout(6), self._providers:
                 raw: object = await self.api.request("utils.resolveScreenName", screen_name=name)
-            resolved = _Resolution.model_validate(raw)
+            resolved = Resolution.model_validate(raw)
         except Exception:
             raise RepostError("VK не подтвердил страницу. Попробуй её числовой ID или повтори позже.") from None
         return resolved.object_id * (1 if resolved.type == "user" else -1)
@@ -249,11 +221,11 @@ class Reposts:
             return base | {"available": False, "reason": "Доступ к VK не настроен. Подписку можно сохранить на паузе."}
         try:
             async with asyncio.timeout(6), self._providers:
-                if not await self._public_source(owner_id):
+                if not await public_source(self.api, owner_id):
                     return base | {"available": False, "reason": "Предпросмотр доступен только для подтверждённо открытых страниц VK."}
                 raw: object = await self.api.request("wall.get", owner_id=owner_id, count=3, filter="all")
-            wall = _Wall.model_validate(raw)
-            if any(post.owner_id != owner_id for post in wall.items):
+            wall = Wall.model_validate(raw)
+            if len(wall.items) > 3 or any(post.owner_id != owner_id for post in wall.items):
                 raise ValueError("Unexpected source")
         except Exception:
             return base | {"available": False, "reason": "VK не отдал стену. Проверь доступ к странице; подписка останется на паузе."}
@@ -272,15 +244,3 @@ class Reposts:
                 if not post.friends_only and not post.donut.is_donut
             ],
         }
-
-    async def _public_source(self, owner_id: int) -> bool:
-        assert self.api is not None
-        if owner_id < 0:
-            raw: object = await self.api.request("groups.getById", group_ids=str(-owner_id))
-            # VK 5.124 returns a list; newer API versions wrap it in groups.
-            if isinstance(raw, dict):
-                raw = raw.get("groups")
-        else:
-            raw = await self.api.request("users.get", user_ids=str(owner_id))
-        sources = TypeAdapter(list[_Source]).validate_python(raw)
-        return len(sources) == 1 and sources[0].id == abs(owner_id) and sources[0].is_closed == 0

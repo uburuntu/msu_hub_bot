@@ -2,7 +2,6 @@
 
 import time
 from contextlib import nullcontext
-from html import escape
 from typing import Any, cast
 
 import requests
@@ -159,7 +158,7 @@ class YDL:
         if result is None:
             return None
         title, links, preview = result
-        text = href(escape(preview[0], quote=True), "📺") + " " if preview else "🎞 "
-        text += href(escape(url, quote=True), escape(title)) + "\n\n— "
-        text += ", ".join(href(escape(link, quote=True), escape(label)) for link, label, _, _ in links)
+        text = href(preview[0], "📺") + " " if preview else "🎞 "
+        text += href(url, title) + "\n\n— "
+        text += ", ".join(href(link, label) for link, label, _, _ in links)
         return text, preview

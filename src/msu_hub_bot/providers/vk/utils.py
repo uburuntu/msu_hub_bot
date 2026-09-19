@@ -1,57 +1,84 @@
+"""Escape raw VK text once and keep links/media within public HTTP boundaries."""
+
+import ipaddress
 import re
-from urllib.parse import ParseResult, urlparse
+from html import escape
+from urllib.parse import urlsplit
 
 from msu_hub_bot.utils import shorten
 
-pattern_wiki_link = re.compile(r"\[([^ |\n]+)\|([^\]\n]+)\]", re.U)
-pattern_hashtag = re.compile(r"(#\S+)@\S+", re.U)
-pattern_link = re.compile(r"(http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+)", re.U)
-escaping_symbols = str.maketrans({"<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;"})
+_WIKI_OR_URL = re.compile(r"\[([^ |\n]+)\|([^\]\n]+)\]|https?://[^\s<>\[\]\"']+", re.U)
+_HASHTAG = re.compile(r"(#\S+)@\S+", re.U)
+_HTML_TOKEN = re.compile(r"</?a\b[^>]*>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z]+);|.", re.S)
+_MEDIA_DOMAINS = ("userapi.com", "vkuserphoto.ru", "vk.com", "vk.ru", "okcdn.ru", "mycdn.me", "vk-cdn.net")
 
 
-def cut_hashtags(text: str) -> str:
-    text = pattern_hashtag.sub(r"\1", text)
-    return text
+def safe_url(value: str, *, media: bool = False) -> str:
+    if len(value) > 2048 or re.search(r"[\s<>\"'\x00-\x1f\x7f]", value):
+        return ""
+    try:
+        url = urlsplit(value)
+        host = (url.hostname or "").lower().rstrip(".")
+        if url.scheme not in {"https", "http"} or not host or url.username or url.password or url.port not in {None, 80, 443}:
+            return ""
+        if host == "localhost" or host.endswith((".localhost", ".local", ".internal")) or "." not in host:
+            return ""
+        try:
+            if not ipaddress.ip_address(host).is_global:
+                return ""
+        except ValueError:
+            pass
+        if media and not any(host == domain or host.endswith("." + domain) for domain in _MEDIA_DOMAINS):
+            return ""
+        return value
+    except ValueError:
+        return ""
 
 
-def escape_symbols(text: str) -> str:
-    text = text.translate(escaping_symbols)
-    return text
+def href(url: str, text: str | None = None, url_cut_width: int = 32) -> str:
+    label = escape(text or shorten(url, width=url_cut_width))
+    return f'<a href="{escape(valid, quote=True)}">{label}</a>' if (valid := safe_url(url)) else label
 
 
-def cut_long_links(text: str, width: int = 80) -> str:
-    def repl(match):
-        if len(url := match.group(1)) > width:
-            return href(url, shorten(url, width=width))
-        return url
-
-    return pattern_link.sub(repl, text)
-
-
-def replace_wiki_links(text: str, raw_link: bool = False) -> str:
-    link_format_1 = "{1} ({0})" if raw_link else '<a href="{0}">{1}</a>'
-    link_format_2 = "{1} (vk.com/{0})" if raw_link else '<a href="https://vk.com/{0}">{1}</a>'
-    results = pattern_wiki_link.findall(text)
-    for link, link_text in results:
-        before = "[{0}|{1}]".format(link, link_text)
-        if "vk.com" in link:
-            after = link_format_1.format(link, link_text)
+def prepare_vk_text(text: str) -> str:
+    text = _HASHTAG.sub(r"\1", text)
+    result, previous = [], 0
+    for match in _WIKI_OR_URL.finditer(text):
+        result.append(escape(text[previous : match.start()]))
+        if target := match[1]:
+            if re.fullmatch(r"[A-Za-z0-9_.-]+", target):
+                target = "https://vk.com/" + target
+            elif target.startswith(("vk.com/", "vk.ru/")):
+                target = "https://" + target
+            result.append(href(target, match[2]))
         else:
-            after = link_format_2.format(link, link_text)
-        text = text.replace(before, after)
-
-    return text
-
-
-def prepare_vk_text(text: str):
-    return replace_wiki_links(cut_long_links(escape_symbols(cut_hashtags(text))))
+            url = match[0]
+            result.append(href(url, shorten(url, width=80)) if len(url) > 80 else escape(url))
+        previous = match.end()
+    result.append(escape(text[previous:]))
+    return "".join(result)
 
 
-def href(url: str, text: str = None, url_cut_width: int = 32) -> str:
-    text = text or shorten(url, width=url_cut_width)
-    return f'<a href="{url}">{text}</a>'
+def utf16_length(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
 
 
-def check_vk_url(url: str):
-    result: ParseResult = urlparse(url)
-    return result.netloc == "vk.com" and result.path.startswith("/wall"), result.path.replace("/wall", "")
+def bounded_html(text: str, source: str) -> str:
+    """Fit one Telegram text message without cutting an entity, tag or emoji."""
+    limit = 3500
+    if utf16_length(text) <= limit:
+        return text
+    suffix = "\n\n" + href(source, "Читать целиком в VK →")
+    budget = limit - utf16_length(suffix) - len("</a>")
+    result, size, in_link = [], 0, False
+    for match in _HTML_TOKEN.finditer(text):
+        token = match[0]
+        size += utf16_length(token)
+        if size > budget:
+            break
+        result.append(token)
+        if token.startswith("<a "):
+            in_link = True
+        elif token == "</a>":
+            in_link = False
+    return "".join(result) + ("</a>" if in_link else "") + suffix

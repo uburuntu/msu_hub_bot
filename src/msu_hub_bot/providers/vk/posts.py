@@ -1,79 +1,104 @@
+"""Render the supported wall subset; unavailable objects retain their source link."""
+
 from __future__ import annotations
 
 import re
 from collections import defaultdict
-from enum import IntEnum, auto
-from operator import itemgetter
-from pathlib import Path
-from typing import Final, List, Tuple, Iterable
+from html import escape
 
-from jinja2 import Environment, FileSystemLoader
+from pydantic import ValidationError
 
-from msu_hub_bot.utils import PriorityQueue, megabytes, prettify_bytes, prettify_duration
 from msu_hub_bot.providers.vk.api import VkApi
-from msu_hub_bot.providers.vk.utils import escape_symbols as e, href, prepare_vk_text
-
-env = Environment(
-    loader=FileSystemLoader(str(Path(__file__).parent / "templates")),
-    trim_blocks=True,
-    lstrip_blocks=True,
-    autoescape=True,
-    auto_reload=False,
+from msu_hub_bot.providers.vk.models import (
+    Album,
+    Audio,
+    Cards,
+    Document,
+    Entity,
+    Event,
+    Image,
+    Link,
+    Market,
+    MarketAlbum,
+    Page,
+    Photo,
+    Poll,
+    Post,
+    Video,
+    Wall,
 )
-env.filters["prepare_vk_text"] = prepare_vk_text
+from msu_hub_bot.providers.vk.utils import bounded_html, href, prepare_vk_text, safe_url
+from msu_hub_bot.utils import prettify_bytes, prettify_duration
 
-post_template = env.get_template("post.html")
+
+def best_photo(photo: Photo | None) -> str:
+    if photo is None:
+        return ""
+    images = photo.sizes + photo.images + ([photo.orig_photo] if photo.orig_photo else [])
+    return best_image(images)
+
+
+def best_image(images: list[Image]) -> str:
+    candidates = [
+        image
+        for image in images
+        if safe_url(image.url or image.src, media=True)
+        and image.width + image.height <= 10_000
+        and (not image.width or not image.height or max(image.width, image.height) <= 20 * min(image.width, image.height))
+    ]
+    if not candidates:
+        return ""
+    image = max(candidates, key=lambda item: item.width * item.height)
+    return image.url or image.src
 
 
 class VkPost:
-    """
-    VK Doc: https://vk.com/dev/objects/post
-    """
+    pattern_vk_post = re.compile(
+        r"(?:^|\s)(?:https?://)?(?:m\.|www\.)?vk\.(?:com|ru)/(?:[\w]+\?w=)?wall(-?[1-9][0-9]*_[1-9][0-9]*)(?![0-9])", re.U
+    )
 
-    pattern_vk_post = re.compile(r"(?:^|[\s])(?:http[s]?://)?(?:m.)?vk\.com/(?:[\w\d_]+\?w=)?wall(-?[0-9]+_[0-9]+)", re.U)
-
-    def __init__(self, post: dict, extended: dict):
-        self.post = post
-        self.extended = extended
-
-        self.is_repost = "copy_history" in self.post
-        self.repost = self.is_repost and VkPost(self.post["copy_history"][0], extended)
-
-        self.attachments, self.photos_urls, self.gifs_urls, self.web_preview_pq = self.attachments_handle()
+    def __init__(self, post: Post | dict[str, object], extended: dict[int, Entity] | None = None) -> None:
+        self.post = Post.model_validate(post)
+        self.extended = extended or {}
+        self.repost = VkPost(self.post.copy_history[0], self.extended) if self.post.copy_history else None
+        self.is_repost = self.repost is not None
+        self.attachments, self.photos_urls, self.gifs_urls, self.previews = self.attachments_handle()
 
     @property
     def id(self) -> int:
-        return self.post["id"]
+        return self.post.id
 
     @property
     def owner_id(self) -> int:
-        return self.post["owner_id"]
+        return self.post.owner_id
 
     @property
     def date(self) -> int:
-        return self.post["date"]
+        return self.post.date
 
     @property
     def text(self) -> str:
-        return self.post["text"]
+        return self.post.text
 
     @property
     def body_text(self) -> str:
-        return self.repost.text if self.is_repost else self.text
+        return self.repost.text if self.repost else self.text
 
     @property
     def url(self) -> str:
         return f"https://vk.com/wall{self.owner_id}_{self.id}"
 
-    def _get_url(self, uid: int) -> str:
-        screen_name = self.extended[uid].get("screen_name", "")
-        return f"https://vk.com/{screen_name}"
+    @staticmethod
+    def _get_url(uid: int) -> str:
+        return f"https://vk.com/{'id' if uid > 0 else 'club'}{abs(uid)}"
 
     def _get_name(self, uid: int) -> str:
-        entity = self.extended[uid]
-        if uid > 0:
-            return entity["first_name"] + " " + entity["last_name"]
-        return entity["name"]
+        entity = self.extended.get(uid)
+        if entity:
+            name = entity.name if uid < 0 else f"{entity.first_name} {entity.last_name}".strip()
+            if name:
+                return name
+        return ("Пользователь " if uid > 0 else "Группа ") + str(abs(uid))
 
     @property
     def owner_url(self) -> str:
@@ -84,246 +109,154 @@ class VkPost:
         return self._get_name(self.owner_id)
 
     def header(self, with_header: bool) -> str:
-        if self.is_repost:
+        if self.repost:
             source = "пользователя" if self.repost.owner_id > 0 else "из группы"
-            return f"📢 {href(self.url, 'Репост')} {source} {href(self.repost.owner_url, e(self.repost.owner_name))}:"
+            return f"📢 {href(self.url, 'Репост')} {source} {href(self.repost.owner_url, self.repost.owner_name)}:"
         if with_header:
             source = "пользователя" if self.owner_id > 0 else "в группе"
-            return f"📋 {href(self.url, 'Пост')} {source} {href(self.owner_url, e(self.owner_name))}:"
+            return f"📋 {href(self.url, 'Пост')} {source} {href(self.owner_url, self.owner_name)}:"
         return ""
 
     @classmethod
-    async def from_api_by_id(cls, api: VkApi, posts: str) -> List[VkPost]:
-        # Returns list of VkPost objects by list of {owner_id}_{post_id} ids joined by comma
+    async def from_api_by_id(cls, api: VkApi, posts: str) -> list[VkPost]:
         items, extended = await api.get_wall_post(posts)
         return [cls(item, extended) for item in items]
 
     @classmethod
-    async def from_api_wall(cls, api: VkApi, owner_id: int, count: int = None) -> List[VkPost]:
+    async def from_api_wall(cls, api: VkApi, owner_id: int, count: int | None = None) -> list[VkPost]:
         items, extended = await api.get_wall(owner_id, count)
         return [cls(item, extended) for item in items]
 
     @classmethod
-    async def from_api_wall_last_post(cls, api: VkApi, owner_id: int) -> VkPost:
-        # Skips pinned post and returns last post
-        items, extended = await api.get_wall(owner_id, count=2)
-        return sorted([cls(item, extended) for item in items], key=lambda x: x.date, reverse=True)[0]
-
-    @classmethod
-    async def from_api_newsfeed(cls, api: VkApi, owner_ids: Iterable[int], from_ts: int = 0) -> List[VkPost]:
-        items, extended = await api.get_newsfeed(owner_ids, from_ts)
-        for d in items:
-            d["id"] = d["post_id"]
-            d["owner_id"] = d["source_id"]
-        return [cls(item, extended) for item in items]
-
-    @classmethod
-    def from_response(cls, response: dict) -> List[VkPost]:
-        extended = VkApi.extract_extended(response)
-        posts = [cls(item, extended) for item in response["items"]]
-        return posts
-
-    @staticmethod
-    def postprocess_text(text: str) -> str:
-        return text.strip().replace("\n ", "\n")
+    def from_response(cls, response: object) -> list[VkPost]:
+        """Offline parsing; live callers must use the API's public-source checks."""
+        wall = Wall.model_validate(response)
+        return [cls(item, wall.extended) for item in wall.items]
 
     def render(self, with_header: bool = True) -> str:
-        result = post_template.render(
-            post=self,
-            with_header=with_header,
-        )
-        return self.postprocess_text(result)
+        parts = [prepare_vk_text(self.text)] if self.repost and self.text else []
+        parts.extend([self.header(with_header), prepare_vk_text(self.body_text), self.attachments])
+        text = "\n\n".join(part.strip() for part in parts if part.strip())
+        return bounded_html(text or href(self.url, "Открыть запись в VK"), self.url)
 
-    def for_publish(self, with_header: bool = True, with_webpreview: bool = True) -> Tuple[str, str, list, list]:
-        max_media_count: Final[int] = 10
-
+    def for_publish(self, with_header: bool = True, with_webpreview: bool = True) -> tuple[str, str, list[str], list[str]]:
         text = self.render(with_header)
-        photos_urls, gifs_urls = self.photos_urls[:max_media_count], self.gifs_urls[:max_media_count]
-
+        photos = list(dict.fromkeys(self.photos_urls))[:10]
+        videos = list(dict.fromkeys(self.gifs_urls))[: 10 - len(photos)]
         if not with_webpreview:
-            return text, "", photos_urls, gifs_urls
+            return text, "", photos, videos
+        if len(photos) + len(videos) == 1:
+            return text, (photos or videos)[0], [], []
+        priority, preview = min(self.previews, default=(99, ""))
+        if priority > 5 and photos + videos:
+            preview = ""
+        return text, preview, photos, videos
 
-        if text:
-            if len(photos_urls) + len(gifs_urls) == 1:
-                url = photos_urls[0] if photos_urls else gifs_urls[0]
-                self.web_preview_pq.put(self.PreviewPriority.media, url)
-                photos_urls, gifs_urls = [], []
+    def attachments_handle(self) -> tuple[str, list[str], list[str], list[tuple[int, str]]]:
+        groups: dict[str, list[str]] = defaultdict(list)
+        photos: list[str] = []
+        videos: list[str] = []
+        previews: list[tuple[int, str]] = []
+        unsupported = False
+        raw_items = (self.repost.post.attachments if self.repost else []) + self.post.attachments
 
-        web_preview, priority = self.web_preview_pq.head_with_priority(default="")
-        if priority > self.PreviewPriority.low_priority:
-            # Exclude low-priority previews if have media
-            if len(photos_urls) + len(gifs_urls) > 1:
-                web_preview = ""
+        def preview(priority: int, url: str) -> None:
+            if valid := safe_url(url):
+                previews.append((priority, valid))
 
-        return text, web_preview, photos_urls, gifs_urls
-
-    class PreviewPriority(IntEnum):
-        media = auto()
-        link = auto()
-        video = auto()
-        docs = auto()
-        low_priority = auto()
-        link_photo = auto()
-        album_photo = auto()
-        market_photo = auto()
-        market_album_photo = auto()
-        poll_photo = auto()
-
-    def attachments_handle(self):
-        """
-        VK Doc: https://vk.com/dev/objects/attachments_w
-        """
-        attachments_raw = self.post.get("copy_history", [{}])[0].get("attachments", []) + self.post.get("attachments", [])
-
-        attachments_by_type = defaultdict(list)
-        for attachment in attachments_raw:
-            attachments_by_type[attachment["type"]].append(attachment[attachment["type"]])
-
-        result_text, web_preview_pq = "", PriorityQueue()
-        photos_urls, gifs_urls = [], []
-
-        if attachments := attachments_by_type.get("photo"):
-            photo_sizes_priority = dict(z=2, y=1, x=3, m=4, s=5, r=6, q=7, p=8, o=9)
-            for attachment in attachments:
-                url = min(attachment["sizes"], key=lambda x: photo_sizes_priority.get(x["type"], 10))["url"]
-                photos_urls.append(url)
-
-        for attachment_type in ("posted_photo", "graffiti", "app"):
-            if attachments := attachments_by_type.get(attachment_type):
-                for attachment in attachments:
-                    url = None
-                    for k, v in attachment.items():
-                        if k.startswith("photo_"):
-                            url = v
-                    if url:
-                        photos_urls.append(url)
-
-        if attachments := attachments_by_type.get("video"):
-            result_text += "\n— Видео:\n"
-            for attachment in attachments:
-                if "player" in attachment:
-                    url = attachment["player"]
-                else:
-                    owner_id, video_id = attachment["owner_id"], attachment["id"]
-                    url = f"https://vk.com/video{owner_id}_{video_id}"
-                title, duration = attachment["title"], prettify_duration(attachment["duration"])
-                result_text += f"{href(url, title)}, {duration}\n"
-                web_preview_pq.put(self.PreviewPriority.video, url)
-
-        if attachments := attachments_by_type.get("audio"):
-            result_text += "\n— Аудио:\n"
-            for attachment in attachments:
-                artist, title = attachment["artist"], attachment["title"]
-                result_text += f"{e(artist)} — {e(title)}\n"
-
-        if attachments := attachments_by_type.get("doc"):
-            doc_text = "\n— Приложени" + ("я" if len(attachments) > 1 else "е") + ":\n"
-            for attachment in attachments:
-                url, title, size = attachment["url"], attachment["title"], prettify_bytes(attachment["size"])
-                if attachment["ext"] in ("gif", "mp4") and attachment["size"] < megabytes(20):
-                    gifs_urls.append(url)
-                elif attachment["ext"] in ("jpg", "jpeg", "png") and attachment["size"] < megabytes(5):
-                    photos_urls.append(url)
-                else:
-                    doc_text += f"{href(url, title)}, {size}\n"
-                    web_preview_pq.put(self.PreviewPriority.docs, url)
-            result_text += doc_text if doc_text.count("\n") > 2 else ""
-
-        if attachments := attachments_by_type.get("link"):
-            result_text += "\n— Ссылк" + ("и" if len(attachments) > 1 else "а") + ":\n"
-            for attachment in attachments:
-                url, title = attachment["url"].replace("https://m.vk.com", "https://vk.com"), attachment["title"]
-                result_text += f"{href(url, title)}\n"
-                if photo := attachment.get("photo"):
-                    photo_url = max(photo["sizes"], key=itemgetter("width")).get("url")
-                    web_preview_pq.put(self.PreviewPriority.link_photo, photo_url)
-                web_preview_pq.put(self.PreviewPriority.link, url)
-
-        if attachments := attachments_by_type.get("note"):
-            result_text += "\n— Заметк" + ("и" if len(attachments) > 1 else "а") + ":\n"
-            for attachment in attachments:
-                url, title = attachment["view_url"], attachment["title"]
-                result_text += f"{href(url, title)}\n"
-
-        if attachments := attachments_by_type.get("poll"):
-            result_text += "\n— Опрос" + ("ы" if len(attachments) > 1 else "") + ":\n"
-            for attachment in attachments:
-                owner_id, poll_id = attachment["owner_id"], attachment["id"]
-                question, votes = attachment["question"], attachment["votes"]
-                url = f"https://vk.com/poll{owner_id}_{poll_id}"
-                result_text += f"{href(url, question)}, голосов: {votes}\n"
-                for answer in attachment["answers"]:
-                    text, votes = answer["text"], answer["votes"]
-                    result_text += f"  → {e(text)}, голосов: {votes}\n"
-
-                if photo := attachment.get("photo"):
-                    photo_url = max(photo["images"], key=itemgetter("width")).get("url")
-                    web_preview_pq.put(self.PreviewPriority.poll_photo, photo_url)
-
-        if attachments := attachments_by_type.get("page"):
-            result_text += "\n— Вики-страниц" + ("ы" if len(attachments) > 1 else "а") + ":\n"
-            for attachment in attachments:
-                url, title = attachment["view_url"], attachment["title"]
-                result_text += f"{href(url, title)}\n"
-
-        if attachments := attachments_by_type.get("album"):
-            result_text += "\n— Альбом" + ("ы" if len(attachments) > 1 else "") + ":\n"
-            for attachment in attachments:
-                owner_id, album_id = attachment["owner_id"], attachment["id"]
-                url = f"https://vk.com/album{owner_id}_{album_id}"
-                title, size = attachment["title"], attachment["size"]
-                result_text += f"{href(url, title)}, {size} фото\n"
-                if photo := attachment.get("thumb"):
-                    photo_url = max(photo["sizes"], key=itemgetter("width")).get("url")
-                    web_preview_pq.put(self.PreviewPriority.album_photo, photo_url)
-
-        if _attachments := attachments_by_type.get("photos_list"):
-            pass
-
-        if attachments := attachments_by_type.get("market"):
-            market_text = "\n— Товар" + ("ы" if len(attachments) > 1 else "") + ":\n"
-            for attachment in attachments:
-                if attachment is False:
-                    continue
-                title, price = attachment["title"], attachment["price"]["text"]
-                owner_id, product_id = attachment["owner_id"], attachment["id"]
-                url = f"https://vk.com/product{owner_id}_{product_id}"
-                market_text += f"{href(url, title)}, {price}\n"
-                if photo_url := attachment.get("thumb_photo"):
-                    web_preview_pq.put(self.PreviewPriority.market_photo, photo_url)
-            result_text += market_text if market_text.count("\n") > 2 else ""
-
-        if attachments := attachments_by_type.get("market_album"):
-            result_text += "\n— Подборк" + ("и" if len(attachments) > 1 else "а") + " товаров:\n"
-            for attachment in attachments:
-                title, count = attachment["title"], attachment["count"]
-                owner_id, album_id = attachment["owner_id"], attachment["id"]
-                url = f"https://vk.com/market{owner_id}?section=album_{album_id}"
-                result_text += f"{href(url, title)}, {count} шт\n"
-                if photo := attachment.get("photo"):
-                    photo_url = max(photo["sizes"], key=itemgetter("width")).get("url")
-                    web_preview_pq.put(self.PreviewPriority.market_album_photo, photo_url)
-
-        if attachments := attachments_by_type.get("pretty_cards"):
-            result_text += "\n— Карточки:\n"
-            for attachment in attachments:
-                for card in attachment:
-                    url, title, price = card["link_url"], card["title"], card["price"]
-                    result_text += f"{href(url, title)}, {price}\n"
-
-        if attachments := attachments_by_type.get("event"):
-            result_text += "\n— Встреч" + ("и" if len(attachments) > 1 else "а") + ":\n"
-            for attachment in attachments:
-                event_id = -attachment["id"]
-                url, title = self._get_url(event_id), self._get_name(event_id)
-                result_text += f"{href(url, title)}\n"
-
-        if copy_right := self.post.get("copyright"):
-            url, title = copy_right["link"], copy_right["name"]
-            result_text += f"\n— Источник: {href(url, title)}\n"
-
-        if signer_id := self.post.get("signer_id"):
-            url, title = self._get_url(signer_id), self._get_name(signer_id)
-            result_text += f"\n— Автор: {href(url, title)}\n"
-
-        return result_text, photos_urls, gifs_urls, web_preview_pq
+        for raw in raw_items:
+            kind = raw.get("type")
+            data = raw.get(kind) if isinstance(kind, str) else None
+            try:
+                match kind:
+                    case "photo":
+                        url = best_photo(Photo.model_validate(data))
+                        if url:
+                            photos.append(url)
+                        else:
+                            unsupported = True
+                    case "posted_photo" | "graffiti" | "app":
+                        if not isinstance(data, dict):
+                            unsupported = True
+                            continue
+                        candidates = [
+                            (int(k.removeprefix("photo_")), v)
+                            for k, v in data.items()
+                            if isinstance(k, str) and k.removeprefix("photo_").isdigit() and isinstance(v, str) and safe_url(v, media=True)
+                        ]
+                        if candidates:
+                            photos.append(max(candidates)[1])
+                        else:
+                            unsupported = True
+                    case "video" | "clip":
+                        video = Video.model_validate(data)
+                        if video.is_private:
+                            unsupported = True
+                            continue
+                        url = f"https://vk.com/{kind}{video.owner_id}_{video.id}"
+                        groups["Видео"].append(f"{href(url, video.title)}, {prettify_duration(video.duration)}")
+                        preview(3, url)
+                    case "audio":
+                        audio = Audio.model_validate(data)
+                        groups["Аудио"].append(f"{escape(audio.artist)} — {escape(audio.title)}")
+                    case "doc":
+                        doc = Document.model_validate(data)
+                        url = safe_url(doc.url, media=True)
+                        if not doc.is_unsafe and url and doc.ext.lower() in {"gif", "mp4"} and 0 < doc.size < 20 * 1024 * 1024:
+                            videos.append(url)
+                        elif not doc.is_unsafe and url and doc.ext.lower() in {"jpg", "jpeg", "png"} and 0 < doc.size < 5 * 1024 * 1024:
+                            photos.append(url)
+                        else:
+                            url = f"https://vk.com/doc{doc.owner_id}_{doc.id}"
+                            groups["Приложения"].append(f"{href(url, doc.title)}, {prettify_bytes(doc.size)}")
+                            preview(4, url)
+                    case "link":
+                        link = Link.model_validate(data)
+                        groups["Ссылки"].append(href(link.url, link.title))
+                        preview(2, link.url)
+                        preview(6, best_photo(link.photo))
+                    case "note" | "page":
+                        page = Page.model_validate(data)
+                        groups["Заметки" if kind == "note" else "Вики-страницы"].append(href(page.view_url, page.title))
+                    case "poll":
+                        poll = Poll.model_validate(data)
+                        url = f"https://vk.com/poll{poll.owner_id}_{poll.id}"
+                        lines = [f"{href(url, poll.question)}, голосов: {poll.votes}"]
+                        lines.extend(f"  → {escape(answer.text)}, голосов: {answer.votes}" for answer in poll.answers)
+                        groups["Опросы"].append("\n".join(lines))
+                        preview(10, best_photo(poll.photo))
+                    case "album":
+                        album = Album.model_validate(data)
+                        groups["Альбомы"].append(
+                            f"{href(f'https://vk.com/album{album.owner_id}_{album.id}', album.title)}, {album.size} фото"
+                        )
+                        preview(7, best_photo(album.thumb))
+                    case "market":
+                        market = Market.model_validate(data)
+                        groups["Товары"].append(
+                            f"{href(f'https://vk.com/product{market.owner_id}_{market.id}', market.title)}, {escape(market.price.text)}"
+                        )
+                        preview(8, safe_url(market.thumb_photo, media=True))
+                    case "market_album":
+                        collection = MarketAlbum.model_validate(data)
+                        url = f"https://vk.com/market{collection.owner_id}?section=album_{collection.id}"
+                        groups["Подборки товаров"].append(f"{href(url, collection.title)}, {collection.count} шт")
+                        preview(9, best_photo(collection.photo))
+                    case "pretty_cards":
+                        cards = Cards.model_validate(data)
+                        groups["Карточки"].extend(f"{href(card.link_url, card.title)}, {escape(card.price)}" for card in cards.cards)
+                    case "event":
+                        event = Event.model_validate(data)
+                        groups["Встречи"].append(href(self._get_url(-event.id), self._get_name(-event.id)))
+                    case _:
+                        unsupported = True
+            except ValidationError, ValueError, TypeError:
+                unsupported = True
+        result = "\n\n".join(f"— {title}:\n" + "\n".join(lines) for title, lines in groups.items())
+        if copyright := self.post.copyright:
+            result += "\n\n— Источник: " + href(copyright.link, copyright.name)
+        if signer := self.post.signer_id:
+            result += "\n\n— Автор: " + href(self._get_url(signer), self._get_name(signer))
+        if unsupported or len(photos) + len(videos) > 10:
+            result += "\n\n" + href(self.url, "Все вложения — в VK →")
+        return result, photos, videos, previews
