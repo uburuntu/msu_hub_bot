@@ -246,3 +246,36 @@ it("preserves reminder and repost drafts while switching tools", async () => {
     expect(screen.getByLabelText("Источник VK")).toHaveValue("club123"),
   );
 });
+
+it("keeps a newly saved source when an older refresh returns late", async () => {
+  const api = new CommunityApi("init");
+  let resolveOld:
+    | ((value: { items: Repost[]; automatic_posting: false }) => void)
+    | undefined;
+  const staleRequest = new Promise<{
+    items: Repost[];
+    automatic_posting: false;
+  }>((resolve) => {
+    resolveOld = resolve;
+  });
+  vi.spyOn(api, "reposts")
+    .mockResolvedValueOnce({ items: [], automatic_posting: false })
+    .mockImplementationOnce(() => staleRequest);
+  vi.spyOn(api, "createRepost").mockResolvedValue(repost);
+  const user = userEvent.setup();
+  render(<RepostsPage api={api} community={community} />);
+  await screen.findByText(/Добавьте первый источник/);
+  await user.click(screen.getByRole("button", { name: "Обновить источники" }));
+  await user.type(
+    screen.getByLabelText("Источник VK"),
+    "https://vk.com/club123",
+  );
+  await user.click(screen.getByRole("button", { name: "Добавить на паузе" }));
+  await screen.findByRole("button", { name: "Настроить Новости" });
+  resolveOld!({ items: [], automatic_posting: false });
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Настроить Новости" }),
+    ).toBeVisible(),
+  );
+});

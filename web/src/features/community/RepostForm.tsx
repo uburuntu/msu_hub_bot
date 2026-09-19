@@ -86,6 +86,17 @@ export function RepostForm({
     event.preventDefault();
     if (busy || fresh) return;
     setError("");
+    if (
+      [draft.include_keywords, draft.exclude_keywords].some(
+        (entries) =>
+          entries.length > 20 || entries.some((word) => word.length > 80),
+      )
+    ) {
+      setError(
+        "В каждом фильтре — до 20 слов или фраз, до 80 знаков в каждой.",
+      );
+      return;
+    }
     working(true);
     try {
       let result: Repost;
@@ -138,9 +149,9 @@ export function RepostForm({
             id={`${id}-source`}
             value={source}
             onChange={(event) => setSource(event.target.value)}
-            placeholder="https://vk.com/club123 или −123"
+            placeholder="https://vk.com/club123 или -123"
             required
-            maxLength={512}
+            maxLength={256}
             readOnly={!!base}
             autoComplete="off"
             spellCheck={false}
@@ -153,7 +164,7 @@ export function RepostForm({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Новости факультета"
-            maxLength={120}
+            maxLength={160}
           />
         </label>
         <label className="check-field">
@@ -186,7 +197,7 @@ export function RepostForm({
               value={include}
               onChange={(event) => setInclude(event.target.value)}
               placeholder="лекция, встреча, регистрация"
-              maxLength={1000}
+              maxLength={1800}
             />
           </label>
           <label>
@@ -195,7 +206,7 @@ export function RepostForm({
               value={exclude}
               onChange={(event) => setExclude(event.target.value)}
               placeholder="реклама, конкурс"
-              maxLength={1000}
+              maxLength={1800}
             />
           </label>
           <p className="field-hint">

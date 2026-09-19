@@ -111,7 +111,9 @@ export function GamesPage({
               </p>
             </section>
           </div>
-          <p className="tool-footnote">{state.data.retention_note}</p>
+          <p className="tool-footnote">
+            Игры и рейтинг всего чата, включая темы. {state.data.retention_note}
+          </p>
         </>
       )}
     </ToolFrame>

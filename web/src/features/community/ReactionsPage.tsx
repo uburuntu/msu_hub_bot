@@ -74,7 +74,9 @@ export function ReactionsPage({
               />
             </section>
           </div>
-          <p className="tool-footnote">{state.data.coverage_note}</p>
+          <p className="tool-footnote">
+            Рейтинг всего чата, включая темы. {state.data.coverage_note}
+          </p>
           <button className="button secondary" onClick={state.refresh}>
             Обновить реакции
           </button>

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { ApiClient, ApiError, errorMessage } from "../../platform/api";
 import type {
@@ -6,6 +6,7 @@ import type {
   Reminder,
   ReminderDraft,
   Session,
+  Recurrence,
 } from "../../platform/types";
 import { Icon } from "../../ui/Icon";
 import { dateInput, dueLabel, tomorrowSchedule, zoneLabel } from "./time";
@@ -30,6 +31,15 @@ export function ReminderForm({
   const [timezone, setTimezone] = useState(
     item?.timezone ?? session.default_timezone,
   );
+  const [repeat, setRepeat] = useState<"none" | Recurrence["kind"]>(
+    item?.recurrence?.kind ?? "none",
+  );
+  const [interval, setInterval] = useState(
+    item?.recurrence?.kind === "interval"
+      ? String(item.recurrence.interval_minutes)
+      : "60",
+  );
+  const previousDefault = useRef(session.default_timezone);
   const [when, setWhen] = useState(item ? "date" : "1h");
   const [date, setDate] = useState(
     item ? dateInput(item.due_at, item.timezone) : "",
@@ -40,6 +50,16 @@ export function ReminderForm({
   const [stale, setStale] = useState<Reminder | null>(null);
   const [base, setBase] = useState(item);
   const pending = useRef<CreateReminder | null>(null);
+  useEffect(() => {
+    if (
+      !item &&
+      !text &&
+      !pending.current &&
+      timezone === previousDefault.current
+    )
+      setTimezone(session.default_timezone);
+    previousDefault.current = session.default_timezone;
+  }, [session.default_timezone, item, text, timezone]);
   const clockOffset = useRef(Date.parse(session.now) - Date.now());
   const textarea = useRef<HTMLTextAreaElement>(null);
   const locked = busy || uncertain;
@@ -77,7 +97,16 @@ export function ReminderForm({
         setError("Выберите дату и время.");
         return;
       }
-      draft = { text: text.trim(), schedule, timezone };
+      let recurrence: Recurrence | null = null;
+      if (repeat === "interval") {
+        const minutes = Number(interval);
+        if (!Number.isInteger(minutes) || minutes < 15 || minutes > 525600) {
+          setError("Интервал — целое число минут от 15 до 525600.");
+          return;
+        }
+        recurrence = { kind: "interval", interval_minutes: minutes };
+      } else if (repeat !== "none") recurrence = { kind: repeat };
+      draft = { text: text.trim(), schedule, timezone, recurrence };
     } catch {
       setError("Проверьте часовой пояс. Например, Europe/Moscow.");
       return;
@@ -102,6 +131,8 @@ export function ReminderForm({
         setText("");
         setDate("");
         setWhen("1h");
+        setRepeat("none");
+        setTimezone(session.default_timezone);
       }
       onSaved(result);
     } catch (caught) {
@@ -224,6 +255,42 @@ export function ReminderForm({
         <p className="field-hint" id={`${id}-zone-hint`}>
           Время — по выбранному часовому поясу.
         </p>
+        <label className="recurrence-field">
+          Повторять
+          <select
+            value={repeat}
+            onChange={(event) => setRepeat(event.target.value as typeof repeat)}
+          >
+            <option value="none">Один раз</option>
+            <option value="daily">Каждый день</option>
+            <option value="weekly">Каждую неделю</option>
+            <option value="interval">Через интервал</option>
+          </select>
+        </label>
+        {repeat === "interval" && (
+          <label className="recurrence-field">
+            Интервал, минут
+            <input
+              type="number"
+              inputMode="numeric"
+              min={15}
+              max={525600}
+              step={1}
+              value={interval}
+              onChange={(event) => setInterval(event.target.value)}
+              required
+            />
+          </label>
+        )}
+        {repeat !== "none" && (
+          <p className="field-hint">
+            {repeat === "interval"
+              ? "Первое напоминание — в выбранное время, следующие — через указанный интервал."
+              : "Повтор — в то же местное время по выбранному часовому поясу."}{" "}
+            Если бот был недоступен, он напомнит один раз и продолжит
+            расписание.
+          </p>
+        )}
       </fieldset>
       <div className="destination">
         <span className="destination-icon">

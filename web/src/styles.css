@@ -1745,7 +1745,7 @@ summary:focus-visible {
     grid-template-columns: 1fr;
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 800px) {
   .mobile-navigation {
     display: block;
     position: sticky;

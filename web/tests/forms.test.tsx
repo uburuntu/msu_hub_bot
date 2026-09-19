@@ -126,3 +126,69 @@ it("retains partially typed date and text when unrelated parent content refreshe
   );
   expect(screen.getByLabelText("Дата и время")).toHaveValue("2030-05-12T15:45");
 });
+
+it("submits daily recurrence and preserves it during uncertain retries", async () => {
+  const api = new ApiClient("init");
+  const create = vi
+    .spyOn(api, "create")
+    .mockRejectedValueOnce(new ApiError("network", "Связь прервалась"))
+    .mockResolvedValueOnce(reminder({ recurrence: { kind: "daily" } }));
+  const user = userEvent.setup();
+  render(<ReminderForm api={api} session={session} onSaved={vi.fn()} />);
+  await user.type(screen.getByLabelText("О чём напомнить?"), "Полить цветы");
+  await user.selectOptions(screen.getByLabelText("Повторять"), "daily");
+  await user.click(screen.getByRole("button", { name: "Напомнить мне" }));
+  await screen.findByText("Возможно, уже сохранено.");
+  expect(screen.getByLabelText("Повторять")).toBeDisabled();
+  await user.click(
+    screen.getByRole("button", { name: "Проверить и сохранить" }),
+  );
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+  expect(create.mock.calls[0]![0].recurrence).toEqual({ kind: "daily" });
+  expect(create.mock.calls[0]![0]).toEqual(create.mock.calls[1]![0]);
+});
+
+it("explicitly clears a repeated schedule when changed to one-off", async () => {
+  const api = new ApiClient("init");
+  const edit = vi.spyOn(api, "reschedule").mockResolvedValue(reminder());
+  const user = userEvent.setup();
+  render(
+    <ReminderForm
+      api={api}
+      session={session}
+      item={reminder({ recurrence: { kind: "weekly" } })}
+      onSaved={vi.fn()}
+    />,
+  );
+  expect(screen.getByLabelText("Повторять")).toHaveValue("weekly");
+  await user.selectOptions(screen.getByLabelText("Повторять"), "none");
+  await user.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+  await waitFor(() => expect(edit).toHaveBeenCalledOnce());
+  expect(edit.mock.calls[0]![1].recurrence).toBeNull();
+});
+
+it("uses saved timezone for a pristine composer but leaves existing drafts unchanged", async () => {
+  const api = new ApiClient("init"),
+    saved = vi.fn();
+  const user = userEvent.setup();
+  const view = render(
+    <ReminderForm api={api} session={session} onSaved={saved} />,
+  );
+  view.rerender(
+    <ReminderForm
+      api={api}
+      session={{ ...session, default_timezone: "UTC" }}
+      onSaved={saved}
+    />,
+  );
+  expect(screen.getByLabelText("Часовой пояс")).toHaveValue("UTC");
+  await user.type(screen.getByLabelText("О чём напомнить?"), "Черновик");
+  view.rerender(
+    <ReminderForm
+      api={api}
+      session={{ ...session, default_timezone: "Europe/London" }}
+      onSaved={saved}
+    />,
+  );
+  expect(screen.getByLabelText("Часовой пояс")).toHaveValue("UTC");
+});

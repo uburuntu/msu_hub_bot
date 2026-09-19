@@ -49,10 +49,27 @@ export function ReminderCard({
         </span>
       </div>
       <p className="reminder-text">{item.text}</p>
+      {item.recurrence && (
+        <p className="recurrence-note">
+          <Icon name="refresh" size={14} />{" "}
+          {item.recurrence.kind === "daily"
+            ? "Каждый день"
+            : item.recurrence.kind === "weekly"
+              ? "Каждую неделю"
+              : `Каждые ${item.recurrence.interval_minutes} мин`}
+          {item.occurrences > 0 ? ` · Доставлено: ${item.occurrences}` : ""}
+          {item.skipped_occurrences > 0
+            ? ` · Пропуски объединены: ${item.skipped_occurrences}`
+            : ""}
+        </p>
+      )}
       {item.status === "uncertain" && (
         <p className="delivery-note">
           Telegram не подтвердил доставку. Сообщение могло прийти — проверьте
           чат перед повтором.
+          {item.recurrence
+            ? " Всё расписание приостановлено до вашей проверки."
+            : ""}
         </p>
       )}
       {item.status === "failed" && (

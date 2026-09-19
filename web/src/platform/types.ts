@@ -1,3 +1,8 @@
+export type Recurrence =
+  | { kind: "daily" }
+  | { kind: "weekly" }
+  | { kind: "interval"; interval_minutes: number };
+
 export type ReminderStatus =
   "pending" | "sending" | "uncertain" | "delivered" | "cancelled" | "failed";
 
@@ -17,6 +22,9 @@ export interface Reminder {
   delivered_at: string | null;
   failure: "rejected" | "rate_limit" | "uncertain" | null;
   destination_label?: string;
+  recurrence: Recurrence | null;
+  occurrences: number;
+  skipped_occurrences: number;
 }
 
 export interface Session {
@@ -35,6 +43,7 @@ export interface ReminderDraft {
   text: string;
   schedule: string;
   timezone: string;
+  recurrence?: Recurrence | null;
 }
 
 export interface CreateReminder extends ReminderDraft {

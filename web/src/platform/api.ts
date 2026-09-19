@@ -3,12 +3,29 @@ import type {
   Reminder,
   ReminderDraft,
   ReminderPage,
+  Recurrence,
   Session,
 } from "./types";
 
 import { ApiError } from "./errors";
 import { object, string, integer, stamp } from "./decode";
 export { ApiError } from "./errors";
+
+function recurrence(value: unknown): Recurrence | null {
+  if (value === null) return null;
+  const row = object(value);
+  if (row.kind === "daily" || row.kind === "weekly") return { kind: row.kind };
+  if (row.kind === "interval") {
+    const minutes = integer(row.interval_minutes);
+    if (minutes >= 15 && minutes <= 525600)
+      return { kind: "interval", interval_minutes: minutes };
+  }
+  throw new ApiError(
+    "protocol",
+    "Не удалось прочитать повтор напоминания.",
+    503,
+  );
+}
 
 function reminder(value: unknown): Reminder {
   const row = object(value);
@@ -47,6 +64,9 @@ function reminder(value: unknown): Reminder {
     timezone: string(row.timezone),
     status: status as Reminder["status"],
     attempts: integer(row.attempts),
+    recurrence: recurrence(row.recurrence),
+    occurrences: integer(row.occurrences),
+    skipped_occurrences: integer(row.skipped_occurrences),
     delivered_at: row.delivered_at === null ? null : stamp(row.delivered_at),
     failure: failure as Reminder["failure"],
     ...(row.destination_label === undefined
