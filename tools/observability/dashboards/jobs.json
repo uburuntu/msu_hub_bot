@@ -1,0 +1,187 @@
+{
+  "name": "Hub · Background workshop",
+  "slug": "bot-jobs",
+  "definition": {
+    "kind": "Dashboard",
+    "metadata": {
+      "name": "Hub · Background workshop",
+      "project": "PROJECT_NAME"
+    },
+    "spec": {
+      "display": {
+        "name": "Hub · Background workshop",
+        "description": "Durable work by feature: queue health, acknowledged outcomes and useful failure traces. Snapshot freshness distinguishes empty from unavailable."
+      },
+      "datasources": {},
+      "variables": [],
+      "panels": {
+        "snapshot": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Queue snapshot age",
+              "description": "Seconds since the worker last read queue state. Stale or missing evidence requires attention."
+            },
+            "plugin": {
+              "kind": "Values",
+              "spec": {
+                "format": {
+                  "unit": "seconds",
+                  "decimalPlaces": 0
+                },
+                "statusThresholds": {
+                  "warning": 60,
+                  "critical": 90
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT scalar_value AS seconds FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name = 'bot.feature_jobs.snapshot_age' ORDER BY recorded_timestamp DESC LIMIT 1"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "queues": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Waiting, running and held",
+              "description": "Latest count or age per feature/kind. Pending includes leased work; overdue excludes active leases. Old samples must not be read as current."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH latest AS (SELECT recorded_timestamp, metric_name, attributes->>'feature' AS feature, attributes->>'job.kind' AS kind, scalar_value, ROW_NUMBER() OVER (PARTITION BY metric_name, attributes->>'feature', attributes->>'job.kind' ORDER BY recorded_timestamp DESC) AS position FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name IN ('bot.feature_jobs.pending','bot.feature_jobs.held','bot.feature_jobs.leased','bot.feature_jobs.overdue','bot.feature_jobs.oldest_due')) SELECT feature,kind,metric_name AS signal,scalar_value AS value,EXTRACT(EPOCH FROM (now()-recorded_timestamp)) AS sample_age_seconds FROM latest WHERE position=1 ORDER BY feature,kind,signal"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "outcomes": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Acknowledged job outcomes",
+              "description": "Unsampled state acknowledgments. Retry, hold and expiry are distinct; an unavailable acknowledgment cannot be counted as complete."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "WITH streams AS (SELECT service_version,attributes->>'feature' AS feature,attributes->>'job.kind' AS kind,attributes->>'state' AS state,metric_increase(value,recorded_timestamp) AS n FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name='bot.feature_jobs.transitions' GROUP BY service_version,feature,kind,state) SELECT feature,kind,state,SUM(n) AS transitions FROM streams GROUP BY feature,kind,state HAVING SUM(n)>0 ORDER BY transitions DESC LIMIT 100"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "failures": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Recent job failures",
+              "description": "Retained failure logs, with useful trace links and safe reason/location. Payloads, document keys and lease tokens are not exported."
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {}
+            },
+            "queries": [
+              {
+                "kind": "NonTimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "LogfireNonTimeSeriesQuery",
+                    "spec": {
+                      "query": "SELECT date_trunc('second',start_timestamp) AS time_utc,attributes->>'feature' AS feature,attributes->>'job.kind' AS kind,attributes->>'job.attempt' AS attempt,attributes->>'outcome' AS outcome,attributes->>'error.reason' AS reason,attributes->>'code.file.path' AS source,trace_id,span_id FROM records WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND kind='log' AND span_name='bot.operation.failed' AND attributes->>'boundary'='job.run' ORDER BY start_timestamp DESC LIMIT 50"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "layouts": [
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Durable work",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0,
+                "y": 0,
+                "width": 6,
+                "height": 4,
+                "content": {
+                  "$ref": "#/spec/panels/snapshot"
+                }
+              },
+              {
+                "x": 6,
+                "y": 0,
+                "width": 18,
+                "height": 10,
+                "content": {
+                  "$ref": "#/spec/panels/queues"
+                }
+              },
+              {
+                "x": 0,
+                "y": 10,
+                "width": 24,
+                "height": 8,
+                "content": {
+                  "$ref": "#/spec/panels/outcomes"
+                }
+              },
+              {
+                "x": 0,
+                "y": 18,
+                "width": 24,
+                "height": 12,
+                "content": {
+                  "$ref": "#/spec/panels/failures"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "duration": "1h",
+      "refreshInterval": "60s"
+    }
+  }
+}
