@@ -8,7 +8,9 @@ counters. No job keys, scopes, payloads, lease tokens or user IDs become metric 
 The worker reads queue summaries every 30 seconds independently of delivery.
 Pending includes leased jobs; overdue excludes active leases. Held jobs require
 reconciliation. Oldest-due age measures waiting work, not execution time. Snapshot
-age distinguishes a healthy empty queue from a failed monitor; queue gauges stop
+age includes time since the last exported measurement, so a stopped bot or exporter
+cannot leave a fresh-looking value. It distinguishes a healthy empty queue from a
+failed monitor; queue gauges stop
 emitting after 90 seconds without a successful read. A monitoring outage never
 blocks a job or changes its state.
 

@@ -42,7 +42,7 @@
                   "plugin": {
                     "kind": "LogfireNonTimeSeriesQuery",
                     "spec": {
-                      "query": "SELECT scalar_value AS seconds FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name = 'bot.feature_jobs.snapshot_age' ORDER BY recorded_timestamp DESC LIMIT 1"
+                      "query": "SELECT scalar_value + GREATEST(0, EXTRACT(EPOCH FROM (now() - recorded_timestamp))) AS seconds FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name = 'bot.feature_jobs.snapshot_age' ORDER BY recorded_timestamp DESC LIMIT 1"
                     }
                   }
                 }

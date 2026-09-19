@@ -15,6 +15,7 @@ from msu_hub_bot.providers.exceptions import ExternalServiceError
 from msu_hub_bot.providers.moe import which_anime
 from msu_hub_bot.providers.other import porfirevich, imgur_upload, duckduckgo
 from msu_hub_bot.media.background import BackgroundRemovalError, remove_background
+from msu_hub_bot.media.limits import MAX_DOWNLOAD_BYTES
 from msu_hub_bot.execution.executor import TPExecutor
 from msu_hub_bot.telegram.media_jobs import DownloadUnavailable, run_downloaded
 from msu_hub_bot.providers.pdf import convert_to_pdf
@@ -242,7 +243,7 @@ async def process_topdf(message: Message, meta: MetaInfo) -> Message | bool:
 
     try:
         async with ChatActioner(message, ChatAction.UPLOAD_DOCUMENT):
-            file = await download(dest)
+            file = await download(dest, max_bytes=MAX_DOWNLOAD_BYTES)
             if file is None:
                 return await message.reply("Не удалось скачать файл. Попробуйте ещё раз.")
             with file:

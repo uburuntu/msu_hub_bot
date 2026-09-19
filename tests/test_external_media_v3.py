@@ -73,3 +73,28 @@ async def test_pdf_delivers_downloaded_bytes_with_the_document_filename(monkeypa
     assert isinstance(method.document, BufferedInputFile) and method.document.filename == "input.pdf"
     assert method.document.data == b"%PDF-synthetic"
     assert method.thumbnail is None
+
+
+async def test_pdf_unknown_size_is_stopped_while_streaming_before_conversion(monkeypatch):
+    from msu_hub_bot.telegram import files
+
+    bot = make_bot()
+    bot.session.download_bytes = b"123456789"
+    message = make_message(bot, document=dict(file_id="document", file_unique_id="id", file_name="input.txt"))
+    monkeypatch.setattr(externals, "MAX_DOWNLOAD_BYTES", 8)
+    convert = AsyncMock()
+    monkeypatch.setattr(externals, "convert_to_pdf", convert)
+    streams = []
+    bounded = files._BoundedDownload
+
+    def capture(limit):
+        stream = bounded(limit)
+        streams.append(stream)
+        return stream
+
+    monkeypatch.setattr(files, "_BoundedDownload", capture)
+    with pytest.raises(files.DownloadTooLarge):
+        await externals.process_topdf(message, MetaInfo(message))
+    convert.assert_not_awaited()
+    assert len(streams) == 1 and streams[0].closed
+    assert not any(isinstance(method, SendDocument) for method in bot.session.methods)

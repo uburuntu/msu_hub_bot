@@ -468,3 +468,30 @@ async def test_membership_event_with_stale_directory_chat_still_reaches_handler(
     assert await middleware(handler, event, {}) == "handled"
     handler.assert_awaited_once()
     rig.bot.edit_message_text.assert_awaited_once()
+
+
+async def test_automatic_pdf_unknown_size_stops_streaming_without_reply(monkeypatch):
+    from msu_hub_bot.telegram import files
+    from msu_hub_bot.telegram.middlewares import viewer as module
+    from telegram_helpers import make_bot, make_message
+
+    bot = make_bot()
+    bot.session.download_bytes = b"123456789"
+    viewer = ViewerMiddleware(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+    event = make_message(bot, document=dict(file_id="file", file_unique_id="unique", file_name="file.docx"))
+    monkeypatch.setattr(module, "MAX_DOWNLOAD_BYTES", 8)
+    convert = AsyncMock()
+    monkeypatch.setattr(module, "convert_to_pdf", convert)
+    streams = []
+    bounded = files._BoundedDownload
+
+    def capture(limit):
+        stream = bounded(limit)
+        streams.append(stream)
+        return stream
+
+    monkeypatch.setattr(files, "_BoundedDownload", capture)
+    await viewer.view(event, Settings())
+    convert.assert_not_awaited()
+    assert len(streams) == 1 and streams[0].closed
+    assert not any(method.__api_method__.startswith("send") for method in bot.session.methods)
