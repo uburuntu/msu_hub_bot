@@ -157,7 +157,7 @@ class VkPost:
         photos: list[str] = []
         videos: list[str] = []
         previews: list[tuple[int, str]] = []
-        unsupported = False
+        unsupported = len(self.post.copy_history) > 1 or bool(self.repost and self.repost.post.copy_history)
         raw_items = (self.repost.post.attachments if self.repost else []) + self.post.attachments
 
         def preview(priority: int, url: str) -> None:
@@ -165,6 +165,9 @@ class VkPost:
                 previews.append((priority, valid))
 
         for raw in raw_items:
+            if not isinstance(raw, dict):
+                unsupported = True
+                continue
             kind = raw.get("type")
             data = raw.get(kind) if isinstance(kind, str) else None
             try:

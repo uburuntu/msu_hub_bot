@@ -159,7 +159,7 @@ class Post(VkModel):
     owner_id: OwnerID
     date: int = Field(default=0, ge=0)
     text: str = Field(default="", max_length=100_000)
-    attachments: list[dict[str, object]] = Field(default_factory=list, max_length=100)
+    attachments: list[object] = Field(default_factory=list, max_length=100)
     copy_history: list["Post"] = Field(default_factory=list, max_length=10)
     friends_only: StrictInt | StrictBool = False
     is_deleted: StrictInt | StrictBool = False

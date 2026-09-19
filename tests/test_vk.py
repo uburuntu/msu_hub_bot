@@ -133,6 +133,8 @@ def test_attachment_rendering_escapes_all_user_fields_and_retains_source_fallbac
             attachment("photo", {"sizes": []}),
             attachment("market", False),
             {"type": "poll"},
+            None,
+            "invalid attachment",
         ]
     )
     rendered = parsed.render()
@@ -170,3 +172,23 @@ async def test_caption_budget_uses_utf16_not_python_character_count(monkeypatch)
     await publish.publish_vk_post(parsed, bot, -10)
     bot.send_super_message.assert_awaited_once()
     bot.send_super_message_prefer_album.assert_not_awaited()
+
+
+def test_multiple_copied_records_keep_original_link_for_remaining_content():
+    parsed = parse_post(
+        copy_history=[
+            {"id": 2, "owner_id": -20, "text": "First copied entry"},
+            {"id": 3, "owner_id": -30, "text": "Other copied entry"},
+        ]
+    )
+    assert "First copied entry" in parsed.render()
+    assert "Все вложения — в VK" in parsed.render()
+
+
+def test_untrusted_document_host_never_becomes_direct_media():
+    parsed = parse_post(
+        attachments=[attachment("doc", {"id": 1, "owner_id": -10, "url": "https://untrusted.test/file.gif", "ext": "gif", "size": 100})]
+    )
+    _, preview, photos, videos = parsed.for_publish(with_webpreview=False)
+    assert not preview and not photos and not videos
+    assert "https://vk.com/doc-10_1" in parsed.render()
