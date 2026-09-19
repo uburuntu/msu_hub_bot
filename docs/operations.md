@@ -16,8 +16,9 @@ blocks a job or changes its state.
 
 ## Investigating a held job
 
-1. Open Pulse's feature queue panel, then Trouble desk for that feature/kind.
-   Inspect failures and the current service release before changing data.
+1. Open Background workshop for queue age, pending/held work and recent job
+   failures. Use Trouble desk for wider dependency failures and Pulse for the
+   current service release before changing data.
 2. With administrative access, run `tools/operations/feature_jobs.py` using a
    private connection file, an explicit `--feature` and `--state held`.
    Output contains private identities and scheduling metadata, never payloads.
