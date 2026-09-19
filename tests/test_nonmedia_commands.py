@@ -76,7 +76,6 @@ async def test_settings_nonadmin_cannot_mutate_preferences(transport, monkeypatc
         ("debate.Debate", "debate:rules:7", {"action": "rules", "uid": "7"}),
         ("likes.Like", "like:3", {"count": 3}),
         ("rate.Rate", "rate:+", {"is_up": "+"}),
-        ("raffle.Raffle", "raffle:reg", {"action": "reg"}),
         ("help.HelpMessage", "help:open", {"action": "open"}),
     ],
 )
@@ -111,8 +110,11 @@ async def test_callback_without_accessible_message_is_acknowledged(transport, fa
     kwargs = {}
     if module == "rate":
         kwargs["callback_data"] = command.callback_data(is_up="+")
-    elif module in {"help", "raffle"}:
-        kwargs["callback_data"] = command.callback_data(action="open" if module == "help" else "reg")
+    elif module == "raffle":
+        kwargs["callback_data"] = command.callback_data(action="reg", token="a" * 16)
+        kwargs["raffles"] = SimpleNamespace()  # Inaccessible cards must not touch storage.
+    elif module == "help":
+        kwargs["callback_data"] = command.callback_data(action="open")
     if module == "help":
         kwargs["supervisor"] = SimpleNamespace(create_job=lambda factory: pytest.fail("No job may be created"))
     await command.process_cb(query, **kwargs)

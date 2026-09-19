@@ -552,3 +552,18 @@ async def test_reminder_and_mini_app_entry_points(chess_selection_dispatcher, te
     message = message.model_copy(update={"chat": message.chat.model_copy(update={"type": "private"})})
     selected, _ = await dispatcher.feed_update(bot, Update(update_id=90, message=message))
     assert selected.flags["handler_key"] == expected
+
+
+@pytest.mark.parametrize("payload", ["raffle:reg", "raffle:winner", "raffle:reg:broken:0"])
+async def test_unresolvable_raffle_buttons_use_the_expired_fallback(chess_selection_dispatcher, payload):
+    bot, dispatcher = chess_selection_dispatcher
+    callback = CallbackQuery(
+        id="synthetic",
+        chat_instance="synthetic",
+        from_user=User(id=42, is_bot=False, first_name="Synthetic"),
+        message=make_message(bot),
+        data=payload,
+    )
+    handler, _ = await asyncio.create_task(dispatcher.feed_update(bot, Update(update_id=1, callback_query=callback)))
+    assert handler.callback.__qualname__ == "process_expired_callback"
+    assert bot.session.methods == []
