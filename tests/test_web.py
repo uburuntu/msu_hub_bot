@@ -584,3 +584,111 @@ async def test_preview_has_no_publication_and_rejects_arbitrary_sources(rig, mon
     data = await response.json()
     assert response.status == 200 and not data["automatic_posting"] and not data["available"]
     assert not rig.backend.records and not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)
+
+
+async def test_web_repeat_and_saved_timezone_contract(rig):
+    await rig.api("PATCH", "/api/preferences", body={"etag": None, "timezone": "Europe/London"})
+    body = creation(recurrence={"kind": "daily"})
+    del body["timezone"]
+    response = await rig.api("POST", "/api/reminders", body=body)
+    item = await response.json()
+    assert response.status == 201 and item["recurrence"] == {"kind": "daily"}
+    assert item["timezone"] == "Europe/London" and item["occurrences"] == item["skipped_occurrences"] == 0
+    response = await rig.api(
+        "POST", f"/api/reminders/{item['key']}/reschedule", body={"etag": item["etag"], "schedule": "in 2h", "recurrence": None}
+    )
+    item = await response.json()
+    assert item["recurrence"] is None and item["timezone"] == "Europe/London"
+    assert (await rig.api("POST", "/api/reminders", body=creation(recurrence={"kind": "daily", "injected": True}))).status == 422
+
+
+async def test_chat_settings_preserve_unowned_fields_and_require_exact_revision(rig, monkeypatch):
+    from msu_hub_bot.storage.application import APPLICATION, ChatPreferences
+
+    launch = await _community_access(rig, monkeypatch)
+    collection = rig.server.community.documents.settings
+    tx = rig.reminders.store.transaction("settings", APPLICATION, operation_id=uuid4().hex)
+    tx.expect_absent("chats", "-123")
+    tx.put(collection, "-123", ChatPreferences(future_setting={"keep": True}))
+    await tx.commit()
+    path = f"/api/chats/-123/settings?launch={launch}"
+    original = await (await rig.api("GET", path)).json()
+    body = {"etag": original["etag"], "with_nsfw": True}
+    response = await rig.api("PATCH", path, body=body)
+    assert response.status == 200 and (await response.json())["values"]["with_nsfw"]
+    assert (await rig.api("PATCH", path, body=body)).status == 409
+    assert (await collection.get(APPLICATION, "-123")).value.model_extra == {"future_setting": {"keep": True}}
+
+
+async def test_game_views_hide_live_answers_other_topics_and_unrelated_chat_players(rig, monkeypatch):
+    from msu_hub_bot.games.models import Question, RoundState, Score
+    from msu_hub_bot.storage.features import Scope
+
+    launch = await _community_access(rig, monkeypatch, admin=False)
+    scope = Scope("chat:-123")
+    games = rig.server.community.games
+    for kind in ("chess", "geoguess"):
+        tx = rig.reminders.store.transaction(kind, scope, operation_id=uuid4().hex)
+        for token, topic in (("synthetic-a", 17), ("synthetic-b", 18)):
+            tx.expect_absent("rounds", token)
+            tx.put(
+                games.rounds[kind],
+                token,
+                RoundState(
+                    token=token,
+                    chat_id=-123,
+                    thread_id=topic,
+                    phase="active",
+                    prepared_at=NOW,
+                    question=Question(kind=kind, identity="hidden-answer-canary", choices=["hidden"] * 6, answer=3),
+                ),
+            )
+        tx.expect_absent("scores", "2030-01-01:42")
+        tx.put(games.scores[kind], "2030-01-01:42", Score(user_id=42, points=7, name="Synthetic"), parent="2030-01-01")
+        await tx.commit()
+        response = await rig.api("GET", f"/api/chats/-123/games?launch={launch}&kind={kind}")
+        data = await response.json()
+        assert response.status == 200 and len(data["history"]) == 1 and data["history"][0]["finished_at"] is None
+        assert data["rankings"][0]["score"] == 7
+        assert "hidden-answer-canary" not in await response.text() and "synthetic-b" not in await response.text()
+    assert (await rig.api("GET", f"/api/chats/-999/games?launch={launch}&kind=chess")).status == 403
+    assert (await rig.api("GET", f"/api/chats/-123/games?launch={launch}&kind=private")).status == 422
+
+
+async def test_reaction_view_verifies_membership_and_bounds_window(rig, monkeypatch):
+    from msu_hub_bot.storage.reactions import ReactionScoreboard
+
+    launch = await _community_access(rig, monkeypatch, admin=False)
+    board = ReactionScoreboard.model_validate(
+        {
+            "days": 7,
+            "getters": [],
+            "givers": [{"user_id": 42, "first_name": "Synthetic", "score": 3, "people": 2, "messages": 3}],
+            "emoji": [],
+            "posts": [],
+            "summary": {
+                key: 0
+                for key in (
+                    "points",
+                    "reactions",
+                    "givers",
+                    "getters",
+                    "messages",
+                    "anonymous",
+                    "paid",
+                    "unattributed",
+                    "channel_reactions",
+                )
+            },
+        }
+    )
+    rig.server.database.reaction_scoreboard = AsyncMock(return_value=board)
+    path = f"/api/chats/-123/reactions?launch={launch}&days=7"
+    response = await rig.api("GET", path)
+    data = await response.json()
+    assert response.status == 200 and data["givers"][0]["score"] == 3
+    rig.server.database.reaction_scoreboard.assert_awaited_once_with(-123, days=7, limit=10)
+    assert (await rig.api("GET", f"/api/chats/-123/reactions?launch={launch}&days=365")).status == 422
+    await _community_access(rig, monkeypatch, member=False)
+    assert (await rig.api("GET", path)).status == 403
+    assert rig.server.database.reaction_scoreboard.await_count == 1

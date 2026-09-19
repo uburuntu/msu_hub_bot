@@ -403,3 +403,157 @@ async def test_reminder_restart_delivery_and_text_cleanup_use_real_transactions(
         assert len(bot.session.methods) == 1
     finally:
         await bot.session.close()
+
+
+async def repeating(rig, *, recurrence=None, timezone="Europe/Moscow", due=None):
+    from msu_hub_bot.reminders.models import Recurrence
+    from aiogram.methods import GetChatMember
+    from aiogram.types import ChatMemberOwner, User
+
+    original = rig.bot.session.make_request
+
+    async def membership(bot, method, timeout=None):
+        if isinstance(method, GetChatMember):
+            return ChatMemberOwner(
+                user=User(id=method.user_id, first_name="Synthetic", is_bot=method.user_id == bot.id), is_anonymous=False
+            )
+        return await original(bot, method, timeout)
+
+    rig.bot.session.make_request = membership
+    return await rig.service.create(
+        author_id=42,
+        author_name="Synthetic",
+        chat_id=-123,
+        thread_id=17,
+        source_message_id=1,
+        schedule=Schedule(
+            due_at=due or NOW + timedelta(hours=1),
+            timezone=timezone,
+            text="Repeat",
+            recurrence=recurrence or Recurrence(kind="interval", interval_minutes=60),
+        ),
+    )
+
+
+async def test_recurring_overdue_send_coalesces_misses_and_survives_restart(rig):
+    row = await repeating(rig)
+    rig.backend.now += timedelta(hours=4, minutes=31)
+    restart(rig)
+    await drain(rig)
+    current = await rig.service.get(42, row.key)
+    assert current.value.status == "pending" and current.value.due_at == NOW + timedelta(hours=5)
+    assert current.value.occurrences == 1 and current.value.skipped_occurrences == 3
+    sends = [method for method in rig.bot.session.methods if isinstance(method, SendMessage)]
+    assert len(sends) == 1 and "опозданием" in sends[0].text
+    assert current.expires_at is None
+    rig.backend.now = current.value.due_at
+    await drain(rig)
+    current = await rig.service.get(42, row.key)
+    assert current.value.occurrences == 2 and current.value.due_at == NOW + timedelta(hours=6)
+    await rig.service.cancel(42, row.key, expected_etag=current.etag)
+    rig.backend.now += timedelta(days=1)
+    await drain(rig)
+    assert len([method for method in rig.bot.session.methods if isinstance(method, SendMessage)]) == 2
+
+
+async def test_recurring_uncertain_delivery_holds_series_until_explicit_retry(rig, monkeypatch):
+    row = await repeating(rig)
+    original = rig.bot.session.make_request
+
+    async def lost(bot, method, timeout=None):
+        if isinstance(method, SendMessage):
+            raise TimeoutError
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(rig.bot.session, "make_request", lost)
+    rig.backend.now += timedelta(hours=2)
+    await drain(rig)
+    held = await rig.service.get(42, row.key)
+    assert held.value.status == "uncertain" and held.value.occurrences == 0
+    rig.backend.now += timedelta(days=2)
+    await drain(rig)
+    assert (await rig.service.get(42, row.key)).value.status == "uncertain"
+    monkeypatch.setattr(rig.bot.session, "make_request", original)
+    await rig.service.retry(42, row.key, expected_etag=held.etag)
+    await drain(rig)
+    assert (await rig.service.get(42, row.key)).value.status == "pending"
+    assert len([method for method in rig.bot.session.methods if isinstance(method, SendMessage)]) == 1
+
+
+async def test_recurrence_preserved_by_telegram_snooze_and_explicitly_removable(rig):
+    row = await repeating(rig)
+    row = await rig.service.reschedule(42, row.key, Schedule(due_at=NOW + timedelta(hours=2)), expected_etag=row.etag)
+    assert row.value.recurrence.kind == "interval"
+    row = await rig.service.reschedule(42, row.key, Schedule(due_at=NOW + timedelta(hours=3), recurrence=None), expected_etag=row.etag)
+    assert row.value.recurrence is None
+
+
+@pytest.mark.parametrize("kind,days", [("daily", 1), ("weekly", 7)])
+async def test_daily_and_weekly_repeats_keep_local_wall_clock(rig, kind, days):
+    from msu_hub_bot.reminders.models import Recurrence
+    from msu_hub_bot.reminders.recurrence import next_occurrence
+
+    due = datetime(2030, 3, 30, 9, tzinfo=UTC)
+    following, skipped = next_occurrence(due, "Europe/London", Recurrence(kind=kind), due)
+    assert following == due + timedelta(days=days, hours=-1)
+    assert skipped == 0
+
+
+def test_calendar_skips_nonexistent_time_chooses_first_fold_and_bounds_long_offline_gap():
+    from msu_hub_bot.reminders.models import Recurrence
+    from msu_hub_bot.reminders.recurrence import next_occurrence
+
+    daily = Recurrence(kind="daily")
+    due = datetime(2030, 3, 30, 1, 30, tzinfo=UTC)
+    next_due, skipped = next_occurrence(due, "Europe/London", daily, due)
+    assert next_due == datetime(2030, 4, 1, 0, 30, tzinfo=UTC) and skipped == 1
+    due = datetime(2030, 10, 26, 0, 30, tzinfo=UTC)
+    next_due, skipped = next_occurrence(due, "Europe/London", daily, due)
+    assert next_due == datetime(2030, 10, 27, 0, 30, tzinfo=UTC) and skipped == 0
+    next_due, skipped = next_occurrence(due, "Europe/London", daily, datetime(2050, 10, 26, 9, tzinfo=UTC))
+    assert next_due > datetime(2050, 10, 26, 9, tzinfo=UTC) and skipped > 7000
+
+
+@pytest.mark.parametrize(
+    "rule", [{"kind": "interval", "interval_minutes": 1}, {"kind": "daily", "interval_minutes": 20}, {"kind": "interval"}]
+)
+def test_recurrence_rejects_invalid_or_excessive_frequency(rule):
+    from msu_hub_bot.reminders.models import Recurrence
+
+    with pytest.raises(ValueError):
+        Recurrence.model_validate(rule)
+
+
+async def test_recurring_reminder_stops_when_author_leaves_chat(rig, monkeypatch):
+    from aiogram.methods import GetChatMember
+    from aiogram.types import ChatMemberLeft, User
+
+    row = await repeating(rig)
+    original = rig.bot.session.make_request
+
+    async def left(bot, method, timeout=None):
+        if isinstance(method, GetChatMember) and method.user_id == 42:
+            return ChatMemberLeft(user=User(id=42, first_name="Synthetic", is_bot=False))
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(rig.bot.session, "make_request", left)
+    rig.backend.now += timedelta(hours=2)
+    await drain(rig)
+    assert (await rig.service.get(42, row.key)).value.status == "failed"
+    assert not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)
+
+
+async def test_v1_reminder_upgrade_preserves_unknown_fields_and_future_versions_fail_closed(rig):
+    from msu_hub_bot.storage.features import FutureVersion
+
+    row = await create(rig)
+    saved = next(iter(rig.backend.records.values()))
+    saved["payload_version"] = 1
+    for name in ("recurrence", "occurrences", "skipped_occurrences"):
+        del saved["payload"][name]
+    saved["payload"]["future_flag"] = {"keep": True}
+    upgraded = await rig.service.reschedule(42, row.key, Schedule(due_at=NOW + timedelta(hours=3)))
+    assert upgraded.value.recurrence is None and upgraded.value.model_extra == {"future_flag": {"keep": True}}
+    next(iter(rig.backend.records.values()))["payload_version"] = 3
+    with pytest.raises(FutureVersion):
+        await rig.service.get(42, row.key)

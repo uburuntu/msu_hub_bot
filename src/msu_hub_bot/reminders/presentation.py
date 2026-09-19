@@ -42,4 +42,8 @@ def keyboard(record: Record[Reminder]) -> InlineKeyboardMarkup | None:
 
 
 def confirmation(record: Record[Reminder]) -> str:
-    return f"⏰ {when(record.value)} — {STATUSES[record.value.status]}\n{compact(record.value.text, 160)}\n\nID: {record.key}"
+    repeat = ""
+    if rule := record.value.recurrence:
+        label = {"daily": "каждый день", "weekly": "каждую неделю", "interval": f"каждые {rule.interval_minutes} мин."}[rule.kind]
+        repeat = f"\n🔁 {label}; отмена останавливает всю серию"
+    return f"⏰ {when(record.value)} — {STATUSES[record.value.status]}{repeat}\n{compact(record.value.text, 160)}\n\nID: {record.key}"

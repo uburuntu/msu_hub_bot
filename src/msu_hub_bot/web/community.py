@@ -1,6 +1,6 @@
 """Mini App adapters for verified chat settings and paused repost targets."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 from aiohttp import web
@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from msu_hub_bot.community.preferences import Preferences
 from msu_hub_bot.community.reposts import RepostCreate, Reposts, RepostUpdate, SourcePreview, source_url
+from msu_hub_bot.community.summaries import GameKind, GameSummaries
 from msu_hub_bot.reminders.models import DEFAULT_TIMEZONE, valid_zone
 from msu_hub_bot.storage.application import APPLICATION, ApplicationDocuments, ChatPreferences, VkDocument
 from msu_hub_bot.storage.features import Conflict, Record
@@ -39,6 +40,7 @@ class CommunityAPI:
         self.server, self.reposts = server, reposts
         self.preferences = Preferences(server.reminders.store)
         self.documents = ApplicationDocuments(server.reminders.store, server.database.get_chat)
+        self.games = GameSummaries(server.reminders.store, server.bot.id)
 
     def register(self, app: web.Application) -> None:
         app.router.add_get("/api/community", self.community)
@@ -50,6 +52,8 @@ class CommunityAPI:
         app.router.add_post("/api/reposts", self.create_repost)
         app.router.add_post("/api/reposts/preview", self.preview_repost)
         app.router.add_patch("/api/reposts/{key}", self.update_repost)
+        app.router.add_get("/api/chats/{chat_id}/games", self.game_summary)
+        app.router.add_get("/api/chats/{chat_id}/reactions", self.reactions)
 
     async def access(self, request: web.Request) -> ChatAccess:
         from .server import USER
@@ -191,3 +195,43 @@ class CommunityAPI:
     async def preview_repost(self, request: web.Request) -> web.Response:
         await self.destination(request, admin=True)
         return web.json_response(await self.reposts.preview(await self.server._body(request, SourcePreview)))
+
+    async def game_summary(self, request: web.Request) -> web.Response:
+        destination = await self.destination(request)
+        kind = request.query.get("kind", "chess")
+        if kind not in {"chess", "geoguess", "chess_play"}:
+            raise ValueError("Unknown game")
+        return web.json_response(
+            await self.games.read(destination.chat_id, destination.thread_id, cast(GameKind, kind), self.server.clock())
+        )
+
+    async def reactions(self, request: web.Request) -> web.Response:
+        destination = await self.destination(request)
+        days = int(request.query.get("days", "30"))
+        if days not in {1, 7, 30}:
+            raise ValueError("Unknown reaction window")
+        board = await self.server.database.reaction_scoreboard(destination.chat_id, days=days, limit=10)
+        return web.json_response(
+            {
+                "days": board.days,
+                "givers": [
+                    {
+                        "user_id": value.user_id,
+                        "name": " ".join(part for part in (value.first_name, value.last_name) if part),
+                        "score": value.score,
+                    }
+                    for value in board.givers
+                ],
+                "getters": [
+                    {
+                        "user_id": value.user_id,
+                        "name": " ".join(part for part in (value.first_name, value.last_name) if part),
+                        "score": value.score,
+                    }
+                    for value in board.getters
+                ],
+                "total_reactions": board.summary.reactions,
+                "coverage_note": "Весь чат: 1 человек → 1 сообщение = 1 балл. Только реакции, замеченные ботом за период и ещё не снятые. "
+                "Свои реакции не дают балл; анонимные, платные и реакции от имени чатов учитываются отдельно.",
+            }
+        )

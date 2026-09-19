@@ -168,6 +168,20 @@ cleanup after 30 days; cleanup removes the text. Until then an uncertain send
 stays available for its owner to reconcile or explicitly retry. Changing a reminder never changes its
 owner or destination.
 
+Reminder payload version 2 adds optional recurrence and delivered/skipped
+occurrence counters. Daily and weekly rules preserve local wall time; custom
+intervals are elapsed UTC minutes (15 minutes to one year). Calendar repeats
+skip nonexistent DST times and choose the first occurrence of an ambiguous
+time. Missed occurrences coalesce into one overdue delivery; the next deadline
+is strictly after the current clock. A successful delivery atomically advances
+the same record and job generation. The series stays permanent while pending.
+Uncertain delivery holds the whole series for explicit owner retry; it never
+silently schedules another occurrence. Cancellation stops future occurrences,
+but cannot recall an attempt whose sending marker is committed. Recurring
+group delivery checks current author membership and bot administrator rights.
+Permanent owner-scoped `preferences/users` records supply the default timezone
+for new command and web reminders; explicit timezones override that default.
+
 Creation and rescheduling atomically update the document and its delivery job.
 The worker marks sending before contacting Telegram and schedules reconciliation
 for an interrupted attempt. Overdue reminders are delivered after restart; a

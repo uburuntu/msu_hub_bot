@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from msu_hub_bot.community.reposts import RepostError, Reposts
 from msu_hub_bot.providers.vk.api import VkApi
 from msu_hub_bot.reminders import ReminderService, Schedule, parse_schedule
-from msu_hub_bot.reminders.models import Reminder, ReminderError
+from msu_hub_bot.reminders.models import Recurrence, Reminder, ReminderError
 from msu_hub_bot.reminders.presentation import confirmation, keyboard
 from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.features import Conflict, FeatureError, Record
@@ -43,12 +43,17 @@ class Input(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
+class RecurrenceInput(Recurrence):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+
 class Creation(Input):
     request_id: UUID
     text: str = Field(min_length=1, max_length=6000)
     schedule: str = Field(min_length=1, max_length=256)
     timezone: str = Field(default="Europe/Moscow", min_length=1, max_length=128)
     launch: str | None = Field(default=None, max_length=64)
+    recurrence: RecurrenceInput | None = None
 
 
 class Revision(Input):
@@ -59,6 +64,7 @@ class Reschedule(Revision):
     schedule: str = Field(min_length=1, max_length=256)
     timezone: str = Field(default="Europe/Moscow", min_length=1, max_length=128)
     text: str = Field(default="", max_length=6000)
+    recurrence: RecurrenceInput | None = None
 
 
 def error(status: int, code: str, message: str) -> web.Response:
@@ -211,6 +217,7 @@ class WebServer:
     def _item(self, record: Record[Reminder], *, label: str | None = None) -> dict[str, object]:
         return {
             **record.value.model_dump(mode="json"),
+            "recurrence": record.value.recurrence.model_dump(exclude_none=True) if record.value.recurrence else None,
             "key": record.key,
             "etag": record.etag,
             "created_at": record.created_at.isoformat(),
@@ -301,7 +308,9 @@ class WebServer:
             return web.json_response(self._item(old))
         if not await self._can_write(user.id, destination):
             return error(403, "membership", "Создать напоминание можно в своём чате.")
-        schedule = self._schedule(body.schedule, body.text, body.timezone)
+        timezone = body.timezone if "timezone" in body.model_fields_set else await self.community.preferences.timezone(user.id)
+        schedule = self._schedule(body.schedule, body.text, timezone)
+        schedule.recurrence = body.recurrence
         record, created = await self.reminders.create_with_status(
             author_id=user.id,
             author_name=user.name,
@@ -324,7 +333,10 @@ class WebServer:
         if action != "cancel" and not await self._can_write(user.id, Destination(current.value.chat_id, current.value.thread_id)):
             return error(403, "membership", "Изменить или повторить напоминание можно, пока ты можешь писать в этот чат.")
         if isinstance(body, Reschedule):
-            schedule = self._schedule(body.schedule, body.text or current.value.text, body.timezone)
+            timezone = body.timezone if "timezone" in body.model_fields_set else current.value.timezone
+            schedule = self._schedule(body.schedule, body.text or current.value.text, timezone)
+            if "recurrence" in body.model_fields_set:
+                schedule.recurrence = body.recurrence
             record = await self.reminders.reschedule(user.id, key, schedule, expected_etag=str(body.etag))
         elif action == "cancel":
             record = await self.reminders.cancel(user.id, key, expected_etag=str(body.etag))

@@ -1,7 +1,7 @@
 # Telegram Mini App
 
-The Mini App provides personal reminder management through a reusable React
-shell. `web/src/platform/` owns Telegram and HTTP integration, `app/` owns
+The Mini App provides reminders, chat preferences, repost configuration and
+community statistics through a reusable React shell. `web/src/platform/` owns Telegram and HTTP integration, `app/` owns
 navigation, and `features/` owns each tool. Python's `web/` package supplies
 the authenticated adapter; `reminders/` supplies behavior shared with commands.
 Future tools compose into these boundaries rather than adding database calls
@@ -38,9 +38,22 @@ bodies. Invalid sessions receive a reopen instruction.
 | `GET /api/session` | Verified user and authorized creation context. Optional signed `launch`. |
 | `GET /api/reminders` | Owner-only, key-ordered pages; `after` cursor and bounded `limit`. |
 | `GET /api/reminders/{key}` | One owner-scoped record. |
-| `POST /api/reminders` | Frozen UUID `request_id`, `text`, `schedule`, `timezone`, optional `launch`. |
-| `POST /api/reminders/{key}/reschedule` | Exact `etag`, schedule/timezone and optional replacement text. |
+| `POST /api/reminders` | Frozen UUID `request_id`, `text`, `schedule`, optional timezone, recurrence and signed `launch`. |
+| `POST /api/reminders/{key}/reschedule` | Exact `etag`, schedule and optional timezone, replacement text or recurrence. Omitted recurrence is preserved; null removes it. |
 | `POST /api/reminders/{key}/cancel` or `/retry` | Exact `etag`; retry is an explicit delivery decision. |
+| `GET /api/community` | Signed context, fresh membership/admin access and personal preferences. |
+| `GET/PATCH /api/preferences` | Owner-only timezone, exact nullable `etag` for changes. |
+| `GET/PATCH /api/chats/{chat_id}/settings` | Launch-matched chat; current administrator required to change known flags with an exact revision. |
+| `GET/POST /api/reposts` | Administrator-only targets in the signed topic; creation has a frozen UUID. |
+| `PATCH /api/reposts/{key}` | Administrator-only conditional edit/archive; source, destination and cursor are immutable. |
+| `POST /api/reposts/preview` | Bounded read-only VK preview; never publication. |
+| `GET /api/chats/{chat_id}/games` | Current member; `kind=chess`, `geoguess` or `chess_play`; bounded summary, no active answers. |
+| `GET /api/chats/{chat_id}/reactions` | Current member; whole-chat summary for `days=1`, `7` or `30`. |
+
+Chat-scoped routes and repost routes accept the signed `launch` query argument.
+Opening `/app` in another chat/topic changes that context. Shared access requires
+the bot to be an administrator because Telegram only guarantees other-user
+membership checks in that case. See [community tools](community-tools.md).
 
 Records return a key, revision, timestamps and reminder payload. Creation keeps
 schedule and text separate; text beginning with a duration cannot change the

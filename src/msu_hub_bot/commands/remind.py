@@ -16,7 +16,7 @@ from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.web.links import WebAppLinks
 
 HELP = (
-    "⏰ Напомню здесь, в этой же теме. По умолчанию — московское время.\n\n"
+    "⏰ Напомню здесь, в этой же теме. Часовой пояс — из /app, по умолчанию московский. Повторения настраиваются в /app.\n\n"
     "/remind in 15m выключить духовку\n"
     "/remind через 2ч 30м размяться\n"
     "/remind at 2027-04-15 09:30 [Europe/Moscow] встреча\n\n"
@@ -85,7 +85,7 @@ class Remind:
                         )
                     body, markup = confirmation(record), keyboard(record)
                 else:
-                    schedule = parse_schedule(text, reminders.clock())
+                    schedule = parse_schedule(text, reminders.clock(), await reminders.preferences.timezone(user.id))
                     record = await reminders.create(
                         author_id=user.id,
                         author_name=compact(user.full_name, 256),

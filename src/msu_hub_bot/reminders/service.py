@@ -8,9 +8,17 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNotFound, TelegramRetryAfter, TelegramUnauthorizedError
+from aiogram.exceptions import (
+    TelegramAPIError,
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNotFound,
+    TelegramRetryAfter,
+    TelegramUnauthorizedError,
+)
 from aiogram.methods import SendMessage
-from aiogram.types import LinkPreviewOptions
+from aiogram.types import ChatMemberRestricted, LinkPreviewOptions
+from aiogram.utils.chat_member import ADMINS, MEMBERS
 from aiogram.utils.formatting import Text, TextLink
 
 from msu_hub_bot.commands.quiz_view import compact
@@ -28,7 +36,8 @@ from msu_hub_bot.storage.features import (
 )
 from msu_hub_bot.storage.supabase import RepositoryUnavailable
 
-from .models import Failure, Reminder, ReminderError, ReminderStatus, Schedule
+from .models import Failure, Reminder, ReminderError, ReminderStatus, Schedule, upgrade_reminder
+from .recurrence import next_occurrence
 
 SEND_TIMEOUT = 15
 TERMINAL_RETENTION = timedelta(days=30)
@@ -45,9 +54,12 @@ def when(value: Reminder) -> str:
 
 class ReminderService:
     def __init__(self, bot: Bot, store: FeatureStore, worker: FeatureWorker) -> None:
+        from msu_hub_bot.community.preferences import Preferences
+
         self.bot, self.store, self.worker = bot, store, worker
+        self.preferences = Preferences(store)
         self.clock: Callable[[], datetime] = lambda: datetime.now(UTC)
-        self.items = store.collection("reminders", "items", Reminder, retention=None)
+        self.items = store.collection("reminders", "items", Reminder, retention=None, version=2, upgrades={1: upgrade_reminder})
         worker.register("reminders", "deliver", self._deliver, max_attempts=1024)
         worker.register("reminders", "reconcile", self._reconcile, max_attempts=1024)
         worker.register("reminders", "cleanup", self._cleanup, max_attempts=1024)
@@ -122,6 +134,7 @@ class ReminderService:
             text=schedule.text,
             due_at=schedule.due_at,
             timezone=schedule.timezone,
+            recurrence=schedule.recurrence,
         )
         tx = self._tx(author_id)
         tx.expect_absent("items", key)
@@ -176,6 +189,8 @@ class ReminderService:
         self._future(schedule)
         value = record.value.model_copy(deep=True)
         value.due_at, value.timezone = schedule.due_at, schedule.timezone
+        if "recurrence" in schedule.model_fields_set:
+            value.recurrence = schedule.recurrence
         if schedule.text.strip():
             value.text = schedule.text
         value.attempts = 0
@@ -231,6 +246,28 @@ class ReminderService:
         self._schedule(tx, record.key, "cleanup", self.clock() + TERMINAL_RETENTION)
         await self._commit(tx)
 
+    async def _delivered(self, record: Record[Reminder], message_id: int) -> None:
+        if record.value.recurrence is None:
+            await self._terminal(record, "delivered", message_id=message_id)
+            return
+        value = record.value.model_copy(deep=True)
+        assert value.recurrence is not None
+        try:
+            value.due_at, skipped = next_occurrence(value.due_at, value.timezone, value.recurrence, self.clock())
+        except ReminderError:
+            await self._terminal(record, "delivered", message_id=message_id)
+            return
+        value.status, value.sending_at, value.terminal_at, value.failure = "pending", None, None, None
+        value.delivered_at, value.delivered_message_id = self.clock(), message_id
+        value.attempts = 0
+        value.occurrences += 1
+        value.skipped_occurrences += skipped
+        tx = self._tx(value.author_id)
+        self._put(tx, record, value)
+        tx.cancel_job(f"reconcile:{record.key}")
+        self._schedule(tx, record.key, "deliver", value.due_at)
+        await self._commit(tx)
+
     async def _deliver(self, context: JobContext) -> None:
         try:
             await self._delivery(context)
@@ -246,6 +283,9 @@ class ReminderService:
             await self._terminal(record, "uncertain", failure="uncertain")
             return
         if record.value.status != "pending":
+            return
+        if record.value.recurrence is not None and not await self._recurring_membership(record.value):
+            await self._terminal(record, "failed", failure="rejected")
             return
         value = record.value.model_copy(deep=True)
         value.status, value.sending_at = "sending", self.clock()
@@ -294,7 +334,24 @@ class ReminderService:
         except Exception:
             await self._terminal(sending, "uncertain", failure="uncertain")
             return
-        await self._terminal(sending, "delivered", message_id=delivered.message_id)
+        await self._delivered(sending, delivered.message_id)
+
+    async def _recurring_membership(self, value: Reminder) -> bool:
+        if value.chat_id > 0:
+            return value.chat_id == value.author_id
+        try:
+            async with asyncio.timeout(10):
+                me = await self.bot.get_chat_member(value.chat_id, self.bot.id)
+                if not isinstance(me, ADMINS):
+                    return False
+                member = await self.bot.get_chat_member(value.chat_id, value.author_id)
+        except TelegramBadRequest, TelegramForbiddenError, TelegramNotFound:
+            return False
+        except TelegramAPIError, TimeoutError:
+            raise JobRetry("Recurring reminder membership check is safe to retry") from None
+        return isinstance(member, MEMBERS) and not (
+            isinstance(member, ChatMemberRestricted) and (not member.is_member or not member.can_send_messages)
+        )
 
     async def _reconcile(self, context: JobContext) -> None:
         try:

@@ -1,10 +1,10 @@
 """Typed reminder requests and durable delivery state."""
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from msu_hub_bot.storage.features import Payload
 
@@ -32,11 +32,23 @@ def valid_text(value: str) -> str:
     return value
 
 
+class Recurrence(Payload):
+    kind: Literal["daily", "weekly", "interval"]
+    interval_minutes: int | None = Field(default=None, strict=True, ge=15, le=525600)
+
+    @model_validator(mode="after")
+    def interval(self) -> Self:
+        if (self.kind == "interval") != (self.interval_minutes is not None):
+            raise ValueError("Only interval recurrence needs interval_minutes")
+        return self
+
+
 class Schedule(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     due_at: AwareDatetime
     timezone: str = DEFAULT_TIMEZONE
     text: str = ""
+    recurrence: Recurrence | None = None
 
     _zone = field_validator("timezone")(valid_zone)
     _text = field_validator("text")(valid_text)
@@ -62,6 +74,13 @@ class Reminder(Payload):
     delivered_at: AwareDatetime | None = None
     delivered_message_id: int | None = None
     failure: Failure | None = None
+    recurrence: Recurrence | None = None
+    occurrences: int = Field(default=0, ge=0)
+    skipped_occurrences: int = Field(default=0, ge=0)
 
     _zone = field_validator("timezone")(valid_zone)
     _text = field_validator("text")(valid_text)
+
+
+def upgrade_reminder(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    return {"recurrence": None, "occurrences": 0, "skipped_occurrences": 0} | value
