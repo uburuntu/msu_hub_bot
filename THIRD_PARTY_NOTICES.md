@@ -26,3 +26,7 @@ retain their respective upstream licenses.
 The imageboard integration includes [api2ch 1.2.1](https://github.com/uburuntu/api2ch), copyright 2020 Ramzan Bekbulatov, under the [MIT license](src/msu_hub_bot/providers/_api2ch/LICENSE).
 
 Its source is isolated in `src/msu_hub_bot/providers/_api2ch`. Imports use the local package namespace and `pydantic.v1`; the SDK implementation is otherwise unchanged. The adjacent partial type stub describes the operations used by this bot. Application code imports the boundary in `src/msu_hub_bot/providers/dvach.py` and uses Pydantic 2 for its own models.
+
+## U²-NetP foreground model
+
+The image build includes U²-NetP weights from [U²-Net](https://github.com/xuebinqin/U-2-Net), by Xuebin Qin and contributors, under the [Apache License 2.0](licenses/U-2-Net.txt). The fixed ONNX conversion is distributed by [rembg](https://github.com/danielgatis/rembg). Its source and checksum are maintained in `media/background_model.py`; model files are fetched explicitly during the build, never during image processing.

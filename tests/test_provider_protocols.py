@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import aiohttp
 import pytest
 
-from msu_hub_bot.providers import other, topdf, urbandictionary
+from msu_hub_bot.providers import other, urbandictionary
 from msu_hub_bot.providers.exceptions import BadRequestError, ExternalServiceError
 
 from msu_hub_bot.providers import wit
@@ -112,46 +112,6 @@ async def test_urban_empty_result_is_valid(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "payload",
-    [
-        {"status": False, "message": "private provider detail"},
-        {"preview_size_output_image": None},
-        {"preview_size_output_image": "//other.example/file"},
-    ],
-)
-async def test_background_error_response_is_safe(monkeypatch, payload):
-    session = session_for(monkeypatch, other, [Response(text='<meta name="csrf-token" content="synthetic">'), Response(payload)])
-    with pytest.raises(BadRequestError) as error:
-        await other.remove_bg(io.BytesIO(b"synthetic image"))
-    assert "private provider detail" not in str(error.value)
-    assert session.closed
-
-
-async def test_background_missing_csrf_fails_before_upload(monkeypatch):
-    session = session_for(monkeypatch, other, [Response(text="<html>Unavailable</html>")])
-    with pytest.raises(BadRequestError):
-        await other.remove_bg(io.BytesIO(b"image"))
-    assert len(session.calls) == 1
-
-
-async def test_background_preview_still_returns(monkeypatch):
-    session_for(
-        monkeypatch,
-        other,
-        [Response(text='<meta name="csrf-token" content="synthetic">'), Response({"preview_size_output_image": "/synthetic.png"})],
-    )
-    assert await other.remove_bg(io.BytesIO(b"image")) == "https://slazzer.com/synthetic.png"
-
-
-async def test_background_api_failure_has_no_raw_output(monkeypatch, capsys):
-    monkeypatch.setattr(other.settings, "remove_bg_api_key", "synthetic-key")
-    session_for(monkeypatch, other, [Response({"error": "private provider detail"}, status=402)])
-    with pytest.raises(BadRequestError):
-        await other.remove_bg_api(io.BytesIO(b"image"))
-    assert capsys.readouterr().out == ""
-
-
-@pytest.mark.parametrize(
     "status,payload",
     [
         (403, {"data": {"error": "private provider detail"}}),
@@ -181,16 +141,6 @@ async def test_upload_polling_is_bounded_and_closes_session(monkeypatch):
     session = session_for(monkeypatch, other, [Response({"data": {"id": "synthetic", "processing": {"status": "pending"}}})])
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(other.imgur_upload(io.BytesIO(b"image")), 1)
-    assert session.closed
-
-
-@pytest.mark.parametrize("response", [Response(status=301), Response(invalid_json=True), Response(["unexpected"])])
-async def test_pdf_protocol_failure_is_safe_and_does_not_follow_upload_redirect(monkeypatch, response):
-    session = session_for(monkeypatch, topdf, [response])
-    with pytest.raises(BadRequestError):
-        await topdf.convert_to_pdf(io.BytesIO(b"document"), "synthetic.png", "image/png")
-    assert session.calls[0][2]["allow_redirects"] is False
-    assert len(session.calls) == 1
     assert session.closed
 
 

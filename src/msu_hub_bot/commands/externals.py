@@ -13,8 +13,11 @@ from yarl import URL
 from msu_hub_bot.telegram.constants import TELEGRAM_MESSAGE_MAX_LEN
 from msu_hub_bot.providers.exceptions import ExternalServiceError
 from msu_hub_bot.providers.moe import which_anime
-from msu_hub_bot.providers.other import remove_bg, porfirevich, imgur_upload, duckduckgo
-from msu_hub_bot.providers.topdf import convert_to_pdf
+from msu_hub_bot.providers.other import porfirevich, imgur_upload, duckduckgo
+from msu_hub_bot.media.background import BackgroundRemovalError, remove_background
+from msu_hub_bot.execution.executor import TPExecutor
+from msu_hub_bot.telegram.media_jobs import DownloadUnavailable, run_downloaded
+from msu_hub_bot.providers.pdf import convert_to_pdf
 from msu_hub_bot.providers.urbandictionary import urban_dictionary
 from msu_hub_bot.telegram.chat_actioner import ChatActioner
 from msu_hub_bot.telegram.filters import MetaInfo
@@ -117,13 +120,20 @@ async def process_which_anime(message: Message) -> Message | list[Message] | boo
         return await reply_album(target, media)
 
 
-async def process_bg(message: Message) -> Message | list[Message] | bool:
-    return await process_external(
-        message,
-        remove_bg,
-        output_type=ContentType.DOCUMENT,
-        error_text="Не удалось убрать фон. Попробуйте другое фото или повторите позже.",
-    )
+async def process_bg(message: Message, cpu_executor: TPExecutor) -> Message | bool:
+    target, media = await extract_image(message, with_profile_photo=True)
+    if media is None:
+        return True
+    async with ChatActioner(message, ChatAction.UPLOAD_DOCUMENT):
+        try:
+            result, timeouted = await run_downloaded(cpu_executor, media, remove_background, bot=message.bot)
+        except DownloadUnavailable:
+            return await message.reply("Не удалось скачать картинку. Попробуй прислать её ещё раз.")
+        except BackgroundRemovalError:
+            return await message.reply("Не удалось убрать фон. Попробуй другое фото.")
+        if timeouted or result is None:
+            return await message.reply("Обработка заняла слишком много времени. Попробуй картинку поменьше.")
+        return await target.reply_document(input_file(result, "без-фона.png"))
 
 
 async def process_duckduckgo(message: Message, meta: MetaInfo) -> Message | bool | None:
@@ -235,15 +245,15 @@ async def process_topdf(message: Message, meta: MetaInfo) -> Message | bool:
             file = await download(dest)
             if file is None:
                 return await message.reply("Не удалось скачать файл. Попробуйте ещё раз.")
-            url, thumb, convert_name = await convert_to_pdf(
-                file, dest.file_name or "document", dest.mime_type or "application/octet-stream"
-            )
+            with file:
+                with await convert_to_pdf(file, dest.file_name or "document", dest.mime_type or "application/octet-stream") as converted:
+                    document = input_file(converted, str(getattr(converted, "name", "document.pdf")))
     except TimeoutError:
         return await message.reply("Конвертация заняла слишком много времени. Попробуйте ещё раз позже.")
     except ExternalServiceError:
         return await message.reply("Не удалось преобразовать файл в PDF. Попробуйте позже.")
 
-    return await target.reply_document(URLInputFile(url, filename=convert_name), thumbnail=URLInputFile(thumb))
+    return await target.reply_document(document)
 
 
 async def process_porfirevich(message: Message, meta: MetaInfo) -> Message | bool:

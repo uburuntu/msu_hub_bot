@@ -328,11 +328,31 @@ def check_chess():
             image.verify()
 
 
+def check_background():
+    from PIL import Image, ImageDraw
+    from msu_hub_bot.media.background import remove_background
+    from msu_hub_bot.media.background_model import verified_model
+
+    verified_model()
+    with Image.new("RGB", (320, 320), "#f0e8dd") as image, io.BytesIO() as source:
+        drawing = ImageDraw.Draw(image)
+        drawing.ellipse((110, 35, 210, 135), fill="#bb8666")
+        drawing.rectangle((95, 130, 225, 245), fill="#2f718f")
+        drawing.rectangle((95, 245, 145, 305), fill="#303040")
+        drawing.rectangle((175, 245, 225, 305), fill="#303040")
+        image.save(source, "PNG")
+        result = remove_background(source)
+    with Image.open(io.BytesIO(result)) as cutout:
+        assert cutout.mode == "RGBA" and cutout.size == (320, 320)
+        assert cutout.getpixel((160, 170))[3] >= 240, "Foreground disappeared"
+        assert cutout.getpixel((5, 5))[3] <= 10, "Background remains opaque"
+
+
 async def main():
     socket.socket.connect = blocked
     socket.socket.connect_ex = blocked
     socket.getaddrinfo = blocked
-    for package in ("common", "hub_bot", "edgedb", "gel", "cv2", "numpy"):
+    for package in ("common", "hub_bot", "edgedb", "gel", "cv2"):
         assert importlib.util.find_spec(package) is None, f"Retired package is installed: {package}"
     for program in ("ffmpeg", "ffprobe", "tesseract"):
         assert shutil.which(program), program
@@ -343,6 +363,7 @@ async def main():
     check_animation()
     check_youtube_runtime()
     check_chess()
+    check_background()
     from msu_hub_bot.web import server as web_server
 
     static = Path(web_server.__file__).with_name("static")
@@ -386,7 +407,7 @@ async def main():
     finally:
         await app.close()
     print(
-        "Linux image: fingerprint, OCR, camera, image/video captions, Opus/VP9/WebP/TGS, chess PNG, Deno/EJS, resources, worker, handlers, and shutdown passed"
+        "Linux image: fingerprint, OCR, camera, image/video captions, Opus/VP9/WebP/TGS, chess PNG, offline foreground masks, Deno/EJS, resources, worker, handlers, and shutdown passed"
     )
 
 

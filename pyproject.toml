@@ -42,6 +42,8 @@ dependencies = [
     "babel==2.18.0",
     "opentelemetry-sdk==1.44.0",
     "opentelemetry-exporter-otlp-proto-common==1.44.0",
+    "onnxruntime==1.30.0",
+    "numpy==2.5.3",
 ]
 
 [project.scripts]
@@ -212,11 +214,17 @@ files = [
     "src/msu_hub_bot/media/caption_video.py",
     "src/msu_hub_bot/media/ffmpeg.py",
     "src/msu_hub_bot/media/limits.py",
+    "src/msu_hub_bot/media/background.py",
+    "src/msu_hub_bot/media/background_model.py",
     "src/msu_hub_bot/providers/jdoodle.py",
     "src/msu_hub_bot/execution/sed.py",
     "src/msu_hub_bot/media/sticker_media.py",
     "src/msu_hub_bot/telegram/sticker_sets.py",
     "src/msu_hub_bot/providers/wit.py",
+    "src/msu_hub_bot/providers/http.py",
+    "src/msu_hub_bot/providers/exceptions.py",
+    "src/msu_hub_bot/providers/pdf.py",
+    "src/msu_hub_bot/providers/knowledge.py",
     "src/msu_hub_bot/providers/wolfram.py",
     "src/msu_hub_bot/cli.py",
     "src/msu_hub_bot/fsm_reset.py",
@@ -231,7 +239,7 @@ files = [
 
 [[tool.mypy.overrides]]
 # Remove each provider/native exception when its SDK ships types; adapters remain checked.
-module = ["yt_dlp", "yt_dlp.*", "aiocache", "arxiv", "gtts", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "throttler", "transliterate", "pyfiglet", "airtable", "ccxt", "ccxt.async_support"]
+module = ["onnxruntime", "yt_dlp", "yt_dlp.*", "aiocache", "arxiv", "gtts", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "throttler", "transliterate", "pyfiglet", "airtable", "ccxt", "ccxt.async_support"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

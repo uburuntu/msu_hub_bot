@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram.methods import SendDocument, SendMediaGroup, SendMessage, SendVideo
-from aiogram.types import URLInputFile
+from aiogram.types import BufferedInputFile, URLInputFile
+from msu_hub_bot.providers.pdf import PdfDocument
 
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.commands import externals
@@ -44,27 +45,31 @@ async def test_anime_results_use_native_delivery_and_keep_topic(monkeypatch, cou
         assert all(isinstance(item.media, URLInputFile) for item in method.media)
 
 
-async def test_background_result_url_is_not_treated_as_local_path(monkeypatch):
+async def test_background_uses_bounded_local_worker_and_keeps_topic(monkeypatch):
     bot = make_bot()
-    message = make_message(bot)
-    monkeypatch.setattr(externals, "extract_image", AsyncMock(return_value=(message, None)))
-    monkeypatch.setattr(externals, "download", AsyncMock(return_value=io.BytesIO(b"image")))
-    monkeypatch.setattr(externals, "remove_bg", AsyncMock(return_value="https://example.org/result.png"))
-    await externals.process_bg(message)
+    message = make_message(bot, is_topic_message=True, message_thread_id=9)
+    executor, media = object(), object()
+    monkeypatch.setattr(externals, "extract_image", AsyncMock(return_value=(message, media)))
+    worker = AsyncMock(return_value=(b"synthetic-png", False))
+    monkeypatch.setattr(externals, "run_downloaded", worker)
+    await externals.process_bg(message, executor)
+    worker.assert_awaited_once_with(executor, media, externals.remove_background, bot=bot)
     method = bot.session.methods[-1]
-    assert isinstance(method, SendDocument) and method.document == "https://example.org/result.png"
+    assert isinstance(method, SendDocument) and method.message_thread_id == 9
+    assert method.document.data == b"synthetic-png" and method.document.filename.endswith(".png")
 
 
-async def test_pdf_uses_native_url_upload_and_thumbnail(monkeypatch):
+async def test_pdf_delivers_downloaded_bytes_with_the_document_filename(monkeypatch):
     bot = make_bot()
     message = make_message(bot, document=dict(file_id="document", file_unique_id="id", file_name="input.txt", mime_type="text/plain"))
     monkeypatch.setattr(
         externals,
         "convert_to_pdf",
-        AsyncMock(return_value=("https://example.org/result.pdf", "https://example.org/preview.jpg", "input.pdf")),
+        AsyncMock(return_value=PdfDocument(b"%PDF-synthetic", filename="input.pdf")),
     )
     await externals.process_topdf(message, MetaInfo(message))
     method = bot.session.methods[-1]
     assert isinstance(method, SendDocument)
-    assert isinstance(method.document, URLInputFile) and method.document.filename == "input.pdf"
-    assert isinstance(method.thumbnail, URLInputFile) and method.thumbnail.url.endswith("preview.jpg")
+    assert isinstance(method.document, BufferedInputFile) and method.document.filename == "input.pdf"
+    assert method.document.data == b"%PDF-synthetic"
+    assert method.thumbnail is None

@@ -11,11 +11,11 @@ from yarl import URL
 from msu_hub_bot.execution.executor import ExecutorBusy
 from msu_hub_bot.providers.exceptions import ExternalServiceError
 from msu_hub_bot.providers.instagram import InstagramViewer
-from msu_hub_bot.providers.topdf import convert_to_pdf
+from msu_hub_bot.providers.pdf import convert_to_pdf
 from msu_hub_bot.providers.ydl import YDL
 from msu_hub_bot.telegram.context import bot_for
 from msu_hub_bot.telegram.delivery import AlbumMedia, reply_album
-from msu_hub_bot.telegram.files import download
+from msu_hub_bot.telegram.files import download, input_file
 from msu_hub_bot.telegram.middlewares.settings import Settings
 from msu_hub_bot.telegram.state import UpdateStateContext, release_state_isolation
 from msu_hub_bot.telegram.utils import extract_urls
@@ -140,12 +140,11 @@ class ViewerMiddleware(BaseMiddleware):
             with file:
                 if file.getbuffer().nbytes >= megabytes(20):
                     return
-                pdf_url, thumbnail, name = await convert_to_pdf(
-                    file, destination.file_name, destination.mime_type or "application/octet-stream"
-                )
-        except ExternalServiceError:
+                with await convert_to_pdf(file, destination.file_name, destination.mime_type or "application/octet-stream") as converted:
+                    result = input_file(converted, str(getattr(converted, "name", "document.pdf")))
+        except ExternalServiceError, TimeoutError:
             return
-        await message.reply_document(URLInputFile(pdf_url, filename=name), thumbnail=URLInputFile(thumbnail, filename="thumbnail.jpg"))
+        await message.reply_document(result)
 
     async def __call__(
         self, handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]], event: TelegramObject, data: dict[str, Any]

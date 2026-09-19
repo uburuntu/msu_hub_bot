@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import pytest
 from aiohttp import ClientError
 
-from msu_hub_bot.providers import topdf
 from msu_hub_bot.providers.exceptions import ExternalServiceError
 from msu_hub_bot.commands import lingvanex
 
@@ -155,105 +154,6 @@ async def test_translation_cancellation_propagates(monkeypatch):
     target.reply.assert_not_awaited()
 
 
-@pytest.fixture
-def pending_pdf(monkeypatch):
-    module = topdf
-    original_sleep = asyncio.sleep
-
-    async def yield_to_loop(_delay):
-        await original_sleep(0)
-
-    class Response:
-        status = 200
-
-        def __init__(self, data):
-            self.data = data
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def json(self):
-            return self.data
-
-    class Session:
-        closed = False
-        complete = False
-
-        def __init__(self):
-            self.polling = asyncio.Event()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            self.closed = True
-
-        def post(self, *args, **kwargs):
-            return Response({})
-
-        def get(self, url, **kwargs):
-            if "/convert/" in url:
-                return Response({})
-            self.polling.set()
-            return Response(
-                {
-                    "status": "ready" if self.complete else "processing",
-                    "convert_result": "synthetic.pdf",
-                    "thumb_url": "synthetic.png",
-                }
-            )
-
-    session = Session()
-    monkeypatch.setattr(module.aiohttp, "ClientSession", lambda **kwargs: session)
-    monkeypatch.setattr(module.asyncio, "sleep", yield_to_loop)
-
-    async def invoke():
-        return await module.convert_to_pdf(io.BytesIO(b"document"), "synthetic.txt", "text/plain")
-
-    return module, session, invoke
-
-
-async def test_pdf_polling_deadline_closes_session(pending_pdf, monkeypatch):
-    module, session, invoke = pending_pdf
-    monkeypatch.setattr(module, "JOB_TIMEOUT_SECONDS", 0.02)
-    started = asyncio.get_running_loop().time()
-
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(invoke(), 1)
-
-    assert asyncio.get_running_loop().time() - started < 0.5
-    assert session.polling.is_set()
-    assert session.closed
-
-
-async def test_pdf_caller_cancellation_closes_session(pending_pdf):
-    _, session, invoke = pending_pdf
-    task = asyncio.create_task(invoke())
-    try:
-        await asyncio.wait_for(session.polling.wait(), 1)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert session.closed
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-
-async def test_pdf_ready_result_still_returns(pending_pdf):
-    _, session, invoke = pending_pdf
-    session.complete = True
-
-    result = await asyncio.wait_for(invoke(), 1)
-
-    assert session.closed
-    assert result[0].endswith("/synthetic.pdf")
-    assert result[2] == "synthetic.pdf"
-
-
 async def test_pdf_timeout_has_actionable_command_reply(external_handlers):
     target = SimpleNamespace(reply=AsyncMock(), chat=object())
     document = SimpleNamespace(file_name="synthetic.txt", mime_type="text/plain")
@@ -324,7 +224,6 @@ async def test_search_failure_offers_encoded_search_link(external_handlers):
 @pytest.mark.parametrize(
     "command,provider,expected",
     [
-        ("process_bg", "remove_bg", "Не удалось убрать фон"),
         ("process_imgur", "imgur_upload", "Не удалось загрузить файл на Imgur"),
     ],
 )

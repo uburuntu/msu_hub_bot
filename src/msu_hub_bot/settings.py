@@ -89,7 +89,6 @@ class Settings(BaseSettings):
     jdoodle_tokens: list[tuple[str, str]] = Field(default_factory=list)
     lingvanex_authorization: str = ""
     lingvanex_image_authorization: str = ""
-    remove_bg_api_key: str = ""
     imgur_authorization: str = ""
     owm_key: str = ""
     owm_map_key: str = ""

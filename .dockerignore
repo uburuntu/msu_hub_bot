@@ -21,3 +21,6 @@ web/coverage/
 **/*.key
 **/*.pem
 **/core*
+
+# Models are fetched and checksum-verified by the image build.
+src/msu_hub_bot/media/_models/

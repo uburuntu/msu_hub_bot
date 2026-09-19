@@ -187,7 +187,10 @@ async def test_viewer_runs_after_unmatched_route_and_honors_video_preference():
 async def test_document_without_declared_size_is_bounded_and_stream_closed(monkeypatch):
     viewer = ViewerMiddleware(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
     source = io.BytesIO(b"document")
-    convert = AsyncMock(return_value=("https://example.test/file.pdf", "https://example.test/thumb.jpg", "file.pdf"))
+    from msu_hub_bot.providers.pdf import PdfDocument
+
+    converted = PdfDocument(b"%PDF-synthetic", filename="file.pdf")
+    convert = AsyncMock(return_value=converted)
     reply = AsyncMock()
     monkeypatch.setattr("msu_hub_bot.telegram.middlewares.viewer.download", AsyncMock(return_value=source))
     monkeypatch.setattr("msu_hub_bot.telegram.middlewares.viewer.bot_for", lambda value: SimpleNamespace())
@@ -198,7 +201,8 @@ async def test_document_without_declared_size_is_bounded_and_stream_closed(monke
     assert source.closed
     assert convert.call_args.args[2] == "application/octet-stream"
     assert reply.call_args.args[0].filename == "file.pdf"
-    assert reply.call_args.kwargs["thumbnail"].filename == "thumbnail.jpg"
+    assert reply.call_args.args[0].data == b"%PDF-synthetic"
+    assert converted.closed and "thumbnail" not in reply.call_args.kwargs
 
 
 async def test_log_middleware_never_records_update_text_names_or_ids(caplog):

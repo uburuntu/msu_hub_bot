@@ -26,3 +26,5 @@ core
 core.*
 .DS_Store
 node_modules/
+
+src/msu_hub_bot/media/_models/

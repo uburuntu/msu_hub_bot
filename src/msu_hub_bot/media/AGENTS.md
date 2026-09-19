@@ -5,3 +5,4 @@
 - The [executor](../execution/executor.py) runs threads; caller cancellation or timeout does not stop native work. Subprocesses need their own termination limits.
 - Preserve established crop, font and timing behavior; test long captions and native decoding/encoding when affected. Lobster/demotivator changes do not authorize changing Wolfram crops.
 - Follow [sticker delivery](../../../docs/sticker-delivery.md) for clip limits and format/preview contracts; successful conversion alone does not prove Telegram delivery.
+- [background.py](background.py) runs only the checksum-verified local model in a bounded subprocess; [provider tools](../../../docs/provider-tools.md) owns model installation and processing limits. Never fetch weights during a user request.

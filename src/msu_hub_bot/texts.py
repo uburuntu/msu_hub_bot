@@ -75,7 +75,7 @@ cmd_help = f"""{hbold("Функции бота")}
 🧠 {hbold("Нейронки и прочее")}:
 • /wf — результат от WolframAlpha по запросу ({hlink("link", "https://www.wolframalpha.com/examples/mathematics/")})
 • /song — опознаёт песню ({hlink("link", "https://www.acrcloud.com/")})
-• /bg — удаление фона у изображения ({hlink("link", "https://slazzer.com/")})
+• /bg — удалить фон у картинки, обработка на сервере бота
 • /gpt2 — генерация текста
 • /tyan — случайные аниме тянки
 

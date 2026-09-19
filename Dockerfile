@@ -17,6 +17,7 @@ COPY --from=web /web/dist/ src/msu_hub_bot/web/static/
 COPY LICENSE THIRD_PARTY_NOTICES.md ./
 COPY licenses/ licenses/
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-editable
+RUN .venv/bin/python -m msu_hub_bot.media.background_model fetch
 
 FROM python:3.14.7-slim-trixie@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg tesseract-ocr tesseract-ocr-rus ca-certificates \
