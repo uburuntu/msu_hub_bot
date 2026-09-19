@@ -7,7 +7,7 @@ import {
   telegramCredentials,
 } from "../platform/telegram";
 import { Icon } from "../ui/Icon";
-import { RemindersPage } from "../features/reminders/RemindersPage";
+import { Workspace } from "./Workspace";
 import { Shell } from "./Shell";
 
 export function App() {
@@ -41,11 +41,11 @@ export function App() {
             <Icon name="bell" size={40} />
           </span>
           <div className="eyebrow">MSU HUB В TELEGRAM</div>
-          <h1>Важное не потеряется.</h1>
+          <h1>Свой бот для всего.</h1>
           <p>
-            Дела, планы и маленькие «не забыть».
+            Напоминания, игры и маленькие заботы чата.
             <br />
-            Откройте приложение из бота, чтобы управлять своими напоминаниями.
+            Откройте приложение из бота, чтобы всё было под рукой.
           </p>
           <a className="button primary" href="https://t.me/msu_hub_bot">
             <Icon name="send" />
@@ -57,36 +57,41 @@ export function App() {
         </div>
       </Shell>
     );
+  if (session)
+    return (
+      <Workspace
+        api={api}
+        credentials={credentials}
+        session={session}
+        launch={launch}
+      />
+    );
   return (
     <Shell session={session}>
-      {session ? (
-        <RemindersPage api={api} session={session} launch={launch} />
-      ) : (
-        <div className="session-loading">
-          {error ? (
-            <>
-              <span className="welcome-icon">
-                <Icon name="refresh" size={28} />
-              </span>
-              <h1>Давайте ещё раз</h1>
-              <p role="alert">{errorMessage(error)}</p>
-              <button
-                className="button primary"
-                onClick={() => setAttempt((value) => value + 1)}
-              >
-                Повторить
-              </button>
-            </>
-          ) : (
-            <>
-              <span className="welcome-icon loading-pulse">
-                <Icon name="bell" size={32} />
-              </span>
-              <p role="status">Открываем ваши напоминания…</p>
-            </>
-          )}
-        </div>
-      )}
+      <div className="session-loading">
+        {error ? (
+          <>
+            <span className="welcome-icon">
+              <Icon name="refresh" size={28} />
+            </span>
+            <h1>Давайте ещё раз</h1>
+            <p role="alert">{errorMessage(error)}</p>
+            <button
+              className="button primary"
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              Повторить
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="welcome-icon loading-pulse">
+              <Icon name="bell" size={32} />
+            </span>
+            <p role="status">Открываем ваши инструменты…</p>
+          </>
+        )}
+      </div>
     </Shell>
   );
 }

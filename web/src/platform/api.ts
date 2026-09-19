@@ -6,48 +6,9 @@ import type {
   Session,
 } from "./types";
 
-export class ApiError extends Error {
-  constructor(
-    public code: string,
-    message: string,
-    public status = 0,
-  ) {
-    super(message);
-  }
-
-  get uncertain(): boolean {
-    return this.status === 0 || this.status >= 500;
-  }
-}
-
-function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new ApiError(
-      "protocol",
-      "Сервер ответил неожиданно. Попробуйте ещё раз.",
-      503,
-    );
-  return value as Record<string, unknown>;
-}
-
-function string(value: unknown): string {
-  if (typeof value !== "string")
-    throw new ApiError("protocol", "Не удалось прочитать ответ сервера.", 503);
-  return value;
-}
-
-function integer(value: unknown): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value))
-    throw new ApiError("protocol", "Не удалось прочитать ответ сервера.", 503);
-  return value;
-}
-
-function stamp(value: unknown): string {
-  const result = string(value);
-  if (!Number.isFinite(Date.parse(result)))
-    throw new ApiError("protocol", "Не удалось прочитать дату.", 503);
-  return result;
-}
+import { ApiError } from "./errors";
+import { object, string, integer, stamp } from "./decode";
+export { ApiError } from "./errors";
 
 function reminder(value: unknown): Reminder {
   const row = object(value);
@@ -100,11 +61,12 @@ export class ApiClient {
     private transport: typeof fetch = (...args) => fetch(...args),
   ) {}
 
-  private async request<T>(
+  protected async request<T>(
     path: string,
     decode: (data: unknown) => T,
     body?: unknown,
     signal?: AbortSignal,
+    method?: "POST" | "PATCH",
   ): Promise<T> {
     if (!this.initData)
       throw new ApiError(
@@ -119,7 +81,7 @@ export class ApiClient {
     const timer = window.setTimeout(abort, 20_000);
     try {
       const response = await this.transport(path, {
-        method: body === undefined ? "GET" : "POST",
+        method: method ?? (body === undefined ? "GET" : "POST"),
         headers: {
           Authorization: `tma ${this.initData}`,
           Accept: "application/json",

@@ -7,6 +7,22 @@ const paths = {
       <path d="M10 21h4" />
     </>
   ),
+  trophy: (
+    <>
+      <path d="M8 3h8v5a4 4 0 0 1-8 0V3ZM8 5H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4M12 12v7m-4 2h8m-6-2h4" />
+    </>
+  ),
+  heart: (
+    <path d="M20.5 5.5a5 5 0 0 0-7 0L12 7l-1.5-1.5a5 5 0 0 0-7 7L12 21l8.5-8.5a5 5 0 0 0 0-7Z" />
+  ),
+  settings: (
+    <>
+      <path d="M4 6h16M4 12h16M4 18h16" />
+      <circle cx="8" cy="6" r="2" fill="var(--panel)" />
+      <circle cx="16" cy="12" r="2" fill="var(--panel)" />
+      <circle cx="10" cy="18" r="2" fill="var(--panel)" />
+    </>
+  ),
   plus: <path d="M12 5v14M5 12h14" />,
   arrow: <path d="m9 5 7 7-7 7" />,
   clock: (
