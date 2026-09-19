@@ -112,6 +112,78 @@ def test_feature_migration_is_additive_atomic_and_preserves_old_rpc_bodies(postg
     assert postgres.feature_upgrade
 
 
+def exercise_job_observability_migration(db, migration):
+    from test_application_postgres import rows_snapshot
+
+    def snapshot():
+        return {
+            "rows": rows_snapshot(db, ("users", "chats", "feature_records", "feature_jobs", "feature_operations")),
+            "functions": db.value(
+                "SELECT jsonb_agg(jsonb_build_array(oid,prosrc,proowner,proacl,proconfig) ORDER BY oid) FROM pg_proc WHERE pronamespace='msu_hub_private'::regnamespace;"
+            ),
+            "relations": db.value(
+                "SELECT jsonb_agg(jsonb_build_array(oid,relname,relowner,relacl,relrowsecurity) ORDER BY oid) FROM pg_class WHERE relnamespace='msu_hub_private'::regnamespace;"
+            ),
+            "ledger": db.value("SELECT jsonb_agg(version ORDER BY version) FROM msu_hub_private.schema_migrations;"),
+        }
+
+    before = snapshot()
+    db.run("INSERT INTO msu_hub_private.schema_migrations(version) VALUES(99);")
+    rejected = db.run(migration, check=False)
+    assert rejected.returncode and "requires schema revision 7" in rejected.stderr
+    db.run("DELETE FROM msu_hub_private.schema_migrations WHERE version=99;")
+    interrupted = migration.replace("VALUES(8);", "VALUES(1/0);")
+    assert db.run(interrupted, check=False).returncode
+    assert snapshot() == before
+    db.run(migration)
+    after = snapshot()
+    assert before["rows"] == after["rows"]
+    assert before["relations"] == after["relations"]
+    assert before["functions"] == after["functions"]
+    assert db.value("SELECT max(version) FROM msu_hub_private.schema_migrations;") == 8
+    return True
+
+
+def test_job_overview_migration_preserves_private_objects_and_data(application_postgres):
+    assert application_postgres.job_observability_upgrade
+
+
+def test_job_overview_is_bounded_private_and_counts_unleased_overdue_work(db):
+    create(db, "first", jobs=[job("first", "first")])
+    create(db, "held", jobs=[job("held", "held")])
+    create(db, "future", jobs=[job("future", "future", run_at=when(days=1))])
+    create(db, "foreign", jobs=[job("foreign", "foreign")])
+    db.run("UPDATE msu_hub_private.feature_jobs SET owner_id=12345 WHERE key='foreign';")
+    db.run("UPDATE msu_hub_private.feature_jobs SET state='held' WHERE key='held';")
+    request = {"handlers": [{"feature": "quiz", "kind": "finish"}, {"feature": "empty", "kind": "none"}]}
+    rows = call(db, "job_overview", request)
+    assert rows[0] == {"feature": "empty", "kind": "none", "pending": 0, "held": 0, "leased": 0, "overdue": 0, "oldest_due_seconds": 0}
+    assert rows[1] | {"oldest_due_seconds": 0} == {
+        "feature": "quiz",
+        "kind": "finish",
+        "pending": 2,
+        "held": 1,
+        "leased": 0,
+        "overdue": 1,
+        "oldest_due_seconds": 0,
+    }
+    assert rows[1]["oldest_due_seconds"] >= 1
+    claimed = claim(db)
+    assert len(claimed) == 1
+    active = call(db, "job_overview", request)[1]
+    assert active["leased"] == 1 and active["overdue"] == 0 and active["oldest_due_seconds"] == 0
+    assert db.run(f"SELECT msu_hub_api.feature_job_overview_v1({literal(request)});", principal=STRANGER, check=False).returncode
+    assert db.run("SET ROLE anon; SELECT msu_hub_api.feature_job_overview_v1('{}');", check=False).returncode
+    for invalid in (
+        {},
+        {"handlers": []},
+        {"handlers": request["handlers"] * 33},
+        {"handlers": [{"feature": "bad name", "kind": "finish"}]},
+        request | {"owner_id": 12345},
+    ):
+        assert db.run(f"SELECT msu_hub_api.feature_job_overview_v1({literal(invalid)});", principal=PRINCIPAL, check=False).returncode
+
+
 def test_records_preserve_envelope_unknown_fields_and_application_scope(db):
     first = create(db)
     assert first == get(db)

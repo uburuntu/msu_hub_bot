@@ -91,7 +91,14 @@ def application_postgres(postgres):
     try:
         reset_database(upgraded, legacy=True)
         upgrades = [schema for schema in SCHEMAS if int(schema.name[:3]) > 5]
-        upgraded.application_upgrade = exercise_application_migrations(upgraded, upgrades)
+        upgraded.application_upgrade = exercise_application_migrations(
+            upgraded, [schema for schema in upgrades if int(schema.name[:3]) <= 7]
+        )
+        from test_feature_postgres import exercise_job_observability_migration
+
+        for schema in upgrades:
+            if int(schema.name[:3]) > 7:
+                upgraded.job_observability_upgrade = exercise_job_observability_migration(upgraded, schema.read_text())
         yield upgraded
     finally:
         admin.run(f'DROP DATABASE "{name}";')

@@ -11,7 +11,7 @@ from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportM
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 from msu_hub_bot.telegram.middlewares.telemetry import DispatchTelemetryMiddleware, HandlerTelemetryMiddleware
-from msu_hub_bot.telemetry import Boundary, GaugeName, Outcome, Provider, Telemetry, TelemetryConfig
+from msu_hub_bot.telemetry import Boundary, GaugeName, JobGaugeName, Outcome, Provider, Telemetry, TelemetryConfig
 from telegram_helpers import make_message
 from telemetry_helpers import Capture, config
 
@@ -48,6 +48,34 @@ async def test_disabled_default_ignores_ambient_tokens_and_resources(monkeypatch
     await telemetry.close()
     assert sink.started == 0 and sink.payloads == []
     assert trace.get_tracer_provider() is not telemetry._provider
+
+
+async def test_job_dimensions_are_registered_and_stale_queue_snapshots_disappear(monkeypatch):
+    sink = Capture()
+    telemetry = Telemetry(config(), transport=sink)
+    telemetry.register_feature_job("reminders", "deliver")
+    await telemetry.start()
+    telemetry.feature_job_snapshot({("reminders", "deliver"): {name: 2.0 for name in JobGaugeName}})
+    assert telemetry._job_gauge_callback(JobGaugeName.PENDING)(None)[0].value == 2
+    telemetry.feature_job_transition("reminders", "deliver", "hold")
+    telemetry.feature_job_transition(CANARY, "deliver", "hold")
+    with telemetry.operation(Boundary.JOB, "feature.job", feature="reminders", job_kind="deliver", attempt=3):
+        pass
+    with telemetry.operation(Boundary.JOB, "feature.job", feature=CANARY, job_kind=CANARY):
+        pass
+    await telemetry._metrics()
+    telemetry._job_observed_at -= 91
+    assert telemetry._job_gauge_callback(JobGaugeName.PENDING)(None) == []
+    assert telemetry._job_gauge_callback(None)(None)[0].value >= 91
+    await telemetry.close()
+    encoded = sink.serialized()
+    assert CANARY not in encoded
+    assert "bot.feature_jobs.pending" in encoded and "bot.feature_jobs.transitions" in encoded
+    for span in sink.spans():
+        attributes = {a.key: a.value.string_value for a in span.attributes}
+        assert attributes.get("feature") in {None, "reminders"}
+    with pytest.raises(RuntimeError):
+        telemetry.register_feature_job("other", "new")
 
 
 async def test_every_signal_is_allowlisted_with_exception_baggage_and_environment_canaries(monkeypatch, caplog):

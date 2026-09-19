@@ -84,6 +84,29 @@ async def test_success_uses_registered_claim_and_original_fencing_identity():
             assert request["feature"] == "sample" and request["scope"] == claimed["scope"]
 
 
+async def test_queue_monitor_accepts_exact_registered_summary_and_rejects_unknown_dimensions():
+    backend, worker = configured()
+    worker.register("sample", "finish", AsyncMock())
+    from unittest.mock import Mock
+
+    worker.telemetry.feature_job_snapshot = snapshot = Mock()
+    row = {"feature": "sample", "kind": "finish", "pending": 3, "held": 2, "leased": 1, "overdue": 1, "oldest_due_seconds": 10.5}
+    backend.feature_request = AsyncMock(return_value=[row])
+    await worker.observe_once()
+    snapshot.assert_called_once()
+    for invalid in (
+        [row, row],
+        [row | {"feature": "unknown"}],
+        [row | {"leased": 3}],
+        [row | {"oldest_due_seconds": float("nan")}],
+        [row | {"payload": CANARY}],
+    ):
+        backend.feature_request.return_value = invalid
+        with pytest.raises(FeatureProtocolError):
+            await worker.observe_once()
+    assert snapshot.call_count == 1
+
+
 async def test_obsolete_generation_never_enters_handler_and_releases_only_original_claim():
     async def status(_):
         return {"current": False}

@@ -9,9 +9,9 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from pydantic import JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
 
-from msu_hub_bot.telemetry import Backend, Boundary, Telemetry
+from msu_hub_bot.telemetry import Backend, Boundary, JobGaugeName, Outcome, Telemetry
 
 from .models import FeatureError, FeatureProtocolError, Job, identifier, timestamp
 from .store import FeatureStore
@@ -36,13 +36,27 @@ class LeaseLost(FeatureError):
         super().__init__("Feature job lease is no longer current")
 
 
+class JobOverview(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, strict=True)
+    feature: str
+    kind: str
+    pending: int = Field(ge=0)
+    held: int = Field(ge=0)
+    leased: int = Field(ge=0)
+    overdue: int = Field(ge=0)
+    oldest_due_seconds: float = Field(ge=0, allow_inf_nan=False)
+
+    _identity = field_validator("feature", "kind")(identifier)
+
+
 type JobHandler = Callable[[JobContext], Awaitable[None]]
 type JobAction = Literal["check", "renew", "complete", "retry", "hold", "expire"]
 
 
 class JobContext:
-    def __init__(self, store: FeatureStore, job: Job, *, lease_seconds: int = 60) -> None:
+    def __init__(self, store: FeatureStore, job: Job, *, lease_seconds: int = 60, telemetry: Telemetry | None = None) -> None:
         self.store, self.job, self.lease_seconds = store, job, lease_seconds
+        self.telemetry = telemetry
 
     async def status(self, action: JobAction, *, run_at: datetime | None = None) -> bool:
         request: dict[str, JsonValue] = {
@@ -60,6 +74,8 @@ class JobContext:
         result = await self.store.backend.feature_request("job_status", request)
         if not isinstance(result, dict) or type(result.get("current")) is not bool:
             raise FeatureProtocolError()
+        if result["current"] and self.telemetry is not None:
+            self.telemetry.feature_job_transition(self.job.feature, self.job.kind, action)
         return bool(result["current"])
 
     async def current(self) -> bool:
@@ -104,6 +120,7 @@ class FeatureWorker:
             raise ValueError("Feature retry attempts must be bounded")
         self._handlers[identity] = handler
         self._attempt_limits[identity] = self.max_attempts if max_attempts is None else max_attempts
+        self.telemetry.register_feature_job(*identity)
 
     def stop(self) -> None:
         self._stopped.set()
@@ -118,8 +135,23 @@ class FeatureWorker:
         # A renewal failure cancels local work. Fencing cannot recall an HTTP request
         # already accepted by another service; handlers must reconcile uncertainty.
         async def invoke() -> None:
-            with self.telemetry.operation(Boundary.JOB, "feature.job", backend=Backend.SUPABASE, trace=False):
-                await handler(context)
+            with self.telemetry.operation(
+                Boundary.JOB,
+                "feature.job",
+                backend=Backend.SUPABASE,
+                trace=False,
+                feature=context.job.feature,
+                job_kind=context.job.kind,
+                attempt=context.job.attempts,
+            ) as operation:
+                try:
+                    await handler(context)
+                except JobExpired:
+                    operation.set_outcome(Outcome.IGNORED)
+                    raise
+                except JobRetry, JobHold:
+                    operation.set_outcome(Outcome.UNAVAILABLE)
+                    raise
 
         task = asyncio.create_task(invoke(), name="feature-job")
         renewal = asyncio.create_task(self._renew(context), name="feature-lease")
@@ -134,7 +166,7 @@ class FeatureWorker:
             await asyncio.gather(task, renewal, return_exceptions=True)
 
     async def _handle(self, job: Job) -> None:
-        context = JobContext(self.store, job, lease_seconds=self.lease_seconds)
+        context = JobContext(self.store, job, lease_seconds=self.lease_seconds, telemetry=self.telemetry)
         handler = self._handlers.get((job.feature, job.kind))
         if handler is None:
             raise FeatureProtocolError()
@@ -199,7 +231,63 @@ class FeatureWorker:
                     raise result
             return len(jobs)
 
+    async def observe_once(self) -> None:
+        """Separate, bounded read; a monitoring outage must not stall delivery."""
+        if not self._handlers:
+            return
+        async with asyncio.timeout(5):
+            raw = await self.store.backend.feature_request(
+                "job_overview", {"handlers": [{"feature": feature, "kind": kind} for feature, kind in self._handlers]}
+            )
+        if not isinstance(raw, list) or len(raw) != len(self._handlers):
+            raise FeatureProtocolError()
+        try:
+            rows = [JobOverview.model_validate(item) for item in raw]
+        except ValidationError:
+            raise FeatureProtocolError() from None
+        values = {
+            (row.feature, row.kind): {
+                JobGaugeName.PENDING: float(row.pending),
+                JobGaugeName.HELD: float(row.held),
+                JobGaugeName.LEASED: float(row.leased),
+                JobGaugeName.OVERDUE: float(row.overdue),
+                JobGaugeName.OLDEST_DUE: row.oldest_due_seconds,
+            }
+            for row in rows
+        }
+        if set(values) != set(self._handlers) or any(row.leased + row.overdue > row.pending for row in rows):
+            raise FeatureProtocolError()
+        self.telemetry.feature_job_snapshot(values)
+
+    async def _observe_loop(self) -> None:
+        failed = False
+        while not self._stopped.is_set():
+            try:
+                await self.observe_once()
+                if failed:
+                    logger.info("Feature queue monitoring recovered")
+                failed = False
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if not failed:
+                    logger.warning("Feature queue monitoring unavailable")
+                failed = True
+            try:
+                await asyncio.wait_for(self._stopped.wait(), timeout=30)
+            except TimeoutError:
+                pass
+
     async def run(self) -> None:
+        monitor = asyncio.create_task(self._observe_loop(), name="feature-queue-monitor") if self.telemetry.config.export else None
+        try:
+            await self._run()
+        finally:
+            if monitor is not None:
+                monitor.cancel()
+                await asyncio.gather(monitor, return_exceptions=True)
+
+    async def _run(self) -> None:
         while not self._stopped.is_set():
             try:
                 await self.run_once()

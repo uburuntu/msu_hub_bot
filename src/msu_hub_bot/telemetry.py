@@ -88,6 +88,18 @@ class GaugeName(StrEnum):
     POLL_AGE = "bot.poll.age"
 
 
+class JobGaugeName(StrEnum):
+    PENDING = "bot.feature_jobs.pending"
+    HELD = "bot.feature_jobs.held"
+    LEASED = "bot.feature_jobs.leased"
+    OVERDUE = "bot.feature_jobs.overdue"
+    OLDEST_DUE = "bot.feature_jobs.oldest_due"
+
+
+JOB_METRIC_KEYS = {"feature", "job.kind"}
+JOB_STATES = frozenset({"complete", "retry", "hold", "expire"})
+
+
 OPERATIONS = frozenset(
     {
         "dispatch",
@@ -138,7 +150,7 @@ UPDATE_KINDS = frozenset(
         "unknown",
     }
 )
-METRIC_KEYS = {"boundary", "operation", "outcome", "provider", "backend", "update.kind"}
+METRIC_KEYS = {"boundary", "operation", "outcome", "provider", "backend", "update.kind", *JOB_METRIC_KEYS}
 
 
 @dataclass(frozen=True)
@@ -511,6 +523,9 @@ class Telemetry:
         self._meter_provider: MeterProvider | None = None
         self._reader: InMemoryMetricReader | None = None
         self._gauge_values: dict[GaugeName, float] = {}
+        self._feature_jobs: set[tuple[str, str]] = set()
+        self._job_gauges: dict[tuple[str, str], dict[JobGaugeName, float]] = {}
+        self._job_observed_at: float | None = None
         self._last_poll: float | None = None
         self._closing = False
         self._closed = False
@@ -532,6 +547,42 @@ class Telemetry:
         if self._worker is not None or self._closed:
             raise RuntimeError("Register telemetry commands before start")
         self.command_keys = frozenset(key.casefold() for key in keys if re.fullmatch(r"[\w-]{1,64}", key))
+
+    def register_feature_job(self, feature: str, kind: str) -> None:
+        """Only code-registered job kinds become metric dimensions."""
+        if self._worker is not None or self._closed:
+            raise RuntimeError("Register telemetry jobs before start")
+        if len(self._feature_jobs) >= 64 or any(re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value) is None for value in (feature, kind)):
+            raise ValueError("Feature telemetry identity must be bounded")
+        self._feature_jobs.add((feature, kind))
+
+    def feature_job_snapshot(self, values: Mapping[tuple[str, str], Mapping[JobGaugeName, float]]) -> None:
+        if not self._available() or set(values) != self._feature_jobs:
+            return
+        if any(
+            set(row) != set(JobGaugeName) or any(not math.isfinite(n) or not 0 <= n <= 1e12 for n in row.values())
+            for row in values.values()
+        ):
+            return
+        self._job_gauges = {key: dict(row) for key, row in values.items()}
+        self._job_observed_at = time.monotonic()
+
+    def feature_job_transition(self, feature: str, kind: str, state: str) -> None:
+        if self._available() and (feature, kind) in self._feature_jobs and state in JOB_STATES:
+            self._job_transitions.add(1, {"feature": feature, "job.kind": kind, "state": state})
+
+    def _job_gauge_callback(self, name: JobGaugeName | None) -> Callable[[CallbackOptions], Sequence[Observation]]:
+        def observe(_options: CallbackOptions) -> Sequence[Observation]:
+            if self._job_observed_at is None:
+                return []
+            age = max(0, time.monotonic() - self._job_observed_at)
+            if name is None:
+                return [Observation(age)]
+            if age > 90:
+                return []
+            return [Observation(row[name], {"feature": feature, "job.kind": kind}) for (feature, kind), row in self._job_gauges.items()]
+
+        return observe
 
     @contextmanager
     def context(
@@ -645,6 +696,16 @@ class Telemetry:
                     View(instrument_name="bot.telemetry.dropped_spans", meter_name="msu_hub_bot.telemetry", attribute_keys=set()),
                     View(instrument_name="bot.telemetry.dropped_logs", meter_name="msu_hub_bot.telemetry", attribute_keys=set()),
                     View(instrument_name="bot.poll.requests", meter_name="msu_hub_bot.telemetry", attribute_keys={"outcome"}),
+                    View(
+                        instrument_name="bot.feature_jobs.transitions",
+                        meter_name="msu_hub_bot.telemetry",
+                        attribute_keys=JOB_METRIC_KEYS | {"state"},
+                    ),
+                    View(instrument_name="bot.feature_jobs.snapshot_age", meter_name="msu_hub_bot.telemetry", attribute_keys=set()),
+                    *[
+                        View(instrument_name=name.value, meter_name="msu_hub_bot.telemetry", attribute_keys=JOB_METRIC_KEYS)
+                        for name in JobGaugeName
+                    ],
                     *[View(instrument_name=name.value, meter_name="msu_hub_bot.telemetry", attribute_keys=set()) for name in GaugeName],
                 ],
             )
@@ -654,6 +715,14 @@ class Telemetry:
             self._drops = meter.create_counter("bot.telemetry.dropped_spans", unit="1")
             self._log_drops = meter.create_counter("bot.telemetry.dropped_logs", unit="1")
             self._poll_count = meter.create_counter("bot.poll.requests", unit="1")
+            self._job_transitions = meter.create_counter("bot.feature_jobs.transitions", unit="1")
+            meter.create_observable_gauge("bot.feature_jobs.snapshot_age", callbacks=[self._job_gauge_callback(None)], unit="s")
+            for job_gauge in JobGaugeName:
+                meter.create_observable_gauge(
+                    job_gauge.value,
+                    callbacks=[self._job_gauge_callback(job_gauge)],
+                    unit="s" if job_gauge is JobGaugeName.OLDEST_DUE else "1",
+                )
             for name in GaugeName:
                 meter.create_observable_gauge(
                     name.value, callbacks=[self._gauge_callback(name)], unit="s" if name is GaugeName.POLL_AGE else "1"
@@ -776,6 +845,8 @@ class Telemetry:
         telegram_method: str | None = None,
         target_chat_id: int | None = None,
         target_message_id: int | None = None,
+        feature: str | None = None,
+        job_kind: str | None = None,
     ) -> Iterator[Operation]:
         if not self._available():
             yield Operation(None)
@@ -798,6 +869,15 @@ class Telemetry:
             labels["backend"] = backend.value
         if dispatch is not None:
             labels["update.kind"] = dispatch.kind
+        if (
+            boundary is Boundary.JOB
+            and isinstance(feature, str)
+            and isinstance(job_kind, str)
+            and (feature, job_kind) in self._feature_jobs
+        ):
+            labels.update({"feature": feature, "job.kind": job_kind})
+            if type(attempt) is int:
+                attributes["job.attempt"] = min(10000, max(1, attempt))
         attributes.update({"operation": key, **labels})
         if boundary is Boundary.TELEGRAM:
             attributes["telegram.method"] = telegram_method if telegram_method in TELEGRAM_METHODS else "unknown"
