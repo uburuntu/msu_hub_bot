@@ -75,7 +75,6 @@ class Provider(StrEnum):
 
 
 class Backend(StrEnum):
-    REDIS = "redis"
     SUPABASE = "supabase"
     NATIVE = "native"
 

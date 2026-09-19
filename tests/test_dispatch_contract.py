@@ -483,12 +483,11 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
 
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     private_text = "SYNTHETIC_PRIVATE_ROUTER_CANARY"
-    session, client, db = RecordingSession(), AsyncMock(), AsyncMock()
-    client.get.return_value = None
+    session, db = RecordingSession(), AsyncMock()
+    db.feature_request.return_value = None
     db.load_settings.return_value = {}
     db.list_directory.return_value = []
     monkeypatch.setattr(app, "AiohttpSession", lambda **kwargs: session)
-    monkeypatch.setattr(app, "Redis", lambda **kwargs: client)
     monkeypatch.setattr(app, "create_repository", lambda *args, **kwargs: db)
     sink = Capture()
     telemetry = Telemetry(config(traces_per_minute=1), transport=sink)
@@ -496,7 +495,6 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
     application = await app.Application.create(
         Settings(
             bot_token="123456789:" + "a" * 35,
-            redis_host="localhost",
             supabase_url="http://supabase.invalid",
             supabase_key="synthetic-publishable-key",
             supabase_email="bot@example.invalid",

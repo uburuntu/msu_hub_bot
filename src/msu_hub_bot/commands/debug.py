@@ -7,7 +7,7 @@ from aiogram.utils.markdown import hpre
 
 from msu_hub_bot.telegram.constants import TELEGRAM_MESSAGE_MAX_LEN
 from msu_hub_bot.logger import LoggerBuilder
-from msu_hub_bot.telegram.storage import RedisStorage
+from msu_hub_bot.telegram.deletions import MessageDeletions
 from msu_hub_bot.telegram.utils import command_arguments, send_super_reply
 from msu_hub_bot.utils import parse_int
 from msu_hub_bot.redaction import redact
@@ -43,9 +43,9 @@ async def process_logs(message: Message) -> Message | bool | None:
     return await send_super_reply(message, text, text_postprocess=hpre)
 
 
-async def process_delete_after(message: Message, redis: RedisStorage) -> bool:
+async def process_delete_after(message: Message, deletions: MessageDeletions) -> bool:
     if not message.reply_to_message:
         return True
     args = command_arguments(message).split()
     after = (parse_int(args[0], 0, 3, 10 * 24 * 60 * 60) or 0) if args else 0
-    return await redis.mark_message_to_delete(message.reply_to_message, after=after)
+    return await deletions.mark_message_to_delete(message.reply_to_message, after=after)

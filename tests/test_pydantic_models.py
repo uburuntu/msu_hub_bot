@@ -25,19 +25,19 @@ def test_settings_preserve_json_collections_case_and_init_precedence(monkeypatch
 
 
 def test_settings_do_not_read_ambient_dotenv_files(monkeypatch, tmp_path):
-    monkeypatch.delenv("HUB_REDIS_PASSWORD", raising=False)
+    monkeypatch.delenv("HUB_SUPABASE_PASSWORD", raising=False)
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text("HUB_REDIS_PASSWORD=synthetic-dotenv-marker\n")
-    assert Settings().redis_password == ""
+    (tmp_path / ".env").write_text("HUB_SUPABASE_PASSWORD=synthetic-dotenv-marker\n")
+    assert Settings().supabase_password == ""
 
 
 def test_settings_validation_does_not_echo_invalid_input():
     marker = "synthetic-invalid-credential-marker"
     with pytest.raises(ValidationError) as result:
-        Settings(redis_port=marker)
+        Settings(web_port=marker)
     assert marker not in str(result.value)
     assert marker not in repr(result.value)
-    assert "redis_port" in str(result.value)
+    assert "web_port" in str(result.value)
 
 
 @pytest.mark.parametrize("count", [0, 4, 6])

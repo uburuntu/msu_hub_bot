@@ -58,14 +58,14 @@ def callback(actor, target=None, action="ban", bot_permissions=True):
     )
     query = SimpleNamespace(message=message, from_user=User(id=10, is_bot=False, first_name="Friend"), answer=AsyncMock())
     data = AntiBotCallback(action=action, chat_id=-100, user_id=20)
-    redis = SimpleNamespace(mark_message_to_delete=AsyncMock())
-    return query, data, bot, redis
+    deletions = SimpleNamespace(mark_message_to_delete=AsyncMock())
+    return query, data, bot, deletions
 
 
 @pytest.mark.parametrize("actor", [member("member"), member("administrator")])
 async def test_limited_actor_cannot_ban(actor):
-    query, data, bot, redis = callback(actor)
-    await AntiBot.process_cb(query, data, bot, redis)
+    query, data, bot, deletions = callback(actor)
+    await AntiBot.process_cb(query, data, bot, deletions)
     bot.ban_chat_member.assert_not_awaited()
     assert bot.get_chat_member.await_count == 1
     query.answer.assert_awaited_once()
@@ -73,25 +73,25 @@ async def test_limited_actor_cannot_ban(actor):
 
 @pytest.mark.parametrize("status", ["administrator", "creator", "left", "kicked", "restricted"])
 async def test_target_membership_is_rechecked(status):
-    query, data, bot, redis = callback(member("creator"), member(status))
-    await AntiBot.process_cb(query, data, bot, redis)
+    query, data, bot, deletions = callback(member("creator"), member(status))
+    await AntiBot.process_cb(query, data, bot, deletions)
     bot.ban_chat_member.assert_not_awaited()
     query.answer.assert_awaited_once()
 
 
 async def test_simultaneous_decisions_only_ban_once():
-    query, data, bot, redis = callback(member("creator"))
+    query, data, bot, deletions = callback(member("creator"))
     bot.get_chat_member.side_effect = [member("creator"), member("administrator", True, True), member("member"), member("creator")]
-    await asyncio.gather(AntiBot.process_cb(query, data, bot, redis), AntiBot.process_cb(query, data, bot, redis))
+    await asyncio.gather(AntiBot.process_cb(query, data, bot, deletions), AntiBot.process_cb(query, data, bot, deletions))
     bot.ban_chat_member.assert_awaited_once_with(-100, 20, until_date=None)
     assert query.answer.await_count == 2
 
 
 @pytest.mark.parametrize("change", [{"action": "unknown"}, {"chat_id": 123}, {"user_id": 0}])
 async def test_invalid_callback_cannot_moderate(change):
-    query, data, bot, redis = callback(member("creator"))
+    query, data, bot, deletions = callback(member("creator"))
     data = data.model_copy(update=change)
-    await AntiBot.process_cb(query, data, bot, redis)
+    await AntiBot.process_cb(query, data, bot, deletions)
     bot.get_chat_member.assert_not_awaited()
     bot.ban_chat_member.assert_not_awaited()
     query.answer.assert_awaited_once()
@@ -103,6 +103,6 @@ def test_non_numeric_callback_is_rejected_before_dispatch():
 
 
 async def test_bot_permissions_still_required():
-    query, data, bot, redis = callback(member("creator"), bot_permissions=False)
-    await AntiBot.process_cb(query, data, bot, redis)
+    query, data, bot, deletions = callback(member("creator"), bot_permissions=False)
+    await AntiBot.process_cb(query, data, bot, deletions)
     bot.ban_chat_member.assert_not_awaited()

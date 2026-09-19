@@ -15,7 +15,6 @@ from telegram_helpers import RecordingSession
 def app_settings():
     return Settings(
         bot_token="123456789:" + "a" * 35,
-        redis_host="localhost",
         supabase_url="http://supabase.invalid",
         supabase_key="synthetic-publishable-key",
         supabase_email="bot@example.invalid",
@@ -28,44 +27,39 @@ def boundaries(monkeypatch):
     from msu_hub_bot import app
 
     session = RecordingSession()
-    client = AsyncMock()
     db = AsyncMock()
     db.feature_request.side_effect = lambda operation, request: {"version": 1} if operation == "health" else []
     monkeypatch.setattr(app, "AiohttpSession", lambda **kwargs: session)
-    monkeypatch.setattr(app, "Redis", lambda **kwargs: client)
     monkeypatch.setattr(app, "create_repository", lambda *args, **kwargs: db)
-    return session, client, db
+    return session, db
 
 
 async def test_composition_startup_and_idempotent_shutdown(app_settings, boundaries, monkeypatch):
     from msu_hub_bot.app import Application
 
-    session, client, db = boundaries
+    session, db = boundaries
     application = await Application.create(app_settings)
-    assert application.redis.generate_key("bot", "to_delete") == "hub:bot:to_delete"
+    assert application.deletions.store is application.features
     assert application.fsm.storage is not application.dispatcher.storage
-    assert application.fsm.storage.state_ttl is None
-    assert application.fsm.storage.data_ttl is None
+    assert application.fsm.storage.records.retention is None
     await application.start()
     db.check.assert_awaited_once_with()
     assert [type(method) for method in session.methods] == [GetMe, DeleteWebhook]
     assert session.methods[-1].drop_pending_updates is False
-    assert application._producer is not None
     assert application._feature_task is not None
     assert application.dispatcher.workflow_data["quiz"] is application.quiz
     assert application.dispatcher.workflow_data["chess_matches"] is application.chess_matches
     await application.close()
     await application.close()
-    client.aclose.assert_awaited_once()
     db.close.assert_awaited_once()
-    assert session.closed and application._producer.done()
+    assert session.closed
     assert application._feature_task.done()
 
 
 async def test_partial_allocation_failure_closes_opened_clients(app_settings, boundaries, monkeypatch):
     from msu_hub_bot import app
 
-    session, client, db = boundaries
+    session, db = boundaries
 
     def fail(*args, **kwargs):
         raise RuntimeError("Synthetic allocation failure")
@@ -74,20 +68,18 @@ async def test_partial_allocation_failure_closes_opened_clients(app_settings, bo
     with pytest.raises(RuntimeError, match="allocation"):
         await app.Application.create(app_settings)
     assert session.closed
-    client.aclose.assert_awaited_once()
     db.close.assert_awaited_once()
 
 
 async def test_startup_failure_runs_owned_cleanup(app_settings, boundaries):
     from msu_hub_bot.app import Application
 
-    session, client, db = boundaries
+    session, db = boundaries
     db.check.side_effect = RuntimeError("Synthetic DB outage")
     application = await Application.create(app_settings)
     with pytest.raises(RuntimeError, match="outage"):
         await application.run()
     assert session.closed
-    client.aclose.assert_awaited_once()
     assert session.methods == []
 
 
@@ -95,20 +87,19 @@ async def test_missing_feature_schema_stops_startup_before_telegram(app_settings
     from msu_hub_bot.app import Application
     from msu_hub_bot.storage.features import FeatureProtocolError
 
-    session, client, db = boundaries
+    session, db = boundaries
     db.feature_request.side_effect = lambda operation, request: {"version": 0}
     application = await Application.create(app_settings)
     with pytest.raises(FeatureProtocolError):
         await application.run()
     assert session.closed and session.methods == []
-    client.aclose.assert_awaited_once()
     db.close.assert_awaited_once()
 
 
 async def test_polling_explicitly_subscribes_to_all_kinds_and_preserves_backlog(app_settings, boundaries, monkeypatch):
     from msu_hub_bot.app import Application
 
-    session, _, _ = boundaries
+    session, _ = boundaries
     application = await Application.create(app_settings)
     start_polling = AsyncMock()
     monkeypatch.setattr(application.dispatcher, "start_polling", start_polling)
@@ -129,7 +120,7 @@ async def test_polling_explicitly_subscribes_to_all_kinds_and_preserves_backlog(
 async def test_shutdown_drains_admitted_jobs_before_closing_dependencies(app_settings, boundaries):
     from msu_hub_bot.app import Application
 
-    session, client, _ = boundaries
+    session, db = boundaries
     application = await Application.create(app_settings)
     started, finish = asyncio.Event(), asyncio.Event()
 
@@ -140,7 +131,7 @@ async def test_shutdown_drains_admitted_jobs_before_closing_dependencies(app_set
 
         async def late_job():
             assert not session.closed
-            client.aclose.assert_not_awaited()
+            db.close.assert_not_awaited()
 
         application.supervisor.create_job(late_job)
 
@@ -176,7 +167,7 @@ async def test_web_listener_starts_after_readiness_and_drains_before_database_cl
     listener.close.side_effect = lambda: events.append("web-close")
     monkeypatch.setattr(app, "WebServer", lambda *args, **kwargs: listener)
     app_settings.web_app_url = "https://app.example.invalid"
-    session, client, db = boundaries
+    session, db = boundaries
     db.check.side_effect = lambda: events.append("database-ready")
     db.close.side_effect = lambda: events.append("database-close")
     application = await app.Application.create(app_settings)
@@ -187,4 +178,3 @@ async def test_web_listener_starts_after_readiness_and_drains_before_database_cl
     assert menu.menu_button.web_app.url == app_settings.web_app_url
     await application.close()
     assert events[-2:] == ["web-close", "database-close"]
-    client.aclose.assert_awaited_once()

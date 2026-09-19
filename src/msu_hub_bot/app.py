@@ -6,10 +6,10 @@ import asyncio
 import logging
 import os
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from aiogram import Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -17,10 +17,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode, UpdateType
 from aiogram.filters import Command
 from aiogram.types import MenuButtonWebApp, WebAppInfo
-from aiogram.fsm.storage.base import DefaultKeyBuilder
-from aiogram.fsm.storage.redis import RedisStorage as FSMRedisStorage
 from ccxt.async_support import binance
-from redis.asyncio import Redis
 
 from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.factory import create_repository
@@ -49,7 +46,8 @@ from msu_hub_bot.telegram.state import (
     StateContextMiddleware,
     TopicFSMContextMiddleware,
 )
-from msu_hub_bot.telegram.storage import RedisStorage
+from msu_hub_bot.telegram.fsm_storage import FeatureFSMStorage
+from msu_hub_bot.telegram.deletions import MessageDeletions
 from msu_hub_bot.telegram.wrapper import BotWrapper
 from msu_hub_bot.providers.vk.api import VkApi
 from msu_hub_bot.events import EcosystemManager, EventsMiddleware
@@ -76,8 +74,7 @@ class Application:
     dispatcher: Dispatcher
     supervisor: Supervisor
     database: BotRepository
-    redis_client: Redis
-    redis: RedisStorage
+    deletions: MessageDeletions
     fsm: TopicFSMContextMiddleware
     stack: AsyncExitStack
     health: HealthCheck
@@ -89,7 +86,6 @@ class Application:
     reminders: ReminderService
     web_apps: WebAppLinks
     web: WebServer | None = None
-    _producer: asyncio.Task[None] | None = None
     _feature_task: asyncio.Task[None] | None = None
     _closed: bool = False
 
@@ -107,30 +103,15 @@ class Application:
                 token=settings.bot_token, session=session, telemetry=telemetry, default=DefaultBotProperties(parse_mode=ParseMode.HTML)
             )
             supervisor = Supervisor(telemetry=telemetry)
-            client = Redis(
-                host=settings.redis_host,
-                port=settings.redis_port,
-                password=settings.redis_password or None,
-                db=settings.redis_db,
-                decode_responses=True,
-            )
-            # The real FSM owns this shared Redis client's close, including the pool.
-            storage = FSMRedisStorage(
-                client,
-                key_builder=DefaultKeyBuilder(
-                    prefix=f"{settings.name}:fsm3",
-                    with_bot_id=True,
-                    with_destiny=True,
-                ),
-            )
-            isolation = ReleasableEventIsolation()
-            fsm = TopicFSMContextMiddleware(storage, isolation)
-            stack.push_async_callback(fsm.close)
-            redis = RedisStorage(client, prefix=settings.name, supervisor=supervisor, telemetry=telemetry)
             database = create_repository(settings, telemetry=telemetry)
             stack.push_async_callback(database.close)
             features = FeatureStore(database)
             feature_worker = FeatureWorker(features, telemetry=telemetry)
+            storage = FeatureFSMStorage(features)
+            isolation = ReleasableEventIsolation()
+            fsm = TopicFSMContextMiddleware(storage, isolation)
+            stack.push_async_callback(fsm.close)
+            deletions = MessageDeletions(features, bot, feature_worker)
             quiz = QuizService(bot, features, feature_worker)
             raffles = RaffleStore(bot.id, features)
             chess_matches = ChessMatchService(bot, features, feature_worker)
@@ -184,7 +165,7 @@ class Application:
             dispatcher.workflow_data.update(
                 telemetry=telemetry,
                 db=database,
-                redis=redis,
+                deletions=deletions,
                 supervisor=supervisor,
                 quiz=quiz,
                 raffles=raffles,
@@ -231,8 +212,7 @@ class Application:
                 dispatcher,
                 supervisor,
                 database,
-                client,
-                redis,
+                deletions,
                 fsm,
                 stack,
                 health,
@@ -249,19 +229,10 @@ class Application:
             await stack.aclose()
             raise
 
-    async def _deletion_loop(self) -> None:
-        while True:
-            await asyncio.sleep(60)
-            try:
-                await self.redis.process_messages_to_delete(self.bot)
-            except Exception:
-                logger.exception("Scheduled deletion scan failed")
-
     async def start(self) -> None:
         await self.telemetry.start()
         await self.database.check()
         await self.features.check()
-        await cast(Awaitable[bool], self.redis_client.ping())
         identity = await self.bot.me()
         self.web_apps.username = identity.username or ""
         if self.web is not None:
@@ -271,7 +242,6 @@ class Application:
             )
         await self.bot.delete_webhook(drop_pending_updates=False)
         await self.health.start()
-        self._producer = asyncio.create_task(self._deletion_loop(), name="scheduled-deletions")
         self._feature_task = self.supervisor.create_job(self.feature_worker.run, trace=False)
 
     async def close(self, *, hard_exit: Callable[[int], Any] = os._exit) -> None:
@@ -288,9 +258,6 @@ class Application:
         try:
             if self.web is not None:
                 await self.web.close()
-            if self._producer is not None:
-                self._producer.cancel()
-                await asyncio.gather(self._producer, return_exceptions=True)
             await self.health.stop()
             try:
                 await self.supervisor.drain(timeout=max(0, drain_deadline - asyncio.get_running_loop().time()), cancel_timeout=5)

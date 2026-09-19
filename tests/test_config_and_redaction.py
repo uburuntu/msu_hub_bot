@@ -14,7 +14,7 @@ from msu_hub_bot.settings import MissingIntegration, Settings, load_runtime_envi
 
 
 def test_required_configuration_and_optional_providers(monkeypatch):
-    for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", "HUB_SUPABASE_PASSWORD"):
+    for key in ("HUB_BOT_TOKEN", "HUB_SUPABASE_PASSWORD"):
         monkeypatch.delenv(key, raising=False)
     config = Settings()
     with pytest.raises(ValueError, match="HUB_BOT_TOKEN"):
@@ -28,7 +28,6 @@ def supabase_settings(**changes):
     values = {
         "storage_backend": "supabase",
         "bot_token": "123456789:synthetic-token",
-        "redis_host": "redis.invalid",
         "supabase_url": "http://supabase.invalid:8000",
         "supabase_key": "synthetic-publishable-key",
         "supabase_email": "bot@example.invalid",
@@ -43,8 +42,8 @@ def test_required_storage_credentials():
     assert Settings().storage_backend == "supabase"
     with pytest.raises(ValueError, match="HUB_SUPABASE_PASSWORD"):
         supabase_settings(supabase_password="").validate_core()
-    with pytest.raises(ValueError, match="HUB_REDIS_HOST"):
-        supabase_settings(redis_host="").validate_core()
+    with pytest.raises(ValueError, match="HUB_BOT_TOKEN"):
+        supabase_settings(bot_token="").validate_core()
 
 
 @pytest.mark.parametrize("backend", ["edgedb", "unsupported-backend-canary"])
@@ -94,7 +93,7 @@ def test_repository_factory_passes_configuration_and_telemetry(monkeypatch):
 def test_json_collections_and_deployment_roundtrip(monkeypatch):
     secret = 'test-value-with-$quotes"-and\\slashes\nsecond-line'
     payload = {
-        "HUB_REDIS_PASSWORD": secret,
+        "HUB_SUPABASE_PASSWORD": secret,
         "HUB_FOUNDER_IDS": "[101, 202]",
         "HUB_JDOODLE_TOKENS": '[["client", "secret"]]',
         "LOGFIRE_TOKEN": secret + "-write-token",
@@ -108,7 +107,7 @@ def test_json_collections_and_deployment_roundtrip(monkeypatch):
     for key in payload:
         monkeypatch.setenv(key, payload[key])
     config = Settings()
-    assert config.redis_password == secret
+    assert config.supabase_password == secret
     assert config.founder_ids == [101, 202]
     assert config.jdoodle_tokens == [("client", "secret")]
     assert os.environ["LOGFIRE_TOKEN"] == payload["LOGFIRE_TOKEN"]
@@ -120,7 +119,7 @@ def test_json_collections_and_deployment_roundtrip(monkeypatch):
 
 def test_redacts_logs_tracebacks_and_streams(monkeypatch):
     secret = 'canary-value-$"/with-newline\nsecond-canary-line'
-    monkeypatch.setattr(settings, "redis_password", secret)
+    monkeypatch.setattr(settings, "supabase_password", secret)
     assert secret not in redact(secret)
     assert quote(secret, safe="") not in redact(quote(secret, safe=""))
     assert json.dumps(secret)[1:-1] not in redact(json.dumps(secret)[1:-1])
@@ -137,14 +136,14 @@ def test_redacts_logs_tracebacks_and_streams(monkeypatch):
 
 
 def test_short_configured_password_is_redacted(monkeypatch):
-    monkeypatch.setattr(settings, "redis_password", "a$3")
+    monkeypatch.setattr(settings, "supabase_password", "a$3")
     assert "a$3" not in redact("Connection failed with a$3")
     assert quote("a$3", safe="") not in redact(quote("a$3", safe=""))
 
 
 def test_local_logger_preserves_levels_and_redacts_both_outputs(monkeypatch, tmp_path, capsys):
     secret = 'local-logging-canary-$"\nsecond-canary-line'
-    monkeypatch.setattr(settings, "redis_password", secret)
+    monkeypatch.setattr(settings, "supabase_password", secret)
     monkeypatch.setattr(LoggerBuilder, "default_filename", None)
     logger = LoggerBuilder.get_logger("local-test", level=logging.INFO, filename=str(tmp_path / "test.log"))
     try:
@@ -178,7 +177,7 @@ def test_cli_file_logs_rotate_without_losing_redaction(monkeypatch, tmp_path):
     from msu_hub_bot.cli import configure_logging
 
     secret = "synthetic-rotation-secret"
-    monkeypatch.setattr(settings, "redis_password", secret)
+    monkeypatch.setattr(settings, "supabase_password", secret)
     monkeypatch.setattr(settings, "logs_file", str(tmp_path / "bot.log"))
     monkeypatch.setattr(LoggerBuilder, "default_filename", None)
     monkeypatch.setattr("msu_hub_bot.redaction.install_redaction", lambda: None)

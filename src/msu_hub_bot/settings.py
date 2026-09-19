@@ -49,17 +49,13 @@ class MissingIntegration(Exception):
 class Settings(BaseSettings):
     name: str = "hub"
     bot_token: str = ""
-    redis_host: str = ""
-    redis_port: int = 6379
-    redis_password: str = ""
-    redis_db: int = 0
     storage_backend: Literal["supabase"] = "supabase"
     supabase_url: str = ""
     supabase_key: str = ""
     supabase_email: str = ""
     supabase_password: str = ""
     supabase_schema: str = "msu_hub_api"
-    storage_contract: Literal["application-documents-v1"] = "application-documents-v1"
+    storage_contract: Literal["feature-state-v1"] = "feature-state-v1"
     proxy: str = ""
     cert: str = ""
     pkey: str = ""
@@ -107,11 +103,9 @@ class Settings(BaseSettings):
 
     def validate_core(self) -> None:
         database_fields = ("supabase_url", "supabase_key", "supabase_email", "supabase_password")
-        missing = [name for name in ("bot_token", "redis_host", *database_fields) if not getattr(self, name)]
+        missing = [name for name in ("bot_token", *database_fields) if not getattr(self, name)]
         if missing:
             raise ValueError("Missing required settings: " + ", ".join("HUB_" + name.upper() for name in missing))
-        if self.redis_db < 0 or not 1 <= self.redis_port <= 65535:
-            raise ValueError("Invalid Redis database or port")
         endpoint = urlsplit(self.supabase_url)
         if (
             endpoint.scheme not in {"http", "https"}

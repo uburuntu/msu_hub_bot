@@ -40,7 +40,7 @@ def test_callback_wires_remain_compatible(family, wire, fields):
 @pytest.mark.parametrize(
     "family,fields,services",
     [
-        ("antibot.AntiBot", {"action": "ban", "chat_id": -100, "user_id": 7}, {"bot": None, "redis": None}),
+        ("antibot.AntiBot", {"action": "ban", "chat_id": -100, "user_id": 7}, {"bot": None, "deletions": None}),
         ("crypto.Crypto", {"ticker": "BTC"}, {"crypto_exchange": None}),
         ("dvach.Dvach", {"board": "b", "url": "update"}, {"dvach": None, "bot": None}),
         ("geoguess.Geoguess", {"round": "token", "choice": "finish"}, {"quiz": None}),

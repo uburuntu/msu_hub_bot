@@ -67,7 +67,7 @@ async def test_deleted_message_does_not_trigger_another_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_provider_error_redacts_configured_secret(monkeypatch):
-    monkeypatch.setattr(settings, "redis_password", "synthetic-private-password")
+    monkeypatch.setattr(settings, "supabase_password", "synthetic-private-password")
     bot = make_bot()
     session = bot.session
     update = Update(update_id=1, message=make_message(bot=bot))

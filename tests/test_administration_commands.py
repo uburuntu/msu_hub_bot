@@ -179,6 +179,6 @@ async def test_debug_json_preserves_telegram_aliases_dates_and_redacts_tokens(re
 @pytest.mark.parametrize("argument,seconds", [("", 0), ("invalid", 0), ("1", 3), ("999999999", 864000)])
 async def test_delete_after_retains_existing_bounds(argument, seconds):
     source = message("source", message_id=2)
-    redis = SimpleNamespace(mark_message_to_delete=AsyncMock(return_value=True))
-    assert await debug.process_delete_after(message("/delete_after " + argument, reply_to_message=source), redis)
-    redis.mark_message_to_delete.assert_awaited_once_with(source, after=seconds)
+    deletions = SimpleNamespace(mark_message_to_delete=AsyncMock(return_value=True))
+    assert await debug.process_delete_after(message("/delete_after " + argument, reply_to_message=source), deletions)
+    deletions.mark_message_to_delete.assert_awaited_once_with(source, after=seconds)

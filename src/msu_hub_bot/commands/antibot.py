@@ -14,7 +14,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hbold, hlink
 from emoji import emoji_count
 
-from msu_hub_bot.telegram.storage import RedisStorage
+from msu_hub_bot.telegram.deletions import MessageDeletions
 from msu_hub_bot.providers.cas import CombotAntiSpam
 from msu_hub_bot.telegram.callbacks import CallbackCommandBase
 
@@ -49,7 +49,7 @@ class AntiBot(CallbackCommandBase):
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
-    async def process(cls, message: Message, bot: Bot, redis: RedisStorage) -> Message | bool | None:
+    async def process(cls, message: Message, bot: Bot, deletions: MessageDeletions) -> Message | bool | None:
         for user in message.new_chat_members or []:
             member = await bot.get_chat_member(message.chat.id, user.id)
             if isinstance(member, (ChatMemberOwner, ChatMemberAdministrator)):
@@ -80,7 +80,7 @@ class AntiBot(CallbackCommandBase):
                     f"⚠️ Подозреваю, что {user.mention_html()} — {hbold('бот')}, {reason}",
                     reply_markup=cls.keyboard(message.chat.id, user.id),
                 )
-                await redis.mark_message_to_delete(reply, after=24 * 60 * 60)
+                await deletions.mark_message_to_delete(reply, after=24 * 60 * 60)
 
         return True
 
@@ -91,7 +91,9 @@ class AntiBot(CallbackCommandBase):
                 await message.delete()
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: AntiBotCallback, bot: Bot, redis: RedisStorage) -> Message | bool | None:
+    async def process_cb(
+        cls, query: CallbackQuery, callback_data: AntiBotCallback, bot: Bot, deletions: MessageDeletions
+    ) -> Message | bool | None:
         try:
             chat_id, user_id = int(callback_data.chat_id), int(callback_data.user_id)
             action = callback_data.action
@@ -105,11 +107,11 @@ class AntiBot(CallbackCommandBase):
         ):
             return await query.answer("Эта кнопка больше не работает.")
         async with cls.lock(cls.cache_key(query.message)):
-            return await cls._process_cb_locked(query, callback_data, bot, redis)
+            return await cls._process_cb_locked(query, callback_data, bot, deletions)
 
     @classmethod
     async def _process_cb_locked(
-        cls, query: CallbackQuery, callback_data: AntiBotCallback, bot: Bot, redis: RedisStorage
+        cls, query: CallbackQuery, callback_data: AntiBotCallback, bot: Bot, deletions: MessageDeletions
     ) -> Message | bool | None:
         action, chat_id, user_id = callback_data.action, int(callback_data.chat_id), int(callback_data.user_id)
         reply = query.message
@@ -133,7 +135,7 @@ class AntiBot(CallbackCommandBase):
                 reply_markup=cls.keyboard_after_decision(chat_id, user_id),
             )
             cls.cache[key] = action
-            await redis.mark_message_to_delete(reply, after=60)
+            await deletions.mark_message_to_delete(reply, after=60)
             return await query.answer("✅")
 
         if action == "close":
@@ -178,5 +180,5 @@ class AntiBot(CallbackCommandBase):
             reply.html_text + f"\n\n{query.from_user.mention_html()} вынес вердикт: {verdict}",
             reply_markup=cls.keyboard_after_decision(chat_id, user_id),
         )
-        await redis.mark_message_to_delete(reply, after=60)
+        await deletions.mark_message_to_delete(reply, after=60)
         return True

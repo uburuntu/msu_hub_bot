@@ -1,6 +1,5 @@
 import asyncio
 import importlib
-import json
 import socket
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -10,17 +9,12 @@ import brotli
 import pycares
 import pytest
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.fsm.storage.base import DefaultKeyBuilder, StorageKey
-from aiogram.fsm.storage.redis import RedisStorage
 from aiohttp.compression_utils import BrotliDecompressor
 from aiohttp_socks import ProxyConnector
 from python_socks.async_.asyncio.v2 import Proxy
-from redis.asyncio import Redis
 
 
-@pytest.mark.parametrize(
-    "name", ["aiogram", "pydantic_settings", "aiohttp_socks", "redis.asyncio", "bs4", "dns", "msu_hub_bot.providers.dvach"]
-)
+@pytest.mark.parametrize("name", ["aiogram", "pydantic_settings", "aiohttp_socks", "bs4", "dns", "msu_hub_bot.providers.dvach"])
 def test_required_dependency_integrations_import(name):
     importlib.import_module(name)
 
@@ -129,32 +123,3 @@ async def test_proxy_connector_reaches_the_current_transport_interface_without_n
     finally:
         await owner.close()
     assert session.closed
-
-
-@pytest.mark.asyncio
-async def test_redis_client_and_fsm_storage_keep_json_expiry_and_close_contract(monkeypatch):
-    client = Redis(host="127.0.0.1", db=15)
-    stored = {}
-
-    async def set_value(key, value, **kwargs):
-        assert kwargs == {"ex": None}
-        stored[key] = value.encode() if isinstance(value, str) else value
-
-    async def get_value(key):
-        return stored.get(key)
-
-    monkeypatch.setattr(client, "set", AsyncMock(side_effect=set_value))
-    monkeypatch.setattr(client, "get", AsyncMock(side_effect=get_value))
-    close = AsyncMock(wraps=client.aclose)
-    monkeypatch.setattr(client, "aclose", close)
-    storage = RedisStorage(client, key_builder=DefaultKeyBuilder(prefix="synthetic"))
-    key = StorageKey(bot_id=101, chat_id=-202, user_id=303, thread_id=404)
-    try:
-        await storage.set_state(key, "Synthetic:input")
-        await storage.set_data(key, {"text": "Тест 😀", "optional": None})
-        assert await storage.get_state(key) == "Synthetic:input"
-        assert await storage.get_data(key) == {"text": "Тест 😀", "optional": None}
-        assert json.loads(stored["synthetic:-202:404:303:data"]) == {"text": "Тест 😀", "optional": None}
-    finally:
-        await storage.close()
-    close.assert_awaited_once_with(close_connection_pool=True)
