@@ -543,6 +543,29 @@ async def test_recurring_reminder_stops_when_author_leaves_chat(rig, monkeypatch
     assert not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)
 
 
+async def test_recurring_delivery_membership_outage_stays_pending_before_external_send(rig, monkeypatch):
+    from aiogram.exceptions import TelegramNetworkError
+    from aiogram.methods import GetChatMember
+
+    row = await repeating(rig)
+    original = rig.bot.session.make_request
+
+    async def unavailable(bot, method, timeout=None):
+        if isinstance(method, GetChatMember):
+            raise TelegramNetworkError(method, "Synthetic outage")
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(rig.bot.session, "make_request", unavailable)
+    rig.backend.now += timedelta(hours=2)
+    await rig.worker.run_once()
+    pending = await rig.service.get(42, row.key)
+    assert pending.etag == row.etag and pending.value.status == "pending"
+    assert not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)
+    monkeypatch.setattr(rig.bot.session, "make_request", original)
+    await drain(rig)
+    assert (await rig.service.get(42, row.key)).value.occurrences == 1
+
+
 async def test_v1_reminder_upgrade_preserves_unknown_fields_and_future_versions_fail_closed(rig):
     from msu_hub_bot.storage.features import FutureVersion
 

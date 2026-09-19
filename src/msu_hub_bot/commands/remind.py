@@ -4,6 +4,7 @@ import asyncio
 from datetime import timedelta
 from uuid import UUID
 
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from msu_hub_bot.commands.quiz_view import compact
@@ -97,7 +98,7 @@ class Remind:
                     body, markup = confirmation(record), keyboard(record)
         except ReminderError as error:
             body = str(error)
-        except Conflict, FeatureError, RepositoryError, TimeoutError, ValueError:
+        except Conflict, FeatureError, RepositoryError, TimeoutError, ValueError, TelegramAPIError:
             body = "Не удалось подтвердить изменение. Проверь /remind list перед повтором."
         if web_apps is not None and (button := web_apps.button(message, now=reminders.clock())) is not None:
             markup = InlineKeyboardMarkup(inline_keyboard=[*(markup.inline_keyboard if markup else []), [button]])
@@ -130,5 +131,5 @@ class Remind:
                 )
         except ReminderError as error:
             await answer(query, str(error), alert=True)
-        except Conflict, FeatureError, RepositoryError, TimeoutError, ValueError:
+        except Conflict, FeatureError, RepositoryError, TimeoutError, ValueError, TelegramAPIError:
             await answer(query, "Напоминание изменилось. Открой /remind list.", alert=True)

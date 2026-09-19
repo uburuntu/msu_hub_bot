@@ -136,6 +136,7 @@ class ReminderService:
             timezone=schedule.timezone,
             recurrence=schedule.recurrence,
         )
+        await self._require_recurrence_access(value)
         tx = self._tx(author_id)
         tx.expect_absent("items", key)
         tx.put(self.items, key, value, parent=destination(chat_id, thread_id), status="pending")
@@ -194,6 +195,7 @@ class ReminderService:
         if schedule.text.strip():
             value.text = schedule.text
         value.attempts = 0
+        await self._require_recurrence_access(value)
         tx = self._tx(author_id)
         self._put(tx, record, value)
         self._schedule(tx, key, "deliver", value.due_at)
@@ -219,6 +221,7 @@ class ReminderService:
         self._revision(record, expected_etag)
         if record.value.status not in {"uncertain", "failed"}:
             raise ReminderError("Повтор нужен только после ошибки или неподтверждённой доставки.")
+        await self._require_recurrence_access(record.value)
         value = record.value.model_copy(deep=True)
         value.status, value.attempts = "pending", 0
         value.terminal_at = value.sending_at = value.failure = None
@@ -271,7 +274,7 @@ class ReminderService:
     async def _deliver(self, context: JobContext) -> None:
         try:
             await self._delivery(context)
-        except RepositoryUnavailable, TimeoutError, Conflict:
+        except RepositoryUnavailable, TimeoutError, Conflict, TelegramAPIError:
             # An already committed sending marker prevents another network send.
             raise JobRetry("Reminder state can safely be reconciled") from None
 
@@ -336,6 +339,10 @@ class ReminderService:
             return
         await self._delivered(sending, delivered.message_id)
 
+    async def _require_recurrence_access(self, value: Reminder) -> None:
+        if value.recurrence is not None and not await self._recurring_membership(value):
+            raise ReminderError("Для повторений в чате бот должен быть администратором, а ты — участником с правом писать.")
+
     async def _recurring_membership(self, value: Reminder) -> bool:
         if value.chat_id > 0:
             return value.chat_id == value.author_id
@@ -347,8 +354,6 @@ class ReminderService:
                 member = await self.bot.get_chat_member(value.chat_id, value.author_id)
         except TelegramBadRequest, TelegramForbiddenError, TelegramNotFound:
             return False
-        except TelegramAPIError, TimeoutError:
-            raise JobRetry("Recurring reminder membership check is safe to retry") from None
         return isinstance(member, MEMBERS) and not (
             isinstance(member, ChatMemberRestricted) and (not member.is_member or not member.can_send_messages)
         )

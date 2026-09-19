@@ -177,8 +177,10 @@ is strictly after the current clock. A successful delivery atomically advances
 the same record and job generation. The series stays permanent while pending.
 Uncertain delivery holds the whole series for explicit owner retry; it never
 silently schedules another occurrence. Cancellation stops future occurrences,
-but cannot recall an attempt whose sending marker is committed. Recurring
-group delivery checks current author membership and bot administrator rights.
+but cannot recall an attempt whose sending marker is committed. Creating,
+rescheduling, retrying and delivering a recurring group reminder check current
+author membership and bot administrator rights. Cancellation and removing
+recurrence do not require bot administrator rights.
 Permanent owner-scoped `preferences/users` records supply the default timezone
 for new command and web reminders; explicit timezones override that default.
 

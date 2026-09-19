@@ -602,6 +602,74 @@ async def test_web_repeat_and_saved_timezone_contract(rig):
     assert (await rig.api("POST", "/api/reminders", body=creation(recurrence={"kind": "daily", "injected": True}))).status == 422
 
 
+async def test_group_repetition_requires_delivery_permissions_before_creation_or_conversion(rig):
+    launch = rig.links.launch(42, Destination(-123, 17), now=NOW)
+    response = await rig.api("POST", "/api/reminders", body=creation(launch=launch, recurrence={"kind": "daily"}))
+    assert response.status == 422 and "администратором" in (await response.json())["error"]["message"]
+    assert not rig.backend.records and not rig.backend.jobs
+    assert not any(isinstance(method, SendMessage) for method in rig.bot.session.methods)
+
+    # One-off reminders still work with an ordinary bot member.
+    response = await rig.api("POST", "/api/reminders", body=creation(launch=launch))
+    assert response.status == 201
+    item = await response.json()
+    response = await rig.api(
+        "POST",
+        f"/api/reminders/{item['key']}/reschedule",
+        body={"etag": item["etag"], "schedule": "in 2h", "recurrence": {"kind": "daily"}},
+    )
+    assert response.status == 422
+    current = await rig.reminders.get(42, item["key"])
+    assert current.etag == item["etag"] and current.value.recurrence is None
+
+
+async def test_recurring_controls_recheck_bot_rights_but_allow_cancelling_or_disabling_repeats(rig, monkeypatch):
+    launch = await _community_access(rig, monkeypatch)
+    response = await rig.api("POST", "/api/reminders", body=creation(launch=launch, recurrence={"kind": "daily"}))
+    assert response.status == 201
+    item = await response.json()
+    await _community_access(rig, monkeypatch, bot_admin=False)
+    response = await rig.api("POST", f"/api/reminders/{item['key']}/reschedule", body={"etag": item["etag"], "schedule": "in 2h"})
+    assert response.status == 422
+    assert (await rig.reminders.get(42, item["key"])).etag == item["etag"]
+    response = await rig.api(
+        "POST",
+        f"/api/reminders/{item['key']}/reschedule",
+        body={"etag": item["etag"], "schedule": "in 2h", "recurrence": None},
+    )
+    assert response.status == 200 and (await response.json())["recurrence"] is None
+
+    await _community_access(rig, monkeypatch)
+    item = await (await rig.api("POST", "/api/reminders", body=creation(launch=launch, recurrence={"kind": "daily"}))).json()
+    await rig.reminders._terminal(await rig.reminders.get(42, item["key"]), "uncertain", failure="uncertain")
+    held = await rig.reminders.get(42, item["key"])
+    await _community_access(rig, monkeypatch, bot_admin=False)
+    response = await rig.api("POST", f"/api/reminders/{item['key']}/retry", body={"etag": held.etag})
+    assert response.status == 422 and (await rig.reminders.get(42, item["key"])).etag == held.etag
+    response = await rig.api("POST", f"/api/reminders/{item['key']}/cancel", body={"etag": held.etag})
+    assert response.status == 200 and (await response.json())["status"] == "cancelled"
+
+
+async def test_recurring_permission_outage_is_retryable_without_committing_a_reminder(rig, monkeypatch):
+    from aiogram.exceptions import TelegramNetworkError
+
+    launch = await _community_access(rig, monkeypatch)
+    original = rig.bot.session.make_request
+
+    async def unavailable(bot, method, timeout=None):
+        if isinstance(method, GetChatMember) and method.user_id == bot.id:
+            raise TelegramNetworkError(method, "Synthetic outage")
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(rig.bot.session, "make_request", unavailable)
+    body = creation(launch=launch, recurrence={"kind": "daily"})
+    response = await rig.api("POST", "/api/reminders", body=body)
+    assert response.status == 503 and not rig.backend.records and not rig.backend.jobs
+    monkeypatch.setattr(rig.bot.session, "make_request", original)
+    response = await rig.api("POST", "/api/reminders", body=body)
+    assert response.status == 201 and len(rig.backend.records) == len(rig.backend.jobs) == 1
+
+
 async def test_chat_settings_preserve_unowned_fields_and_require_exact_revision(rig, monkeypatch):
     from msu_hub_bot.storage.application import APPLICATION, ChatPreferences
 
