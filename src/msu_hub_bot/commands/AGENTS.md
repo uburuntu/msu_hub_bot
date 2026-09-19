@@ -8,4 +8,5 @@
 - Live-location weather uses an in-memory 15-minute throttle per chat/message, without persistent timers or database state.
 - Preserve aliases unless the user explicitly chooses to change them; audit recommendations alone do not authorize removal.
 - Keep error replies deliberate and outputs bounded, and avoid embedding provider or storage details in command presentation.
+- Chess, geoguess, raffle, reminder, reaction and Mini App flows preserve the author’s invoking message, including aliases and leaderboards; cleanup targets temporary bot UI.
 - Persist JSON-compatible Pydantic drafts in FSM; scope conversations per user/chat/topic. `/cancel` clears drafts without cancelling already-started work.
