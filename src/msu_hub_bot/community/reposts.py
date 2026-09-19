@@ -85,7 +85,7 @@ class Reposts:
         url = urlsplit(source if "://" in source else "https://" + source)
         if (
             url.scheme != "https"
-            or url.hostname not in {"vk.com", "www.vk.com", "m.vk.com", "vk.ru", "www.vk.ru"}
+            or url.hostname not in {"vk.com", "www.vk.com", "m.vk.com", "vk.ru", "www.vk.ru", "m.vk.ru"}
             or url.username
             or url.password
             or url.port is not None

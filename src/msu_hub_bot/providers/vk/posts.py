@@ -56,7 +56,7 @@ def best_image(images: list[Image]) -> str:
 
 class VkPost:
     pattern_vk_post = re.compile(
-        r"(?:^|\s)(?:https?://)?(?:m\.|www\.)?vk\.(?:com|ru)/(?:[\w]+\?w=)?wall(-?[1-9][0-9]*_[1-9][0-9]*)(?![0-9])", re.U
+        r"(?:^|\s)(?:https?://)?(?:m\.|www\.)?vk\.(?:com|ru)/(?:[\w.-]+\?w=)?wall(-?[1-9][0-9]*_[1-9][0-9]*)(?![0-9])", re.U | re.I
     )
 
     def __init__(self, post: Post | dict[str, object], extended: dict[int, Entity] | None = None) -> None:
