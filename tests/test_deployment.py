@@ -20,7 +20,6 @@ def payload():
         "revision": "b" * 40,
         "environment": {
             "HUB_BOT_TOKEN": "fake",
-            "HUB_REDIS_HOST": "localhost",
             "HUB_STORAGE_BACKEND": "supabase",
             "HUB_SUPABASE_URL": "http://database.invalid:8000",
             "HUB_SUPABASE_KEY": "synthetic-publishable-key",
@@ -653,12 +652,13 @@ def test_web_release_attaches_only_private_proxy_network_without_host_ports(tmp_
     assert "ports" not in document["services"]["bot"]
 
 
-def test_rollback_refuses_old_table_writers_after_application_document_cutover(tmp_path):
+@pytest.mark.parametrize("contract", ["application-documents-v1", "feature-state-v1"])
+def test_rollback_refuses_incompatible_persistence_writers(tmp_path, contract):
     previous = stored_supabase(tmp_path)
     current = stored_supabase(tmp_path, number=2)
     runtime = tmp_path / "releases" / current["release"] / "runtime.env"
     environment = json.loads(runtime.read_text().removeprefix("HUB_CONFIG_JSON="))
-    environment["HUB_STORAGE_CONTRACT"] = "application-documents-v1"
+    environment["HUB_STORAGE_CONTRACT"] = contract
     deployment.write_private(runtime, "HUB_CONFIG_JSON=" + json.dumps(environment) + "\n")
     deployment.write_private(tmp_path / "current.json", json.dumps(current))
     deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
@@ -745,3 +745,27 @@ def test_administrative_handoff_rejects_mismatched_or_unsafe_marker(tmp_path, da
     deployer.run = lambda *args, **kwargs: pytest.fail("Docker reached before fence validation")
     with pytest.raises(deployment.DeploymentError, match="Administrative transition"):
         deployer.deploy(request, adopt_transition=marker)
+
+
+def test_feature_state_contract_requires_no_separate_cache_configuration():
+    request = payload()
+    request["environment"]["HUB_STORAGE_CONTRACT"] = "feature-state-v1"
+    deployment.validate_payload(request)
+
+
+def test_feature_state_rollback_cannot_resume_application_document_conversations(tmp_path):
+    previous = stored_supabase(tmp_path)
+    current = stored_supabase(tmp_path, number=2)
+    for state, contract in [(previous, "application-documents-v1"), (current, "feature-state-v1")]:
+        runtime = tmp_path / "releases" / state["release"] / "runtime.env"
+        environment = json.loads(runtime.read_text().removeprefix("HUB_CONFIG_JSON="))
+        environment["HUB_STORAGE_CONTRACT"] = contract
+        deployment.write_private(runtime, "HUB_CONFIG_JSON=" + json.dumps(environment) + "\n")
+    deployment.write_private(tmp_path / "current.json", json.dumps(current))
+    deployment.write_private(tmp_path / "previous.json", json.dumps(previous))
+    deployer = deployment.Deployer(tmp_path)
+    restored = []
+    deployer.restore = restored.append
+    with pytest.raises(deployment.DeploymentError, match="reconcile data"):
+        deployer.deploy({"action": "rollback"})
+    assert not restored

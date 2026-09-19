@@ -55,13 +55,13 @@ def validate_environment(values, *, historical=False):
             raise DeploymentError("Invalid runtime configuration")
     if values.get("HUB_STORAGE_BACKEND", "supabase") != "supabase":
         raise DeploymentError("Invalid storage backend")
-    if values.get("HUB_STORAGE_CONTRACT", "relational-v1") not in {"relational-v1", "application-documents-v1"}:
+    if values.get("HUB_STORAGE_CONTRACT", "relational-v1") not in {"relational-v1", "application-documents-v1", "feature-state-v1"}:
         raise DeploymentError("Invalid storage contract")
     schema = values.get("HUB_SUPABASE_SCHEMA", "hub_api" if historical else "")
     if not SCHEMA_RE.fullmatch(schema):
         raise DeploymentError("Invalid or missing Supabase schema")
     database_fields = ("HUB_SUPABASE_URL", "HUB_SUPABASE_KEY", "HUB_SUPABASE_EMAIL", "HUB_SUPABASE_PASSWORD")
-    if not all(values.get(key) for key in ("HUB_BOT_TOKEN", "HUB_REDIS_HOST", *database_fields)):
+    if not all(values.get(key) for key in ("HUB_BOT_TOKEN", *database_fields)):
         raise DeploymentError("Missing core runtime settings")
 
 

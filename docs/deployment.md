@@ -10,7 +10,7 @@ uses a host lock. A deployment sends one JSON header followed by a compressed
 image archive over the same encrypted SSH connection.
 
 Requirements: Linux x86-64, Python 3, Docker, Compose 2.30 or later, and access to
-Redis and the selected database backend through Docker network `msu_db`. The account
+the Supabase API through Docker network `msu_db`. The account
 must be able to use Docker. Passwordless sudo is not required.
 
 The optional [Mini App](mini-app.md) also requires an external `msu_hub_web`
@@ -130,10 +130,9 @@ Build and image-validation steps receive no project token. See the
 ## Database configuration
 
 `HUB_STORAGE_BACKEND` defaults to `supabase`, the only supported application backend.
-Redis remains required for topic conversations and scheduled deletions. Keep
-its namespace and database unchanged during application upgrades. Chess and
-geoguess use Supabase for all persistent state, including daily scores; see
-[quiz storage and cutover](feature-persistence.md#chess-and-geoguess).
+Conversation state, delayed deletions, games and other durable work share the
+versioned feature store in Supabase; see [feature persistence](feature-persistence.md).
+No separate cache database is required.
 
 Supabase requires
 `HUB_SUPABASE_URL`, a publishable `HUB_SUPABASE_KEY`, and a dedicated Auth account
@@ -152,7 +151,7 @@ refer to production. Runtime readiness validates the actual API path.
 ## Cutover and rollback
 
 Before stopping the current bot, the wrapper verifies and loads the image and runs a
-separate preflight: configuration validation, Redis ping, the selected database's readiness check,
+separate preflight: configuration validation, database and feature API readiness checks,
 Telegram `getMe`, and required media programs. Preflight never polls Telegram,
 sends messages, or migrates the database.
 
@@ -230,37 +229,63 @@ host lock. Deploy the candidate with the proven, newly configured release as
 its rollback target. Resume CD only when both current and previous releases use
 the renamed namespace and polling, API access and maintenance checks pass.
 
-## Conversation resets across FSM generations
+## Restoring conversation state and scheduled deletions
 
-Ordinary restarts preserve pending conversations. When upgrading from the
-legacy FSM to the topic-aware FSM, or rolling back across that boundary, start
-with clean conversations instead. Pause deployment and rollback jobs, stop
-every poller using the configuration, and wait for shutdown before resetting.
-Use the administrator connection; the restricted deployment key cannot run
-maintenance commands.
+`HUB_STORAGE_CONTRACT=feature-state-v1` identifies images whose conversations
+and delayed deletions use the feature store. The host compares this marker,
+the backend and the API schema before rollback. A different marker requires
+an administrative cutover with the existing transition guard; never relabel an
+incompatible image to bypass the guard. Prepare a tested compatible fallback
+before switching writers. See [feature state contracts](feature-persistence.md#telegram-conversations-and-deletions).
 
-Use a reviewed, locally available application image containing
-`msu_hub_bot.fsm_reset`. The older rollback image may not contain this tool.
-Supply the existing private release environment file without printing it:
+The administrator restore tool accepts a private normalized JSON snapshot:
 
-```sh
-docker run --rm --network msu_db \
-  --env-file /private/release/runtime.env \
-  --entrypoint python REVIEWED_IMAGE \
-  -m msu_hub_bot.fsm_reset --generation legacy
+```json
+{
+  "format": "feature-state-v1",
+  "bot_id": 123,
+  "conversations": [{
+    "key": {"bot_id": 123, "chat_id": -456, "user_id": 789,
+            "thread_id": 42, "business_connection_id": null, "destiny": "default"},
+    "state": "Example:input", "data": {"draft": "Synthetic example"},
+    "state_expires_at": null, "data_expires_at": null
+  }],
+  "deletions": [{"chat_id": -456, "message_id": 11, "run_at": "2030-01-01T12:00:00Z"}]
+}
 ```
 
-Repeat with `--generation v3` before starting the target release. Each command
-prints only the number of removed keys and exits nonzero on failure; a failed
-reset may have removed some keys and can be repeated while polling stays
-stopped. Then deploy or roll back normally and verify one healthy poller.
+Stop every poller and feature worker first, hold the deployment transition guard,
+and retain protected backups. Keep snapshots outside the repository with
+owner-only permissions; their payloads can contain private messages. The tool
+checks the snapshot's bot identity against the configured token and validates
+all payloads before any insert. It does not contact Telegram, create schemas,
+delete source data or modify differing existing records.
 
-The command reads only `HUB_NAME` and `HUB_REDIS_*` from the deployment envelope
-or environment. It opens only Redis: no Telegram requests, Supabase connection or
-schema migration. `legacy` matches the namespace's chat/user FSM state/data;
-`v3` matches its `fsm3` topic FSM state/data. Settings, delayed deletions and
-other namespaces remain intact. Never use `FLUSHDB` for
-this operation. Startup, Deploy and Rollback do not run the reset automatically.
+Run a reviewed image with its private environment, streaming the protected
+snapshot through stdin. This preserves host file permissions while the image
+runs as its own unprivileged user:
+
+```sh
+docker run --rm -i --network msu_db \
+  --env-file /private/release/runtime.env \
+  --entrypoint python REVIEWED_IMAGE \
+  -m msu_hub_bot.telegram.state_transfer /dev/stdin < /private/state.json
+```
+
+Review the count-only result, then repeat with `--apply` after `/dev/stdin`
+and before the input redirection.
+Each conversation insert is guarded; each deletion and its job are one atomic
+transaction. If interrupted, rerun the same snapshot while writers remain
+stopped. Identical records are skipped, and differing or future-version records
+abort instead of being overwritten. A partially completed restore can therefore
+be resumed safely; it is not one transaction spanning the entire snapshot.
+Live per-field deadlines are preserved. Already expired fields are cleared;
+fully expired or empty conversations are skipped and counted separately.
+
+Compare the protected source inventory with restored counts, test conversation
+continuation and deletion recovery, and verify one healthy poller before ending
+the cutover. Source cleanup is a separate administrative decision scoped to the
+bot's own records; shared infrastructure is outside this tool's authority.
 
 ## Moving VPSs
 

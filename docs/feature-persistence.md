@@ -243,7 +243,7 @@ the commands show only the current Moscow day.
 
 Presentation caches are disposable; rebuilding one must never change the
 selected question, votes or scores. Both games use only the feature store for
-persistence, with no Redis scoring adapter or dual writes.
+persistence.
 
 ### Raffles
 
@@ -301,25 +301,42 @@ unavailable response instead of a partial ranking. Navigation is bounded to the
 first 10,000 places; the personal rank counts every player. Chess actions never
 modify the user's active FSM conversation.
 
-### Moving from Redis-backed quizzes
+### Telegram conversations and deletions
 
-Install the feature schema and bounded maintenance described below before
-deploying these games. Stop the old poller before starting the new release.
-There is no import or compatibility path for earlier in-memory rounds or Redis
-rankings: the games start with fresh rounds and scores. Existing Telegram
-messages stay visible; callbacks without a saved round cannot resume the game.
+`telegram/fsm_storage.py` implements aiogram `BaseStorage` through feature
+`telegram_state`; `telegram/deletions.py` uses the same feature and shared worker.
 
-Old score keys use
-`msu_hub:{chess|geoguess}:{chat_id}:{YYYY-MM-DD}:scores` and the `:names`,
-`:usernames`, `:rounds` suffixes. Their existing expiry is midnight Moscow time
-two calendar days after the score day. Allow that expiry to remove them; no
-cleanup script, namespace reset or `FLUSHDB` is needed. Redis remains in use by
-other bot features.
+| Collection | Identity | Lifecycle |
+| --- | --- | --- |
+| `conversations` | Bot scope; SHA-256 of canonical bot/chat/user/topic/business-connection/destiny fields, retained in the payload for validation. | No expiration by default. `/cancel` clears the state and data; a fully empty record is removed. Imported state/data deadlines remain independent. |
+| `deletions` | Bot scope; `chat_id:message_id`, paired with one `delete_message` job. | Pending work has no expiry; completion keeps a seven-day record before cleanup. |
 
-Validate both games through voting, closure and their daily ranking, then
-restart and verify an active round and completed result navigation. An older
-application image cannot read the new round or score records; rolling it back
-does not convert those records into Redis data.
+FSM reads return independent JSON data. `set_data` replaces only data;
+`set_state` changes only state. `update_data` uses compare-and-swap with bounded
+conflict retries, preserving unrelated concurrent fields. Setting either field
+clears only that field's live imported expiration; mutations also remove
+already expired fields. Uncertain commit responses retry the same frozen
+operation ID, so a lost response cannot replay a new write. Payloads share the 64 KiB feature
+limit; malformed, oversized or future-version data is never defaulted and
+written back. Unknown payload fields survive updates and prevent automatic
+empty-record deletion. `close()` does not close the borrowed database client.
+
+`USER_IN_TOPIC`, `/cancel` behavior and releasable event isolation remain explicit
+middleware policies. Isolation uses process-local locks; storage CAS protects
+individual writes, not whole multi-step handlers across several pollers. Run
+exactly one poller per token.
+
+Scheduling a deletion atomically replaces its document and increments its job
+generation. An older lease cannot complete the replacement job. The worker
+checks the current generation before the Telegram call; rescheduling cannot
+recall an HTTP deletion already in flight. Deletion is idempotent: uncertain
+network failures retry, rate limits honor Telegram's delay, and missing or
+inaccessible messages finish without retry loops. Unclassified bad requests
+are held for review. Expired leases recover through the shared worker after a
+restart; there is no separate scan loop or process timer.
+
+For protected snapshot validation, repeatable restoration and compatible
+rollback, follow [deployment operations](deployment.md#restoring-conversation-state-and-scheduled-deletions).
 
 ### Schema and runtime
 

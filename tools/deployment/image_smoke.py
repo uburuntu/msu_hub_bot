@@ -352,7 +352,7 @@ async def main():
     socket.socket.connect = blocked
     socket.socket.connect_ex = blocked
     socket.getaddrinfo = blocked
-    for package in ("common", "hub_bot", "edgedb", "gel", "cv2"):
+    for package in ("common", "hub_bot", "edgedb", "gel", "cv2", "redis", "hiredis"):
         assert importlib.util.find_spec(package) is None, f"Retired package is installed: {package}"
     for program in ("ffmpeg", "ffprobe", "tesseract"):
         assert shutil.which(program), program
@@ -373,7 +373,6 @@ async def main():
     from msu_hub_bot.settings import settings
 
     settings.bot_token = "123456789:" + "a" * 35
-    settings.redis_host = "localhost"
     settings.storage_backend = "supabase"
     settings.supabase_url = "https://database.example.invalid"
     settings.supabase_key = "synthetic-publishable-key"

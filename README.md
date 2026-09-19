@@ -4,7 +4,7 @@ A friends' Swiss-army Telegram bot, born in Moscow State University chats:
 media tools, OCR, speech and song recognition, translation, code execution
 through JDoodle, games, polls, chat administration, and a few inside jokes.
 
-The runtime uses aiogram 3, Pydantic 2, Supabase, and Redis. Dependencies are locked for
+The runtime uses aiogram 3, Pydantic 2 and Supabase. Dependencies are locked for
 reproducible builds. External tools depend on their providers' availability
 and configuration; see the bot's `/help` for commands.
 
@@ -60,7 +60,7 @@ uv run pytest -q
 cp .env.example .env
 ```
 
-Fill in `HUB_BOT_TOKEN` and `HUB_REDIS_HOST`, then configure the Supabase API URL,
+Fill in `HUB_BOT_TOKEN`, then configure the Supabase API URL,
 publishable key and dedicated Auth account
 described in [database configuration](docs/deployment.md#database-configuration), then run:
 
@@ -74,8 +74,8 @@ access and use synthetic data; they require no live bot or database.
 Configuration is documented by `.env.example` and the typed settings in
 `src/msu_hub_bot/settings.py`. Lists, tuples, and mappings use JSON. Optional services
 stay registered when unconfigured and return an unavailable response when used.
-Administrator IDs default to no access. The Redis namespace defaults to `hub`;
-changing it disconnects the bot from its existing state.
+Administrator IDs default to no access. Conversation state and scheduled work
+survive restarts through the shared feature store.
 
 Real environment files, credentials, logs, dumps, private keys, and core dumps
 are excluded from Git and Docker builds. Never put tokens in build arguments or
@@ -91,7 +91,7 @@ to the deployment job on the `production` environment.
 Main-branch changes run the same checks, build and test the release image,
 and transfer it directly to the VPS over SSH. The host verifies the archive
 and runs its immutable image ID. Images are kept on the runner and VPS.
-The bot connects to separately managed Supabase APIs and Redis. Deployment does
+The bot connects to separately managed Supabase APIs. Deployment does
 not run migrations or recreate shared infrastructure. Supabase is the sole
 application database backend; immutable schema history and recovery artifact
 verification remain available.
