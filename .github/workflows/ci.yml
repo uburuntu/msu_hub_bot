@@ -3,9 +3,18 @@ name: CI
 on:
   pull_request:
   workflow_call:
+    inputs:
+      check_image:
+        description: Build and smoke-test the Linux image in this workflow
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   web:
@@ -102,6 +111,7 @@ jobs:
 
   image:
     name: Linux image
+    if: github.event_name == 'pull_request' || inputs.check_image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

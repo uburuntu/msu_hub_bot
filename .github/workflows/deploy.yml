@@ -15,6 +15,8 @@ concurrency:
 jobs:
   validate:
     uses: ./.github/workflows/ci.yml
+    with:
+      check_image: ${{ github.ref != 'refs/heads/main' || vars.DEPLOY_ENABLED != 'true' }}
 
   deploy:
     if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'

@@ -106,6 +106,12 @@ value through stdin with `gh secret set HUB_BOT_TOKEN --env production --repo
 uburuntu/msu_hub_bot`, then dispatch the Deploy workflow. Do not place secret
 values in `--body` arguments or shell history. Arrays and mappings must be JSON.
 
+Pull requests run all checks, including the Linux image smoke test; a new commit
+cancels older CI runs for that pull request. Deploy reruns the checks for its own
+revision. When deployment is enabled on `main`, its deployment job owns the
+image build and smoke test; otherwise, CI keeps that validation. Deployment and
+rollback share the production queue and never cancel an active release.
+
 Actions builds and tests the image before the transfer step receives any
 production configuration. Images are transferred directly over SSH. The host
 checks the archive checksum, image ID, revision label, platform, non-root user,
