@@ -243,6 +243,25 @@ Presentation caches are disposable; rebuilding one must never change the
 selected question, votes or scores. Both games use only the feature store for
 persistence, with no Redis scoring adapter or dual writes.
 
+### Raffles
+
+`games/raffle.py` owns `raffle` documents scoped to `chat:<id>:topic:<id-or-0>`.
+`rounds` stores the creator, original Telegram message, entrant count and winner.
+`members` maps each round/user pair to one numbered `participants` record; the
+three changes commit atomically. Numbered entries allow bounded page reads and
+uniform winner selection with one lookup, without growing the round payload.
+
+A draw commits its winner before any Telegram edit. Repeating a draw or pressing
+refresh renders that same result; it never picks again. Only the stored creator
+can finish. Callback origin must match the bound bot message and chat/topic.
+An uncertain initial send is never resent automatically; a callback can bind
+its original card after verifying sender, reply, markup and publication time.
+No animation jobs or separate winner messages are needed.
+
+Rounds, membership indexes and entrant names expire together 90 days after
+creation. Writes and reads do not extend that window. Expired or preexisting
+cards receive the ordinary unavailable-button response.
+
 ### Public chess matches
 
 `games/chess_play/service.py` owns `chess_play` documents in the bot's
