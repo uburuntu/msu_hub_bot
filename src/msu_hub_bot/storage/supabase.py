@@ -32,6 +32,7 @@ from msu_hub_bot.storage.models import (
     DirectoryCreate,
     DirectoryPatch,
     DirectoryRecord,
+    FeedbackMessageRecord,
     MembershipBatch,
     MembershipObservation,
     MembershipState,
@@ -341,6 +342,35 @@ class SupabaseRepository:
             "list_chat_members",
             {"p_chat_id": chat_id, "p_state": state, "p_after_user_id": after_user_id, "p_limit": limit},
             lambda value: _record(ChatMemberPage, value),
+            trace=False,
+        )
+
+    async def recent_feedback_messages(
+        self, chat_id: int, *, thread_id: int | None, before: datetime, before_message_id: int
+    ) -> list[FeedbackMessageRecord]:
+        if type(chat_id) is not int or chat_id == 0 or not -(2**63) <= chat_id < 2**63:
+            raise ValueError("Feedback context requires a valid chat identifier")
+        if thread_id is not None and (type(thread_id) is not int or not 0 < thread_id < 2**63):
+            raise ValueError("Feedback context requires a valid topic identifier")
+        if type(before_message_id) is not int or not 0 < before_message_id < 2**63:
+            raise ValueError("Feedback context requires an invocation identifier")
+        if before.tzinfo is None or before.utcoffset() is None:
+            raise ValueError("Feedback context requires a timezone-aware timestamp")
+
+        def records(value: JsonValue) -> list[FeedbackMessageRecord]:
+            if not isinstance(value, list) or len(value) > 5:
+                raise RepositoryProtocolError()
+            return [_record(FeedbackMessageRecord, item) for item in value]
+
+        return await self._rpc(
+            "recent_feedback_messages",
+            {
+                "p_chat_id": chat_id,
+                "p_thread_id": thread_id,
+                "p_before": before.isoformat(),
+                "p_before_message_id": before_message_id,
+            },
+            records,
             trace=False,
         )
 

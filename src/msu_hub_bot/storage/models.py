@@ -197,6 +197,39 @@ class MessageObservation(DatabaseModel):
     data: dict[str, JsonValue]
 
 
+class FeedbackMessageRecord(DatabaseModel):
+    """The archive's narrow feedback projection, never a raw message payload."""
+
+    chat_id: BigInt
+    message_id: PositiveBigInt
+    sent_at: AwareDatetime
+    thread_id: PositiveBigInt | None
+    author_id: BigInt | None
+    author_kind: Literal["user", "chat", "unknown"]
+    author_name: str = Field(max_length=128)
+    text: str = Field(max_length=800)
+    media_kind: (
+        Literal[
+            "rich_message",
+            "photo",
+            "video",
+            "document",
+            "audio",
+            "voice",
+            "animation",
+            "video_note",
+            "sticker",
+            "contact",
+            "location",
+            "venue",
+            "poll",
+            "dice",
+        ]
+        | None
+    )
+    truncated: StrictBool
+
+
 class ReactionValue(DatabaseModel):
     key: Annotated[str, Field(strict=True, min_length=1, max_length=256)]
     count: PositiveBigInt = 1

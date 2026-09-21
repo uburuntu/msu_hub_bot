@@ -73,6 +73,8 @@ def is_added_route(handler):
         "Reactions.process_cb",
         "Remind.process",
         "Remind.process_cb",
+        "Feedback.process",
+        "Feedback.process_cb",
         "process_app",
         "process_app_start",
         "process_intent",
@@ -84,7 +86,7 @@ def test_every_route_preserves_order_and_aliases():
     counts = Counter(route["event"] for route in CONTRACT["routes"])
     for kind, count in counts.items():
         actual = routes(root, "error" if kind == "errors" else kind)
-        extra = {"message": 11, "edited_message": 1, "callback_query": 5}.get(kind, 0)
+        extra = {"message": 12, "edited_message": 1, "callback_query": 6}.get(kind, 0)
         assert len(actual) == count + extra
         retained = [handler for handler in actual if not is_added_route(handler)]
         expected = [route for route in CONTRACT["routes"] if route["event"] == kind]
@@ -541,6 +543,8 @@ async def test_ignored_chat_keeps_metrics_without_spending_command_trace_budget(
     ("text", "expected"),
     [
         ("/remind in 15m чай", "Remind.process"),
+        ("/feedback Last few commands failed", "Feedback.process"),
+        ("/FEEDBACK Add chess leaderboard", "Feedback.process"),
         ("/НАПОМНИ через 1ч чай", "Remind.process"),
         ("/app", "process_app"),
         ("/start app_synthetic", "process_app_start"),

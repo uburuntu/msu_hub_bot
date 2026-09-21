@@ -13,6 +13,7 @@ from msu_hub_bot.storage.models import (
     DirectoryCreate,
     DirectoryPatch,
     DirectoryRecord,
+    FeedbackMessageRecord,
     MembershipBatch,
     MembershipState,
     UsageStats,
@@ -32,6 +33,9 @@ class BotRepository(Protocol):
     async def patch_settings(self, chat_id: int, changes: dict[str, JsonValue]) -> dict[str, JsonValue]: ...
     async def archive_update(self, update: ArchivedUpdate) -> None: ...
     async def observe_memberships(self, batch: MembershipBatch) -> None: ...
+    async def recent_feedback_messages(
+        self, chat_id: int, *, thread_id: int | None, before: datetime, before_message_id: int
+    ) -> list[FeedbackMessageRecord]: ...
     async def list_chat_members(
         self, chat_id: int, *, state: MembershipState | None = "present", after_user_id: int | None = None, limit: int = 50
     ) -> ChatMemberPage: ...

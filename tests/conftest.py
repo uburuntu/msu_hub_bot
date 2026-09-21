@@ -96,12 +96,15 @@ def application_postgres(postgres):
         )
         from test_feature_postgres import exercise_job_observability_migration
         from test_membership_postgres import exercise_membership_migration
+        from test_feedback_context_postgres import exercise_feedback_context_migration
 
         for schema in upgrades:
             if int(schema.name[:3]) == 8:
                 upgraded.job_observability_upgrade = exercise_job_observability_migration(upgraded, schema.read_text())
             elif int(schema.name[:3]) == 9:
                 upgraded.membership_upgrade = exercise_membership_migration(upgraded, schema.read_text())
+            elif int(schema.name[:3]) == 10:
+                upgraded.feedback_context_upgrade = exercise_feedback_context_migration(upgraded, schema.read_text())
         yield upgraded
     finally:
         admin.run(f'DROP DATABASE "{name}";')

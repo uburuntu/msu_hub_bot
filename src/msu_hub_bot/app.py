@@ -27,6 +27,8 @@ from msu_hub_bot.games import QuizService
 from msu_hub_bot.games.raffle import RaffleStore
 from msu_hub_bot.games.chess_play.service import ChessMatchService
 from msu_hub_bot.reminders import ReminderService
+from msu_hub_bot.feedback import FeedbackService
+from msu_hub_bot.feedback.context import DiagnosticBuffer
 from msu_hub_bot.web.links import WebAppLinks
 from msu_hub_bot.web.server import WebServer
 from msu_hub_bot.execution.executor import TPExecutor
@@ -130,6 +132,14 @@ class Application:
             raffles = RaffleStore(bot.id, features)
             chess_matches = ChessMatchService(bot, features, feature_worker)
             reminders = ReminderService(bot, features, feature_worker)
+            feedback = FeedbackService(
+                bot,
+                features,
+                feature_worker,
+                destination_chat_id=settings.feedback_chat_id or settings.events_chat_id,
+                destination_name=settings.feedback_destination_name,
+            )
+            diagnostics = DiagnosticBuffer(release=telemetry.config.release)
             web_apps = WebAppLinks(bot.token, settings.web_app_url)
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
@@ -183,7 +193,7 @@ class Application:
                 if kind not in ("update", "error"):
                     observer.outer_middleware(preferences)
                     observer.middleware(SelectiveIsolationMiddleware())
-                    observer.middleware(HandlerTelemetryMiddleware(telemetry))
+                    observer.middleware(HandlerTelemetryMiddleware(telemetry, diagnostics=diagnostics))
             # These automatic behaviors apply only to new messages. Running them
             # for edits or channel posts would repeat previews and membership work.
             dispatcher.message.outer_middleware(Skip777000())
@@ -200,6 +210,8 @@ class Application:
                 raffles=raffles,
                 chess_matches=chess_matches,
                 reminders=reminders,
+                feedback=feedback,
+                feedback_diagnostics=diagnostics,
                 web_apps=web_apps,
                 events_isolation=isolation,
                 vk_api=vk_api,

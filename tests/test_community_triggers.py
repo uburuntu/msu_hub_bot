@@ -10,6 +10,7 @@ from aiogram.methods import DeleteMessage, DeleteMessages, GetChatMember, SendMe
 from aiogram.types import Update
 
 from msu_hub_bot.commands.reactions import Reactions
+from msu_hub_bot.feedback import FeedbackService
 from msu_hub_bot.games import definitions
 from msu_hub_bot.games.chess_play import service as chess_service
 from msu_hub_bot.games.chess_play.service import ChessMatchService
@@ -65,6 +66,7 @@ class SelectedHandler(BaseMiddleware):
         ("/remind in 1h synthetic reminder", "Remind.process", False),
         ("/напомни через 1 час чай", "Remind.process", False),
         ("/remind list", "Remind.process", False),
+        ("/feedback Add chess leaderboard", "Feedback.process", False),
         ("/reactions", "Reactions.process", False),
         ("/реакции", "Reactions.process", False),
         ("/app", "process_app", False),
@@ -84,6 +86,8 @@ async def test_community_commands_preserve_invocation_and_replied_to_message(mon
     quiz = QuizService(bot, store, worker)
     matches = ChessMatchService(bot, store, worker)
     reminders = ReminderService(bot, store, worker)
+    feedback = FeedbackService(bot, store, worker, destination_chat_id=-1009876543210)
+    feedback.clock = lambda: backend.now
     links = WebAppLinks(bot.token, "https://app.example.test")
     links.username = "test_bot"
     source_chat = -1001234567890
@@ -113,8 +117,9 @@ async def test_community_commands_preserve_invocation_and_replied_to_message(mon
         chess_matches=matches,
         raffles=RaffleStore(bot.id, store),
         reminders=reminders,
+        feedback=feedback,
         web_apps=links,
-        db=SimpleNamespace(reaction_scoreboard=AsyncMock(return_value=scoreboard())),
+        db=SimpleNamespace(reaction_scoreboard=AsyncMock(return_value=scoreboard()), recent_feedback_messages=AsyncMock(return_value=[])),
         deletions=MessageDeletions(store, bot, worker),
     )
     Reactions.permissions.clear()

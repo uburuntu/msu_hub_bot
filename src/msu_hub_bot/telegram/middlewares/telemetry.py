@@ -1,5 +1,6 @@
 """Attach explicit Telegram identifiers and selected command names at shared boundaries."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -20,6 +21,7 @@ from aiogram.types import (
 )
 
 from msu_hub_bot.telemetry import Boundary, Outcome, Telemetry
+from msu_hub_bot.feedback.context import DiagnosticBuffer, DiagnosticOutcome
 from msu_hub_bot.telegram.filters import MetaInfo
 
 Handler = Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]]
@@ -74,8 +76,9 @@ class DispatchTelemetryMiddleware(BaseMiddleware):
 
 
 class HandlerTelemetryMiddleware(BaseMiddleware):
-    def __init__(self, telemetry: Telemetry) -> None:
+    def __init__(self, telemetry: Telemetry, *, diagnostics: DiagnosticBuffer | None = None) -> None:
         self.telemetry = telemetry
+        self.diagnostics = diagnostics
 
     async def __call__(self, handler: Handler, event: TelegramObject, data: dict[str, Any]) -> Any:
         key = get_flag(data, "handler_key")
@@ -83,11 +86,20 @@ class HandlerTelemetryMiddleware(BaseMiddleware):
         parsed = data.get("command")
         command = meta.keyword if isinstance(meta, MetaInfo) else parsed.command if isinstance(parsed, CommandObject) else None
         command_kind = "hashtag" if isinstance(meta, MetaInfo) and meta.hashtag else "slash"
+        outcome: DiagnosticOutcome = "failed"
         with (
             self.telemetry.context(command=command, command_kind=command_kind),
             self.telemetry.operation(Boundary.HANDLER, key if isinstance(key, str) else "unknown") as observation,
         ):
-            result = await handler(event, data)
-            if result is UNHANDLED:
-                observation.set_outcome(Outcome.IGNORED)
-            return result
+            try:
+                result = await handler(event, data)
+                outcome = "ignored" if result is UNHANDLED else "completed"
+                if result is UNHANDLED:
+                    observation.set_outcome(Outcome.IGNORED)
+                return result
+            except asyncio.CancelledError:
+                outcome = "cancelled"
+                raise
+            finally:
+                if self.diagnostics is not None and isinstance(event, Message) and isinstance(key, str) and command:
+                    self.diagnostics.record(event, handler=key, command=command, outcome=outcome)

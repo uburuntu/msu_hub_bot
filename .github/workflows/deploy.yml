@@ -80,6 +80,8 @@ jobs:
           HUB_JEV_CONFIDENCE: ${{ vars.HUB_JEV_CONFIDENCE || '0.8' }}
           HUB_DUMPS_CHAT_ID: ${{ secrets.HUB_DUMPS_CHAT_ID }}
           HUB_EVENTS_CHAT_ID: ${{ secrets.HUB_EVENTS_CHAT_ID }}
+          HUB_FEEDBACK_CHAT_ID: ${{ secrets.HUB_FEEDBACK_CHAT_ID || '0' }}
+          HUB_FEEDBACK_DESTINATION_NAME: ${{ vars.HUB_FEEDBACK_DESTINATION_NAME || 'Event Tracking' }}
           HUB_ERROR_CHAT_ID: ${{ secrets.HUB_ERROR_CHAT_ID }}
           HUB_OWNER_ID: ${{ secrets.HUB_OWNER_ID }}
           HUB_FOUNDER_IDS: ${{ secrets.HUB_FOUNDER_IDS }}
