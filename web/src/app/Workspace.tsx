@@ -1,6 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ApiClient } from "../platform/api";
 import { CommunityApi } from "../platform/community";
+import { FeedbackApi } from "../platform/feedback";
+import { FeedbackPage } from "../features/feedback/FeedbackPage";
 import type { Session } from "../platform/types";
 import { GamesPage } from "../features/community/GamesPage";
 import { ReactionsPage } from "../features/community/ReactionsPage";
@@ -11,6 +13,15 @@ import { useResource } from "../features/community/useResource";
 import { RemindersPage } from "../features/reminders/RemindersPage";
 import type { Section } from "./navigation";
 import { Shell } from "./Shell";
+
+function feedbackLocation(): { reportId?: string } | null {
+  const route = /^#feedback(?:\/([a-f0-9]{16}))?$/.exec(window.location.hash);
+  if (route) return { reportId: route[1] };
+  const values = new URLSearchParams(window.location.search).getAll("feedback");
+  return values.length === 1 && /^[a-f0-9]{16}$/.test(values[0]!)
+    ? { reportId: values[0] }
+    : null;
+}
 
 export function Workspace({
   api,
@@ -25,25 +36,53 @@ export function Workspace({
 }) {
   const [session, setSession] = useState(initial);
   const [communityApi] = useState(() => new CommunityApi(credentials, launch));
+  const [feedbackApi] = useState(() => new FeedbackApi(credentials));
+  const canReview = session.capabilities?.feedback_review === true;
+  const [feedbackLink, setFeedbackLink] = useState(() =>
+    canReview ? feedbackLocation() : null,
+  );
   const load = useCallback(
     (signal: AbortSignal) => communityApi.community(signal),
     [communityApi],
   );
   const community = useResource(load);
-  const [section, setSection] = useState<Section>("reminders");
-  const [visited, setVisited] = useState<Set<Section>>(
-    () => new Set(["reminders"]),
+  const [section, setSection] = useState<Section>(
+    feedbackLink ? "feedback" : "reminders",
   );
+  const [visited, setVisited] = useState<Set<Section>>(
+    () => new Set([feedbackLink ? "feedback" : "reminders"]),
+  );
+  useEffect(() => {
+    const changed = () => {
+      const match = canReview ? feedbackLocation() : null;
+      if (!match) return;
+      setFeedbackLink(match);
+      setSection("feedback");
+      setVisited((previous) => new Set([...previous, "feedback"]));
+    };
+    window.addEventListener("hashchange", changed);
+    return () => window.removeEventListener("hashchange", changed);
+  }, [canReview]);
   function navigate(next: Section) {
+    if (next === "feedback" && !canReview) return;
     setSection(next);
     setVisited((previous) => new Set([...previous, next]));
+    const url = new URL(window.location.href);
+    url.searchParams.delete("feedback");
+    url.hash = next === "feedback" ? "feedback" : "";
+    window.history.replaceState(null, "", url);
   }
   return (
     <Shell session={session} section={section} onNavigate={navigate}>
       <div hidden={section !== "reminders"}>
         <RemindersPage api={api} session={session} launch={launch} />
       </div>
-      {section !== "reminders" && (
+      {canReview && visited.has("feedback") && (
+        <div hidden={section !== "feedback"}>
+          <FeedbackPage api={feedbackApi} reportId={feedbackLink?.reportId} />
+        </div>
+      )}
+      {section !== "reminders" && section !== "feedback" && (
         <LoadState
           busy={community.busy}
           error={community.error}

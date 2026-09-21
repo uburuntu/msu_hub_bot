@@ -1,6 +1,7 @@
 import type { Reminder, Session } from "../src/platform/types";
 
 export const session: Session = {
+  capabilities: { feedback_review: false },
   user: { id: 42, name: "Саша" },
   context: { chat_id: -100, thread_id: 7, label: "Друзья · планы" },
   default_timezone: "Europe/Moscow",

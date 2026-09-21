@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 import { ApiError } from "./errors";
-import { object, string, integer, stamp } from "./decode";
+import { object, string, integer, stamp, boolean } from "./decode";
 export { ApiError } from "./errors";
 
 function recurrence(value: unknown): Recurrence | null {
@@ -162,6 +162,12 @@ export class ApiClient {
           },
           default_timezone: string(row.default_timezone),
           now: stamp(row.now),
+          capabilities: {
+            feedback_review:
+              row.capabilities === undefined
+                ? false
+                : boolean(object(row.capabilities).feedback_review ?? false),
+          },
         };
       },
       undefined,

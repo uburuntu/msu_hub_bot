@@ -39,7 +39,13 @@ export function Shell({
           <Brand />
         </a>
         <div className="nav-label">ВАШИ ИНСТРУМЕНТЫ</div>
-        {onNavigate && <Navigation section={section} onNavigate={onNavigate} />}
+        {onNavigate && (
+          <Navigation
+            section={section}
+            onNavigate={onNavigate}
+            feedbackReview={session?.capabilities?.feedback_review === true}
+          />
+        )}
         <div className="sidebar-bottom">
           <span className="tiny-spark">
             <Icon name="sparkle" size={19} />
@@ -79,7 +85,11 @@ export function Shell({
         </header>
         {onNavigate && (
           <div className="mobile-navigation">
-            <Navigation section={section} onNavigate={onNavigate} />
+            <Navigation
+              section={section}
+              onNavigate={onNavigate}
+              feedbackReview={session?.capabilities?.feedback_review === true}
+            />
           </div>
         )}
         <main id="main" tabIndex={-1}>
@@ -99,23 +109,27 @@ export function Shell({
 function Navigation({
   section,
   onNavigate,
+  feedbackReview,
 }: {
   section: Section;
   onNavigate: (section: Section) => void;
+  feedbackReview: boolean;
 }) {
   return (
     <nav aria-label="Инструменты">
-      {(Object.keys(sections) as Section[]).map((key) => (
-        <button
-          key={key}
-          className={`nav-item ${section === key ? "active" : ""}`}
-          aria-current={section === key ? "page" : undefined}
-          onClick={() => onNavigate(key)}
-        >
-          <Icon name={sections[key].icon} />
-          <span>{sections[key].label}</span>
-        </button>
-      ))}
+      {(Object.keys(sections) as Section[])
+        .filter((key) => key !== "feedback" || feedbackReview)
+        .map((key) => (
+          <button
+            key={key}
+            className={`nav-item ${section === key ? "active" : ""}`}
+            aria-current={section === key ? "page" : undefined}
+            onClick={() => onNavigate(key)}
+          >
+            <Icon name={sections[key].icon} />
+            <span>{sections[key].label}</span>
+          </button>
+        ))}
     </nav>
   );
 }

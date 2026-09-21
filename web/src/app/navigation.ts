@@ -3,6 +3,7 @@ export const sections = {
   reposts: { label: "Репосты", icon: "send" },
   games: { label: "Игровая", icon: "trophy" },
   reactions: { label: "Реакции", icon: "heart" },
+  feedback: { label: "Отзывы", icon: "chat" },
   settings: { label: "Настройки", icon: "settings" },
 } as const;
 export type Section = keyof typeof sections;

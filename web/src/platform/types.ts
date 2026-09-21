@@ -30,6 +30,7 @@ export interface Reminder {
 export interface Session {
   user: { id: number; name: string };
   context: { chat_id: number; thread_id: number | null; label: string };
+  capabilities?: { feedback_review: boolean };
   default_timezone: string;
   now: string;
 }
