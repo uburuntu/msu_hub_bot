@@ -635,6 +635,21 @@ async def test_overlapping_automatic_refresh_does_not_wait_for_running_refresh(e
     await task
 
 
+async def test_explicit_pin_keeps_old_message_when_other_directory_metadata_is_throttled(ecosystem):
+    rig = ecosystem
+
+    async def lookup(chat_id):
+        if chat_id == -102:
+            raise TelegramRetryAfter(GetChat(chat_id=chat_id), "Synthetic flood wait", retry_after=31)
+        return ecosystem_chat(chat_id)
+
+    rig.bot.get_chat.side_effect = lookup
+    assert await rig.manager.pin(-101, forced=True) is False
+    assert rig.entries[-101].pinned_message_id == 7
+    rig.bot.delete_message.assert_not_awaited()
+    rig.bot.send_message.assert_not_awaited()
+
+
 async def test_confirmed_missing_pin_is_cleared_once_without_replacing_messages(ecosystem):
     rig = ecosystem
     before = rig.entries[-101].model_dump()

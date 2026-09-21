@@ -240,14 +240,16 @@ class EcosystemManager:
         if await self.get_chat(chat_id) is None:
             return False
 
-        if e_chat and e_chat.pinned_message_id:
-            if not forced:
-                return True
+        if e_chat and e_chat.pinned_message_id and not forced:
+            return True
 
+        text = await self.text(chat_id)
+        if self.throttled:
+            return False
+        if e_chat and e_chat.pinned_message_id:
             with suppress(TelegramBadRequest):
                 await self.bot.delete_message(chat_id, e_chat.pinned_message_id)
 
-        text = await self.text(chat_id)
         pin_msg = await self.bot.send_message(chat_id, text)
         await pin_msg.pin(disable_notification=True)
         await self.db.patch_directory(chat_id, DirectoryPatch(pinned_message_id=pin_msg.message_id))
