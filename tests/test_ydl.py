@@ -24,6 +24,7 @@ def test_extractor_is_owned_and_failures_stay_quiet(monkeypatch):
     assert options["js_runtimes"] == {"deno": {}}
     assert options["cachedir"] is False
     assert options["socket_timeout"] == 10
+    assert options["allowed_extractors"] == ["default", "-generic", "end"]
     client.extract_info.assert_called_once_with("https://example.test/video", download=False)
 
 
@@ -33,6 +34,38 @@ def test_injected_extractor_remains_caller_owned():
     assert YDL.extract_data("https://example.test/video", client) == {"title": "video"}
     client.__enter__.assert_not_called()
     client.__exit__.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://t.me/example", "https://example.org/article", "https://max.ru/example", "https://example.org/video.mp4"],
+)
+def test_unknown_pages_are_rejected_by_real_extractor_selection_before_network(url, monkeypatch):
+    with YDL.create_ydl() as client:
+        monkeypatch.setattr(client, "urlopen", lambda *args, **kwargs: pytest.fail("unsupported page reached the network"))
+        result = collect_link_diagnostics(YDL.extract_data, url, client)
+    assert result.value is None
+    assert [(item.stage, item.reason) for item in result.diagnostics] == [(LinkStage.EXTRACT, LinkReason.UNSUPPORTED)]
+
+
+@pytest.mark.parametrize(
+    "url,key",
+    [
+        ("https://vimeo.com/123456789", "Vimeo"),
+        ("https://www.youtube.com/watch?v=abcdefghijk", "Youtube"),
+        ("https://t.me/example/123", "TelegramEmbed"),
+    ],
+)
+def test_concrete_video_extractors_still_run(url, key, monkeypatch):
+    with YDL.create_ydl() as client:
+        extractor = client.get_info_extractor(key)
+        monkeypatch.setattr(extractor, "initialize", lambda: None)
+        extract = MagicMock(return_value={"id": "synthetic", "title": "clip", "url": "https://cdn.example.org/video.mp4", "ext": "mp4"})
+        monkeypatch.setattr(extractor, "_real_extract", extract)
+        monkeypatch.setattr(client, "urlopen", lambda *args, **kwargs: pytest.fail("synthetic extractor reached the network"))
+        result = YDL.extract_data(url, client)
+    assert result is not None and result["title"] == "clip"
+    extract.assert_called_once_with(url)
 
 
 @pytest.mark.parametrize("kind", ["playlist", "multi_video", "compat_list"])

@@ -63,6 +63,9 @@ class YDL:
                 "quiet": True,
                 "logger": _QuietLogger(),
                 "noplaylist": True,
+                # Match concrete sites locally. The final catch-all rejects unknown
+                # pages before GenericIE could fetch them and scan for embeds.
+                "allowed_extractors": ["default", "-generic", "end"],
                 "geo_bypass": True,
                 "cachedir": False,
                 "socket_timeout": 10,
