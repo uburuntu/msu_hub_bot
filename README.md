@@ -65,6 +65,13 @@ clocks and ratings survive restarts through the [feature store](docs/feature-per
 Completed matches remain available for 24 hours; ratings do not expire.
 Game buttons work during another conversation without changing its draft.
 
+## Feedback
+
+Use `/feedback description` to report a bug or suggest a feature. Choose which
+chat details, messages and command diagnostics to include, then preview before
+sending. Reports go to the configured review chat and survive restarts;
+see [feedback and context choices](docs/feedback.md).
+
 ## Development
 
 Use Python 3.14 and uv 0.12.15 or newer. Native development works on macOS; the
