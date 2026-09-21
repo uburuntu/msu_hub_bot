@@ -38,6 +38,7 @@ from msu_hub_bot.storage.features import (
     Transaction,
 )
 from msu_hub_bot.storage.supabase import RepositoryError, RepositoryUnavailable
+from msu_hub_bot.telemetry import record_handled_failure
 
 logger = logging.getLogger(__name__)
 SEND_TIMEOUT = 15
@@ -215,7 +216,8 @@ class QuizService:
                         continue
                 if record is None:
                     raise Conflict()
-        except FeatureError, RepositoryError, TimeoutError:
+        except (FeatureError, RepositoryError, TimeoutError) as error:
+            record_handled_failure(error)
             return await self._send(message.reply("Не удалось сохранить игру. Попробуй чуть позже."))
         finally:
             self._unlock(feature, message.chat.id, lock)
@@ -254,10 +256,12 @@ class QuizService:
             if not sending:
                 await asyncio.shield(self._abandon(feature, scope, token))
             raise
-        except TelegramBadRequest, TelegramForbiddenError:
+        except (TelegramBadRequest, TelegramForbiddenError) as error:
+            record_handled_failure(error)
             await self._abandon(feature, scope, token)
             return await self._send(message.reply("Ошибка, попробуйте еще раз"))
-        except Exception:
+        except Exception as error:
+            record_handled_failure(error)
             if not sending:
                 await self._abandon(feature, scope, token)
                 return await self._send(message.reply("Ошибка, попробуйте еще раз"))

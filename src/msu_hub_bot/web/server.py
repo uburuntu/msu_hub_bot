@@ -29,7 +29,7 @@ from msu_hub_bot.reminders.presentation import confirmation, keyboard
 from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.features import Conflict, FeatureError, Record
 from msu_hub_bot.storage.errors import RepositoryError
-from msu_hub_bot.telemetry import Boundary, Outcome, Telemetry
+from msu_hub_bot.telemetry import Boundary, Outcome, Telemetry, failure_outcome
 
 from .auth import AuthenticationError, WebUser, authenticate
 from .links import Destination, LaunchError, WebAppLinks
@@ -72,6 +72,45 @@ class Reschedule(Revision):
 
 def error(status: int, code: str, message: str) -> web.Response:
     return web.json_response({"error": {"code": code, "message": message}}, status=status)
+
+
+def _error_response(exc: Exception, *, feedback: bool) -> web.Response:
+    """Translate expected API failures before the observed request completes."""
+    if isinstance(exc, AuthenticationError):
+        return error(401, "authentication", "Сессия закончилась. Закрой и открой приложение через бота.")
+    if isinstance(exc, LaunchError):
+        return error(422, "launch", str(exc))
+    if isinstance(exc, (AccessDenied, FeedbackAccessDenied)):
+        return error(403, "access", str(exc))
+    if isinstance(exc, FeedbackNotFound):
+        return error(404, "not_found", str(exc))
+    if isinstance(exc, FeedbackError):
+        return error(422, "feedback", str(exc))
+    if isinstance(exc, RepostError):
+        return error(422, "repost", str(exc))
+    if isinstance(exc, Conflict):
+        return error(409, "conflict", "Запись уже изменилась или существует. Обнови её и попробуй снова.")
+    if isinstance(exc, ReminderError):
+        return error(422, "reminder", str(exc))
+    if isinstance(exc, (ValidationError, ValueError, json.JSONDecodeError, RecursionError)):
+        message = "Проверь данные отзыва." if feedback else "Проверь текст, время и часовой пояс."
+        return error(422, "input", message)
+    if isinstance(exc, (TimeoutError, RepositoryError, FeatureError, TelegramAPIError)):
+        return error(503, "unavailable", "Не удалось подтвердить ответ. Попробуй ещё раз.")
+    if isinstance(exc, web.HTTPException):
+        return error(exc.status, "request", "Запрос недоступен.")
+    logger.error("Mini App request failed")
+    return error(500, "unexpected", "Не получилось выполнить запрос. Попробуй позже.")
+
+
+def _http_outcome(status: int, exc: Exception | None = None) -> Outcome:
+    if exc is not None and failure_outcome(exc) is Outcome.TIMEOUT:
+        return Outcome.TIMEOUT
+    if status == 500:
+        return Outcome.UNEXPECTED
+    if status >= 500:
+        return Outcome.UNAVAILABLE
+    return Outcome.REJECTED if status >= 400 else Outcome.SUCCESS
 
 
 class WebServer:
@@ -121,40 +160,19 @@ class WebServer:
                     request[USER] = user
                     with self.telemetry.context(user_id=user.id):
                         with self.telemetry.operation(Boundary.WEB, "web.request") as span:
-                            async with asyncio.timeout(REQUEST_TIMEOUT), self._requests:
-                                response = await handler(request)
-                            if response.status >= 400:
-                                span.set_outcome(Outcome.REJECTED)
+                            try:
+                                async with asyncio.timeout(REQUEST_TIMEOUT), self._requests:
+                                    response = await handler(request)
+                            except Exception as exc:
+                                response = _error_response(exc, feedback=request.path.startswith("/api/feedback"))
+                                span.fail(exc, outcome=_http_outcome(response.status, exc))
+                            else:
+                                span.set_outcome(_http_outcome(response.status))
+                            span.http_status(response.status)
             else:
                 response = await handler(request)
-        except AuthenticationError:
-            response = error(401, "authentication", "Сессия закончилась. Закрой и открой приложение через бота.")
-        except LaunchError as exc:
-            response = error(422, "launch", str(exc))
-        except AccessDenied as exc:
-            response = error(403, "access", str(exc))
-        except FeedbackAccessDenied as exc:
-            response = error(403, "access", str(exc))
-        except FeedbackNotFound as exc:
-            response = error(404, "not_found", str(exc))
-        except FeedbackError as exc:
-            response = error(422, "feedback", str(exc))
-        except RepostError as exc:
-            response = error(422, "repost", str(exc))
-        except Conflict:
-            response = error(409, "conflict", "Запись уже изменилась или существует. Обнови её и попробуй снова.")
-        except ReminderError as exc:
-            response = error(422, "reminder", str(exc))
-        except ValidationError, ValueError, json.JSONDecodeError, RecursionError:
-            message = "Проверь данные отзыва." if request.path.startswith("/api/feedback") else "Проверь текст, время и часовой пояс."
-            response = error(422, "input", message)
-        except TimeoutError, RepositoryError, FeatureError, TelegramAPIError:
-            response = error(503, "unavailable", "Не удалось подтвердить ответ. Попробуй ещё раз.")
-        except web.HTTPException as exc:
-            response = error(exc.status, "request", "Запрос недоступен.")
-        except Exception:
-            logger.error("Mini App request failed")
-            response = error(500, "unexpected", "Не получилось выполнить запрос. Попробуй позже.")
+        except Exception as exc:
+            response = _error_response(exc, feedback=request.path.startswith("/api/feedback"))
         response.headers.update(
             {
                 "Cache-Control": "no-store" if request.path.startswith("/api/") else "no-cache",

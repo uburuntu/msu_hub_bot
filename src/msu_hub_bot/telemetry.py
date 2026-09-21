@@ -36,6 +36,7 @@ from opentelemetry.util.types import Attributes
 
 from msu_hub_bot.providers.link_diagnostics import LinkDiagnostic, LinkReason, LinkStage
 from msu_hub_bot.providers.link_source import source_metadata
+from msu_hub_bot.telegram.errors import telegram_error_reason
 
 logger = logging.getLogger(__name__)
 EU_ENDPOINT = "https://logfire-eu.pydantic.dev"
@@ -81,6 +82,8 @@ class Provider(StrEnum):
     TIKTOK = "tiktok"
     VK = "vk"
     YTDLP = "ytdlp"
+    NEKOS_BEST = "nekos_best"
+    PURRBOT = "purrbot"
     OTHER = "other"
 
 
@@ -133,12 +136,16 @@ JOB_STATES = frozenset({"complete", "retry", "hold", "expire"})
 OPERATIONS = frozenset(
     {
         "dispatch",
+        "ecosystem.events",
+        "ecosystem.refresh",
+        "telegram.auto_unpin",
         "http.request",
         "web.request",
         "jdoodle.execute",
         "jev.classify",
         "intent.execute",
         "wit.recognize",
+        "tyan.image",
         "wolfram.query",
         "fxembed.fetch",
         "links.extract",
@@ -306,11 +313,16 @@ def safe_failure(error: BaseException) -> dict[str, str | int]:
     from msu_hub_bot.settings import MissingIntegration
     from msu_hub_bot.execution.executor import ExecutorBusy
     from msu_hub_bot.media.limits import MediaDimensionsError
+    from msu_hub_bot.media.sticker_media import StickerSizeError
+    from msu_hub_bot.media.ffmpeg import ReverseSizeError
     from msu_hub_bot.telegram.files import DownloadTooLarge
+    from msu_hub_bot.storage.errors import RepositoryFailure, RepositoryUnavailable
 
     classes: tuple[tuple[type[BaseException], str, int | None], ...] = (
         (ExecutorBusy, "worker_busy", None),
         (DownloadTooLarge, "media_too_large", None),
+        (StickerSizeError, "media_too_large", None),
+        (ReverseSizeError, "media_too_large", None),
         (MediaDimensionsError, "media_dimensions", None),
         (telegram.TelegramRetryAfter, "rate_limited", 429),
         (telegram.TelegramBadRequest, "bad_request", 400),
@@ -324,7 +336,13 @@ def safe_failure(error: BaseException) -> dict[str, str | int]:
         (asyncio.CancelledError, "cancelled", None),
         (TimeoutError, "timeout", None),
         (ExternalServiceError, "provider_unavailable", None),
+        (RepositoryUnavailable, "storage_unavailable", None),
         (MissingIntegration, "configuration_missing", None),
+        (aiohttp.ClientConnectorDNSError, "dns_error", None),
+        (aiohttp.ClientSSLError, "tls_error", None),
+        (aiohttp.ClientConnectorError, "connect_error", None),
+        (aiohttp.ServerDisconnectedError, "connection_lost", None),
+        (aiohttp.ClientResponseError, "http_error", None),
         (aiohttp.ClientError, "network_error", None),
         (OSError, "io_error", None),
         (ValueError, "invalid_value", None),
@@ -338,37 +356,11 @@ def safe_failure(error: BaseException) -> dict[str, str | int]:
             if status is not None:
                 attributes["http.response.status_code"] = status
             break
+    if isinstance(error, RepositoryUnavailable) and error.code is RepositoryFailure.TIMEOUT:
+        attributes["error.reason"] = "timeout"
     if isinstance(error, telegram.TelegramAPIError):
-        message = error.message.casefold().removeprefix("bad request: ").removeprefix("forbidden: ")
-        reasons = {
-            "chat not found": "chat_not_found",
-            "private chat not found": "chat_not_found",
-            "the group chat was deleted": "chat_deleted",
-            "message to edit not found": "message_not_found",
-            "message to delete not found": "message_not_found",
-            "message can't be edited": "message_not_editable",
-            "message can't be deleted": "message_not_deletable",
-            "bot was blocked by the user": "bot_blocked",
-            "bot was kicked from the supergroup chat": "bot_removed",
-            "bot was kicked from the group chat": "bot_removed",
-            "bot was kicked from the channel chat": "bot_removed",
-            "bot is not a member of the group chat": "bot_removed",
-            "bot is not a member of the supergroup chat": "bot_removed",
-            "bot is not a member of the channel chat": "bot_removed",
-            "user is deactivated": "user_deactivated",
-            "have no rights to send a message": "not_enough_rights",
-            "not enough rights to send text messages to the chat": "not_enough_rights",
-            "not enough rights to send photos to the chat": "not_enough_rights",
-            "query is too old and response timeout expired or query id is invalid": "query_expired",
-            "message caption is too long": "caption_too_long",
-            "message is too long": "text_too_long",
-        }
-        if message in reasons:
-            attributes["error.reason"] = reasons[message]
-        elif message.startswith("message is not modified"):
-            attributes["error.reason"] = "message_not_modified"
-        elif message.startswith("can't parse entities"):
-            attributes["error.reason"] = "invalid_entities"
+        if telegram_reason := telegram_error_reason(error):
+            attributes["error.reason"] = telegram_reason
     if isinstance(error, telegram.TelegramRetryAfter) and type(error.retry_after) is int:
         attributes["telegram.retry_after"] = min(86400, max(0, error.retry_after))
     if isinstance(error, aiohttp.ClientResponseError) and type(error.status) is int and 100 <= error.status <= 599:
@@ -513,6 +505,12 @@ _current: ContextVar[Operation | None] = ContextVar("telemetry_operation", defau
 _job_link: ContextVar[SpanContext | None] = ContextVar("telemetry_job_link", default=None)
 
 
+def record_handled_failure(error: BaseException) -> None:
+    """Keep the active operation honest when a feature sends its own error reply."""
+    if operation := _current.get():
+        operation.fail(error)
+
+
 @dataclass
 class _LinkContext:
     owner: asyncio.Task[Any] | None
@@ -532,7 +530,7 @@ def _link_outcome(reason: LinkReason) -> Outcome:
         return Outcome.TIMEOUT
     if reason is LinkReason.CANCELLED:
         return Outcome.CANCELLED
-    if reason in {LinkReason.BUSY, LinkReason.REJECTED, LinkReason.TOO_LARGE}:
+    if reason in {LinkReason.BUSY, LinkReason.REJECTED, LinkReason.TOO_LARGE, LinkReason.PRIVATE}:
         return Outcome.REJECTED
     if reason is LinkReason.UNEXPECTED:
         return Outcome.UNEXPECTED
@@ -546,14 +544,19 @@ def failure_outcome(error: BaseException) -> Outcome:
     from msu_hub_bot.providers.exceptions import ExternalServiceError
     from msu_hub_bot.execution.executor import ExecutorBusy
     from msu_hub_bot.media.limits import MediaDimensionsError
+    from msu_hub_bot.media.sticker_media import StickerSizeError
+    from msu_hub_bot.media.ffmpeg import ReverseSizeError
     from msu_hub_bot.telegram.files import DownloadTooLarge
+    from msu_hub_bot.storage.errors import RepositoryFailure, RepositoryUnavailable
 
     if isinstance(error, SkipHandler):
         return Outcome.IGNORED
-    if isinstance(error, (CancelHandler, ExecutorBusy, DownloadTooLarge, MediaDimensionsError)):
+    if isinstance(error, (CancelHandler, ExecutorBusy, DownloadTooLarge, MediaDimensionsError, StickerSizeError, ReverseSizeError)):
         return Outcome.REJECTED
     if isinstance(error, asyncio.CancelledError):
         return Outcome.CANCELLED
+    if isinstance(error, RepositoryUnavailable):
+        return Outcome.TIMEOUT if error.code is RepositoryFailure.TIMEOUT else Outcome.UNAVAILABLE
     if isinstance(error, TimeoutError):
         return Outcome.TIMEOUT
     if isinstance(error, (TelegramBadRequest, TelegramForbiddenError)) or (type(error).__module__, type(error).__name__) == (
@@ -561,7 +564,7 @@ def failure_outcome(error: BaseException) -> Outcome:
         "MissingIntegration",
     ):
         return Outcome.REJECTED
-    if isinstance(error, (TelegramNetworkError, TelegramRetryAfter, ExternalServiceError, OSError)):
+    if isinstance(error, (TelegramNetworkError, TelegramRetryAfter, ExternalServiceError, aiohttp.ClientError, OSError)):
         return Outcome.UNAVAILABLE
     return Outcome.UNEXPECTED
 
@@ -664,6 +667,13 @@ class Operation:
     def set_outcome(self, outcome: Outcome) -> None:
         if isinstance(outcome, Outcome):
             self.outcome = outcome
+
+    def fail(self, error: BaseException, *, outcome: Outcome | None = None) -> None:
+        """Record a handled failure without exporting its text or replaying the work."""
+        if not self._owned():
+            return
+        self.failure = safe_failure(error)
+        self.set_outcome(outcome if isinstance(outcome, Outcome) else failure_outcome(error))
 
     def http_status(self, status: int) -> None:
         if type(status) is int and 100 <= status <= 599:
@@ -1123,8 +1133,8 @@ class Telemetry:
                 severity_text=severity.name,
                 attributes={
                     **attributes,
-                    **handle.details,
                     **handle.failure,
+                    **handle.details,
                     "boundary": boundary.value,
                     "outcome": handle.outcome.value,
                     "duration_ms": round(max(0, duration) * 1000, 3),
@@ -1302,11 +1312,13 @@ class Telemetry:
         try:
             yield handle
         except BaseException as error:
+            # A later exception supersedes a handled failure; explicit classifications
+            # made immediately before raising (for example job retries) still apply.
+            if handle.outcome is Outcome.SUCCESS or handle.failure:
+                handle.set_outcome(failure_outcome(error))
             handle.failure = safe_failure(error)
             if span is not None:
                 span.set_attributes(handle.failure)
-            if handle.outcome is Outcome.SUCCESS:
-                handle.set_outcome(failure_outcome(error))
             if key == "links.preview":
                 handle.link_error(LinkStage(str(handle.details.get("link.stage", "extract"))), error)
             if boundary in {Boundary.HANDLER, Boundary.JOB, Boundary.DISPATCH} and handle.outcome not in {
@@ -1338,6 +1350,8 @@ class Telemetry:
                         else Outcome.UNAVAILABLE
                     )
                 if span is not None:
+                    span.set_attributes(handle.failure)
+                    span.set_attributes(handle.details)
                     span.set_attribute("outcome", handle.outcome.value)
                     if handle.outcome is Outcome.UNEXPECTED:
                         span.set_status(StatusCode.ERROR)

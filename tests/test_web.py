@@ -191,6 +191,80 @@ async def test_web_telemetry_exports_verified_identity_without_request_contents(
         assert private not in serialized
 
 
+@pytest.mark.parametrize(
+    ("failure", "status", "outcome"),
+    [
+        ("forbidden", 403, "rejected"),
+        ("missing", 404, "rejected"),
+        ("conflict", 409, "rejected"),
+        ("input", 422, "rejected"),
+        ("storage", 503, "unavailable"),
+        ("storage_timeout", 503, "timeout"),
+        ("telegram", 503, "unavailable"),
+        ("timeout", 503, "timeout"),
+        ("unexpected", 500, "unexpected"),
+    ],
+)
+async def test_web_failure_telemetry_matches_the_final_http_result(rig, monkeypatch, failure, status, outcome):
+    from msu_hub_bot.feedback.models import FeedbackAccessDenied, FeedbackNotFound
+    from msu_hub_bot.storage.features import Conflict
+    from telemetry_helpers import Capture, config
+
+    from aiogram.exceptions import TelegramBadRequest
+
+    private = "private-failure-content"
+    errors = {
+        "forbidden": FeedbackAccessDenied(),
+        "missing": FeedbackNotFound(),
+        "conflict": Conflict(),
+        "input": ValueError(private),
+        "storage": RepositoryUnavailable(RepositoryFailure.UNAVAILABLE),
+        "storage_timeout": RepositoryUnavailable(RepositoryFailure.TIMEOUT),
+        "telegram": TelegramBadRequest(method=GetChatMember(chat_id=-123, user_id=42), message=private),
+        "timeout": TimeoutError(private),
+        "unexpected": RuntimeError(private),
+    }
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    capture = Capture()
+    telemetry = Telemetry(config(), transport=capture)
+    rig.server.telemetry = telemetry
+    monkeypatch.setattr(rig.server.links, "destination", Mock(side_effect=errors[failure]))
+    await telemetry.start()
+    try:
+        response = await rig.api("GET", "/api/session")
+        assert response.status == status
+        assert_headers(response)
+    finally:
+        await telemetry.close()
+    spans = [span for span in capture.spans() if span.name == "web.request"]
+    assert len(spans) == 1
+    values = {item.key: getattr(item.value, item.value.WhichOneof("value")) for item in spans[0].attributes}
+    assert values["outcome"] == outcome
+    assert values["http.response.status_code"] == status
+    assert private not in capture.serialized()
+
+
+async def test_returned_http_errors_are_classified_without_an_exception(rig, monkeypatch):
+    from telemetry_helpers import Capture, config
+
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    capture = Capture()
+    telemetry = Telemetry(config(), transport=capture)
+    rig.server.telemetry = telemetry
+    monkeypatch.setattr(rig.server, "_label", AsyncMock(return_value="Label"))
+    monkeypatch.setattr("msu_hub_bot.web.server.web.json_response", Mock(return_value=web.Response(status=503)))
+    await telemetry.start()
+    try:
+        response = await rig.api("GET", "/api/session")
+        assert response.status == 503
+    finally:
+        await telemetry.close()
+    span = next(span for span in capture.spans() if span.name == "web.request")
+    values = {item.key: getattr(item.value, item.value.WhichOneof("value")) for item in span.attributes}
+    assert values["outcome"] == "unavailable"
+    assert values["http.response.status_code"] == 503
+
+
 def assert_headers(response):
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Referrer-Policy"] == "no-referrer"

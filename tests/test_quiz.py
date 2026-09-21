@@ -476,6 +476,31 @@ async def test_photo_failure_releases_slot_and_preserves_recent_history(rig):
     assert chat.value.active is None and chat.value.recent == []
 
 
+async def test_photo_rejection_records_failed_game_even_when_error_reply_succeeds(rig, monkeypatch):
+    from msu_hub_bot.telemetry import Boundary, Telemetry
+    from telemetry_helpers import Capture, config
+
+    async def reject(method):
+        raise TelegramBadRequest(method=method, message="Bad Request: PHOTO_INVALID_DIMENSIONS")
+
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    capture = Capture()
+    telemetry = Telemetry(config(), {"quiz.start"}, transport=capture)
+    rig.session.photo_hook = reject
+    await telemetry.start()
+    try:
+        with telemetry.operation(Boundary.HANDLER, "quiz.start"):
+            record = await start(rig)
+    finally:
+        await telemetry.close()
+    assert record.value.phase == "abandoned"
+    assert rig.session.methods[-1].text == "Ошибка, попробуйте еще раз"
+    handler = next(span for span in capture.spans() if span.name == "bot.handler")
+    values = {item.key: getattr(item.value, item.value.WhichOneof("value")) for item in handler.attributes}
+    assert values["outcome"] == "rejected"
+    assert values["error.reason"] == "photo_dimensions_invalid"
+
+
 async def test_initial_send_uncertainty_is_recovered_by_its_own_bot_callback(rig, monkeypatch):
     request = rig.session.make_request
 
