@@ -5,6 +5,7 @@ import io
 import json
 import math
 import subprocess
+import time
 from dataclasses import dataclass
 from contextlib import closing
 from pathlib import Path
@@ -22,10 +23,15 @@ MAX_SOURCE_SECONDS = 7
 MAX_ANIMATION_FRAMES = 300
 MAX_ANIMATION_PIXELS = 64 * 1024 * 1024
 MAX_FRAME_BYTES = 64 * 1024 * 1024
+ENCODING_TIMEOUT = 60
 
 
 class StickerMediaError(ValueError):
     pass
+
+
+class StickerSizeError(StickerMediaError):
+    """Prepared artwork still exceeds Telegram's output-size limit."""
 
 
 @dataclass(frozen=True)
@@ -43,9 +49,9 @@ def speed_factor(duration: float) -> float:
     return duration / 2.95 if duration > 3 else 1.0
 
 
-def _run(command: list[str]) -> bytes:
+def _run(command: list[str], *, timeout: float = 60) -> bytes:
     try:
-        return run_process(command, timeout=60, max_output_bytes=1024 * 1024 if command[0] == "ffprobe" else 0)
+        return run_process(command, timeout=timeout, max_output_bytes=1024 * 1024 if command[0] == "ffprobe" else 0)
     except FileNotFoundError as exc:
         raise StickerMediaError("На сервере нужны FFmpeg и FFprobe.") from exc
     except subprocess.TimeoutExpired as exc:
@@ -54,7 +60,7 @@ def _run(command: list[str]) -> bytes:
         raise StickerMediaError("Не удалось прочитать или преобразовать анимацию.") from exc
 
 
-def _probe(path: Path) -> tuple[dict[str, Any], dict[str, Any], float]:
+def _probe(path: Path, *, timeout: float = 60) -> tuple[dict[str, Any], dict[str, Any], float]:
     info: dict[str, Any] = json.loads(
         _run(
             [
@@ -70,7 +76,8 @@ def _probe(path: Path) -> tuple[dict[str, Any], dict[str, Any], float]:
                 "-of",
                 "json",
                 str(path),
-            ]
+            ],
+            timeout=timeout,
         )
     )
     streams = info.get("streams", [])
@@ -123,52 +130,63 @@ def _encode_video(
         "h='if(gte(dar,1),max(2,trunc(512/dar/2)*2),512)',"
         "setsar=1,fps=30:round=down,format=yuva420p"
     )
-    _run(
-        [
-            "ffmpeg",
-            "-nostdin",
-            "-v",
-            "error",
-            "-y",
-            "-protocol_whitelist",
-            "file,pipe",
-            "-format_whitelist",
-            LOCAL_MEDIA_FORMATS + (",concat" if input_options else ""),
-            "-filter_threads",
-            "1",
-            "-threads",
-            "2",
-            *source_limit,
-            *input_options,
-            *decoder,
-            "-i",
-            str(source),
-            "-map",
-            "0:v:0",
-            "-an",
-            "-sn",
-            "-dn",
-            "-vf",
-            filters,
-            "-c:v",
-            "libvpx-vp9",
-            "-b:v",
-            "0",
-            "-crf",
-            "32",
-            "-deadline",
-            "good",
-            "-cpu-used",
-            "4",
-            "-threads",
-            "2",
-            "-auto-alt-ref",
-            "0",
-            str(output),
-        ]
-    )
-    if output.stat().st_size <= MAX_VIDEO_BYTES:
-        info, result, length = _probe(output)
+    command = [
+        "ffmpeg",
+        "-nostdin",
+        "-v",
+        "error",
+        "-y",
+        "-protocol_whitelist",
+        "file,pipe",
+        "-format_whitelist",
+        LOCAL_MEDIA_FORMATS + (",concat" if input_options else ""),
+        "-filter_threads",
+        "1",
+        "-threads",
+        "2",
+        *source_limit,
+        *input_options,
+        *decoder,
+        "-i",
+        str(source),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-sn",
+        "-dn",
+        "-vf",
+        filters,
+        "-c:v",
+        "libvpx-vp9",
+        "-b:v",
+        "0",
+        "-crf",
+        "32",
+        "-deadline",
+        "good",
+        "-cpu-used",
+        "4",
+        "-threads",
+        "2",
+        "-auto-alt-ref",
+        "0",
+        str(output),
+    ]
+    deadline = time.monotonic() + ENCODING_TIMEOUT
+
+    def remaining() -> float:
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise StickerMediaError("Обработка заняла слишком много времени. Стикер не добавлен.")
+        return budget
+
+    for quality in (32, 42):
+        # Retry only a valid oversized encoding. Keep the original source, alpha,
+        # dimensions and timeline; the second pass trades detail for smaller bytes.
+        command[command.index("-crf") + 1] = str(quality)
+        output.unlink(missing_ok=True)
+        _run(command, timeout=remaining())
+        info, result, length = _probe(output, timeout=remaining())
         width, height = result["width"], result["height"]
         fps_num, fps_den = result.get("avg_frame_rate", "0/1").split("/")
         fps = float(fps_num) / float(fps_den or 1)
@@ -181,8 +199,9 @@ def _encode_video(
             or any(s.get("codec_type") == "audio" for s in info["streams"])
         ):
             raise StickerMediaError("Результат не соответствует ограничениям Telegram.")
-        return PreparedMedia("video", output.read_bytes(), trimmed=trimmed)
-    raise StickerMediaError("После одной попытки сжатия стикер превышает 256 КБ. Стикер не добавлен.")
+        if output.stat().st_size <= MAX_VIDEO_BYTES:
+            return PreparedMedia("video", output.read_bytes(), trimmed=trimmed)
+    raise StickerSizeError("Даже после дополнительного сжатия стикер превышает 256 КБ. Попробуйте более простой или короткий фрагмент.")
 
 
 def _check_dimensions(size: tuple[int, int]) -> None:
@@ -270,7 +289,7 @@ def prepare_static(data: bytes) -> PreparedMedia:
             with io.BytesIO() as output:
                 image.save(output, format="WEBP", lossless=True)
                 if output.tell() > 512 * 1024:
-                    raise StickerMediaError("После одной попытки сжатия картинка превышает 512 КБ. Стикер не добавлен.")
+                    raise StickerSizeError("После одной попытки сжатия картинка превышает 512 КБ. Стикер не добавлен.")
                 return PreparedMedia("static", output.getvalue())
 
 

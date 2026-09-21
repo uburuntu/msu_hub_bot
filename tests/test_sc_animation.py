@@ -134,10 +134,10 @@ def test_video_conversion_command(monkeypatch, duration):
             ({"streams": [{"codec_type": "video"}]}, {"codec_name": "vp9", "width": 512, "height": 288, "avg_frame_rate": "30/1"}, 2.967),
         ]
     )
-    monkeypatch.setattr(media, "_probe", lambda path: next(probes))
+    monkeypatch.setattr(media, "_probe", lambda path, **kwargs: next(probes))
     commands = []
 
-    def run(command):
+    def run(command, **kwargs):
         commands.append(command)
         Path(command[-1]).write_bytes(b"encoded")
 
@@ -431,25 +431,46 @@ def test_successful_creation_clears_pending_state_even_when_preview_fails(handle
     assert handlers["trimmed_sticker_notice"] in m.reply.call_args.args[0]
 
 
-def test_oversized_video_is_encoded_once(monkeypatch):
-    monkeypatch.setattr(media, "_probe", lambda path: ({}, {"codec_name": "h264", "width": 64, "height": 64}, 6))
+@pytest.mark.parametrize("second_size", [100, media.MAX_VIDEO_BYTES + 1])
+def test_oversized_video_gets_one_stronger_pass_within_the_shared_budget(monkeypatch, second_size):
+    clock = [0.0]
+    monkeypatch.setattr(media.time, "monotonic", lambda: clock[0])
+    probes = []
+
+    def probe(path, **kwargs):
+        if path.name == "source":
+            return {}, {"codec_name": "h264", "width": 64, "height": 64}, 6
+        probes.append(kwargs["timeout"])
+        clock[0] += 5
+        return {"streams": [{"codec_type": "video"}]}, {"codec_name": "vp9", "width": 512, "height": 512, "avg_frame_rate": "30/1"}, 2.967
+
+    monkeypatch.setattr(media, "_probe", probe)
     calls = []
 
-    def encode(command):
-        calls.append(command)
-        Path(command[-1]).write_bytes(b"x" * (media.MAX_VIDEO_BYTES + 1))
+    def encode(command, *, timeout):
+        calls.append((list(command), timeout))
+        clock[0] += 10
+        Path(command[-1]).write_bytes(b"x" * (media.MAX_VIDEO_BYTES + 1 if len(calls) == 1 else second_size))
 
     monkeypatch.setattr(media, "_run", encode)
-    with pytest.raises(media.StickerMediaError, match="одной попытки"):
-        media.prepare_video(b"video")
-    assert len(calls) == 1
+    if second_size <= media.MAX_VIDEO_BYTES:
+        assert media.prepare_video(b"video").payload == b"x" * second_size
+    else:
+        with pytest.raises(media.StickerSizeError):
+            media.prepare_video(b"video")
+    assert len(calls) == 2 and [timeout for _, timeout in calls] == [60, 45]
+    assert probes == [50, 35]
+    commands = [command for command, _ in calls]
+    assert [command[command.index("-crf") + 1] for command in commands] == ["32", "42"]
+    assert commands[0][commands[0].index("-vf") + 1] == commands[1][commands[1].index("-vf") + 1]
+    assert all(not Path(command[-1]).parent.exists() for command in commands)
 
 
 def test_encoder_failure_is_not_retried(monkeypatch):
     monkeypatch.setattr(media, "_probe", lambda path: ({}, {"codec_name": "h264", "width": 64, "height": 64}, 6))
     calls = []
 
-    def fail(command):
+    def fail(command, **kwargs):
         calls.append(command)
         raise media.StickerMediaError("Ошибка кодирования")
 
@@ -457,6 +478,48 @@ def test_encoder_failure_is_not_retried(monkeypatch):
     with pytest.raises(media.StickerMediaError, match="Ошибка кодирования"):
         media.prepare_video(b"video")
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("expire", [False, True])
+def test_invalid_or_out_of_time_output_never_starts_fallback(monkeypatch, expire):
+    clock = [0.0]
+    monkeypatch.setattr(media.time, "monotonic", lambda: clock[0])
+    commands = []
+
+    def probe(path, **kwargs):
+        if path.name == "source":
+            return {}, {"codec_name": "h264", "width": 64, "height": 64}, 6
+        if expire:
+            clock[0] = media.ENCODING_TIMEOUT
+        return (
+            {"streams": [{"codec_type": "video"}]},
+            {"codec_name": "vp9", "width": 512, "height": 512, "avg_frame_rate": "30/1"},
+            2.967 if expire else 4,
+        )
+
+    def encode(command, **kwargs):
+        commands.append(list(command))
+        Path(command[-1]).write_bytes(b"x" * (media.MAX_VIDEO_BYTES + 1))
+
+    monkeypatch.setattr(media, "_probe", probe)
+    monkeypatch.setattr(media, "_run", encode)
+    with pytest.raises(media.StickerMediaError, match="много времени" if expire else "ограничениям Telegram"):
+        media.prepare_video(b"video")
+    assert len(commands) == 1 and not Path(commands[0][-1]).parent.exists()
+
+
+def test_native_encoder_timeout_never_starts_fallback(monkeypatch):
+    monkeypatch.setattr(media, "_probe", lambda path: ({}, {"codec_name": "h264", "width": 64, "height": 64}, 6))
+    commands = []
+
+    def fail(command, *, timeout, **kwargs):
+        commands.append(list(command))
+        raise subprocess.TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(media, "run_process", fail)
+    with pytest.raises(media.StickerMediaError, match="много времени"):
+        media.prepare_video(b"video")
+    assert len(commands) == 1 and not Path(commands[0][-1]).parent.exists()
 
 
 def test_oversized_static_is_encoded_once(monkeypatch):

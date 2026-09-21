@@ -127,7 +127,7 @@ def test_reverse_budgets_video_and_audio_together(monkeypatch):
     monkeypatch.setattr(media, "run_process", lambda *args, **kwargs: json.dumps(payload).encode())
     media._validate_source(Path("synthetic.mp4"), reverse=True)
     audio["duration"] = "3600"
-    with pytest.raises(media.ReverseMediaError):
+    with pytest.raises(media.ReverseSizeError):
         media._validate_source(Path("synthetic.mp4"), reverse=True)
 
 

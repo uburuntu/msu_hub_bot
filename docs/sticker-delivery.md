@@ -51,7 +51,10 @@ Pillow decodes APNG/animated WEBP with their frame timing, alpha, blending and
 disposal. A separate APNG poster is excluded. Loop counts do not repeat the source
 cycle; Telegram loops the resulting sticker. Nonpositive or malformed frame
 durations are rejected. Resized RGBA frames feed a generated local timeline into
-one VP9 encoding attempt.
+VP9 encoding. A valid result above 256 KiB gets one stronger compression attempt;
+the source, dimensions, alpha, frame rate and timeline stay unchanged. Decode or
+encoder failures and timeouts are not retried. If the second result is still too
+large, the bot asks for a simpler or shorter excerpt.
 
 | Input or operation | Enforced limits |
 | --- | --- |
@@ -60,7 +63,7 @@ one VP9 encoding attempt.
 | Video output | Silent VP9 WEBM, longest side 512 pixels, at most three seconds, 30 FPS and 256 KiB. |
 | Static output | Lossless WEBP, longest side 512 pixels, at most 512 KiB. |
 | Existing TGS | At most 64 KiB compressed and 2 MiB expanded JSON; positive duration at most three seconds. Arbitrary TGS documents are rejected. |
-| FFmpeg/FFprobe | Each invocation has a 60-second timeout; process groups are terminated and reaped. Probe output is capped at 1 MiB. |
+| FFmpeg/FFprobe | Input probing has a 60-second timeout. Both encoding attempts and their result probes share another 60 seconds; process groups are terminated and reaped. Probe output is capped at 1 MiB. |
 
 Uploaded inputs use a demuxer allowlist for media containers and file/pipe
 protocols; playlists cannot cause additional file or network reads. Only the

@@ -3,6 +3,7 @@
 import io
 import errno
 import os
+import random
 import shutil
 import subprocess
 import threading
@@ -68,6 +69,44 @@ def test_frame_timing_alpha_and_one_cycle_are_preserved(tmp_path, fmt, loop):
     assert abs(colors.count(1) - 12) <= 1
     assert abs(colors.count(2) - 6) <= 1
     assert all(120 <= frame[3] <= 136 for frame in frames)
+
+
+@native
+def test_stronger_encoding_fits_detailed_animation_without_losing_alpha_or_timing(tmp_path, monkeypatch):
+    rng = random.Random(13)
+    frames = []
+    for _ in range(7):
+        frame = Image.frombytes("RGB", (96, 96), rng.randbytes(96 * 96 * 3))
+        frame.putalpha(128)
+        frames.append(frame)
+    source = io.BytesIO()
+    frames[0].save(source, format="PNG", save_all=True, append_images=frames[1:], duration=100, loop=0)
+    for frame in frames:
+        frame.close()
+    run = media._run
+    encoded = []
+
+    def record(command, **kwargs):
+        result = run(command, **kwargs)
+        if command[0] == "ffmpeg":
+            size = Path(command[-1]).stat().st_size
+            encoded.append((command[command.index("-crf") + 1], size))
+            # Keep the fallback exercised on FFmpeg versions that compress the
+            # fixture below Telegram's cap on the first pass already.
+            if len(encoded) == 1:
+                monkeypatch.setattr(media, "MAX_VIDEO_BYTES", min(media.MAX_VIDEO_BYTES, size - 1))
+        return result
+
+    monkeypatch.setattr(media, "_run", record)
+    prepared = media.prepare_media(source.getvalue(), "static")
+    duration, decoded = decode(tmp_path, prepared)
+    assert [quality for quality, _ in encoded] == ["32", "42"]
+    assert encoded[1][1] <= media.MAX_VIDEO_BYTES < encoded[0][1]
+    assert 0.69 <= duration <= 0.735 and not prepared.trimmed
+    assert all(120 <= frame[3] <= 136 for frame in decoded)
+    info, stream, _ = media._probe(tmp_path / "result.webm")
+    assert stream["avg_frame_rate"] == "30/1"
+    assert all(stream["codec_type"] != "audio" for stream in info["streams"])
 
 
 @native

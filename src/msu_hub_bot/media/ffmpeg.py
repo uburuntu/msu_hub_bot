@@ -23,6 +23,10 @@ class ReverseMediaError(ValueError):
     """A safe explanation when a whole-clip reverse cannot fit its budget."""
 
 
+class ReverseSizeError(ReverseMediaError):
+    """The decoded whole clip cannot fit the bounded reverse buffer."""
+
+
 def _positive(value: object) -> float:
     try:
         number = float(Fraction(str(value)))
@@ -83,7 +87,7 @@ def _validate_source(source: Path, *, reverse: bool, timeout: float = FFPROBE_TI
                 raise ReverseMediaError("Не удалось определить параметры звука для разворота. Попробуй другой файл.")
             buffered += duration * sample_rate * channels * 8
         if buffered > MAX_REVERSE_BYTES:
-            raise ReverseMediaError("Файл слишком большой для разворота. Попробуй более короткий фрагмент или меньшее разрешение.")
+            raise ReverseSizeError("Файл слишком большой для разворота. Попробуй более короткий фрагмент или меньшее разрешение.")
 
 
 def ffmpeg(
