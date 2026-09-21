@@ -1,14 +1,16 @@
 import random
+from html import escape
 
 from aiogram.exceptions import TelegramBadRequest
-import aiohttp
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.filters.callback_data import CallbackData
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.utils.markdown import hbold
+from aiogram.utils.markdown import hbold, hlink
 
-from msu_hub_bot import json
+from msu_hub_bot.providers.tyan import TyanImage, TyanProvider, TyanUnavailable, category_available
+from msu_hub_bot.telemetry import Telemetry
 from msu_hub_bot.telegram.callbacks import CallbackCommandBase
+from msu_hub_bot.telegram.context import bot_for
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.telegram.middlewares.settings import Settings
 
@@ -20,6 +22,7 @@ class TyanCallback(CallbackData, prefix="tyan", sep=":"):
 
 class Tyan(CallbackCommandBase):
     callback_data = TyanCallback
+    images = TyanProvider()
 
     @classmethod
     def keyboard(cls, with_nsfw: bool) -> InlineKeyboardMarkup:
@@ -82,7 +85,13 @@ class Tyan(CallbackCommandBase):
         return await target.reply(hbold("База аниме тяночек 👩🏻‍🦰👱🏻‍♀️👩🏻"), reply_markup=cls.keyboard(settings.with_nsfw))
 
     @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: TyanCallback, settings: Settings | None = None) -> Message | bool | None:
+    async def process_cb(
+        cls,
+        query: CallbackQuery,
+        callback_data: TyanCallback,
+        settings: Settings | None = None,
+        telemetry: Telemetry | None = None,
+    ) -> Message | bool | None:
         message = query.message
         if not isinstance(message, Message):
             return await query.answer("Эта кнопка уже недоступна.")
@@ -100,34 +109,48 @@ class Tyan(CallbackCommandBase):
         if not settings.with_nsfw and type_ == "nsfw":
             return await query.answer(text="🚫", cache_time=cls.cache_time_10s)
 
-        await query.answer(text="✅", cache_time=1)
-
-        if category == "neuro":
+        if type_ == "sfw" and category == "neuro":
+            await query.answer(cache_time=1)
             url = cls.request_neuro_tyan()
             return await message.reply_photo(url, caption=f"{hbold('Нейротянка')} для {query.from_user.mention_html()}")
 
+        if not category_available(type_, category):
+            return await query.answer("Эта категория сейчас недоступна. Выбери другую.", show_alert=True)
+
+        await query.answer(cache_time=1)
         for _ in range(3):
             try:
-                url = await cls.request_tyan(type_, category)
+                image = await cls.request_tyan(type_, category, telemetry=telemetry)
+            except TyanUnavailable as error:
+                # The button was already acknowledged. Use a durable reply so
+                # a provider outage cannot disappear with an expired callback.
+                return await message.reply(error.text, parse_mode=None)
+            try:
                 caption = hbold(category.title()) + (f" для {query.from_user.mention_html()}" if message.chat.type != "private" else "")
-
-                if url.endswith(("gif", "mp4")):
-                    return await message.reply_video(url, caption=caption)
-                return await message.reply_photo(url, caption=caption)
+                credits = []
+                if image.artist_name:
+                    credits.append(hlink(image.artist_name, escape(image.artist_url)) if image.artist_url else hbold(image.artist_name))
+                if image.source_url:
+                    credits.append(hlink("Источник", escape(image.source_url)))
+                if image.anime_name:
+                    credits.append(hbold(image.anime_name))
+                if credits:
+                    caption += "\n" + " · ".join(credits)
+                method = (
+                    message.reply_animation(image.url, caption=caption)
+                    if image.animated
+                    else message.reply_photo(image.url, caption=caption)
+                )
+                sent: Message = await bot_for(message)(method, request_timeout=15)
+                return sent
             except TelegramBadRequest as error:
                 if not any(detail in error.message.lower() for detail in ("failed to get http url content", "wrong file identifier")):
                     raise
-        return None
+        return await message.reply("Не получилось загрузить картинку. Попробуй другую категорию.", parse_mode=None)
 
     @classmethod
-    async def request_tyan(cls, type_: str, category: str) -> str:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.waifu.pics/{type_}/{category}") as response:
-                result = await response.json(loads=json.loads)
-                url = result["url"]
-                if not isinstance(url, str):
-                    raise ValueError("Image provider returned an invalid URL")
-                return url
+    async def request_tyan(cls, type_: str, category: str, *, telemetry: Telemetry | None = None) -> TyanImage:
+        return await cls.images.image(type_, category, telemetry=telemetry)
 
     @classmethod
     def request_neuro_tyan(cls) -> str:
