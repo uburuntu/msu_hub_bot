@@ -410,10 +410,16 @@ async def main():
         def count(event):
             return sum(len(router.observers[event].handlers) for router in app.dispatcher.chain_tail)
 
-        assert count("message") == 272
-        assert count("callback_query") == 24
+        assert count("message") == 273
+        assert count("callback_query") == 25
         assert count("edited_message") == 149
         assert count("inline_query") == count("chosen_inline_result") == 0
+        for event, key in (("message", "Feedback.process"), ("callback_query", "Feedback.process_cb")):
+            assert any(
+                handler.flags.get("handler_key") == key
+                for router in app.dispatcher.chain_tail
+                for handler in router.observers[event].handlers
+            ), key
         from PIL import ImageFont
 
         from msu_hub_bot.execution.sed import sed_calc
