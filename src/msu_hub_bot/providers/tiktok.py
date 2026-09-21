@@ -137,28 +137,41 @@ class _Hydration(HTMLParser):
 
 def _item(body: bytes, post_id: str) -> _Item | None:
     if len(body) > _MAX_PAGE_BYTES:
+        record_link_diagnostic(LinkStage.ADAPTER, LinkReason.TOO_LARGE)
         return None
     try:
         parser = _Hydration()
         parser.feed(body.decode("utf-8"))
         parser.close()
         if parser.matches != 1:
+            record_link_diagnostic(LinkStage.ADAPTER, LinkReason.MISSING_HYDRATION if not parser.matches else LinkReason.SCHEMA_MISMATCH)
             return None
         data = json.loads("".join(parser.parts))
         for key in ("__DEFAULT_SCOPE__", "webapp.video-detail"):
             if not isinstance(data, dict):
+                record_link_diagnostic(LinkStage.ADAPTER, LinkReason.SCHEMA_MISMATCH)
                 return None
             data = data.get(key)
-        if not isinstance(data, dict) or type(data.get("statusCode")) is not int or data["statusCode"] != 0:
+        if not isinstance(data, dict) or type(data.get("statusCode")) is not int:
+            record_link_diagnostic(LinkStage.ADAPTER, LinkReason.SCHEMA_MISMATCH)
+            return None
+        if data["statusCode"] != 0:
+            record_link_diagnostic(LinkStage.ADAPTER, LinkReason.UNAVAILABLE)
             return None
         info = data.get("itemInfo")
         if not isinstance(info, dict):
+            record_link_diagnostic(LinkStage.ADAPTER, LinkReason.SCHEMA_MISMATCH)
             return None
         item = _Item.model_validate(info.get("itemStruct"))
-        if item.id != post_id or any((item.privateItem, item.secret, item.forFriend, item.isContentClassified, item.author.privateAccount)):
+        if item.id != post_id:
+            record_link_diagnostic(LinkStage.ADAPTER, LinkReason.ID_MISMATCH)
+            return None
+        if any((item.privateItem, item.secret, item.forFriend, item.isContentClassified, item.author.privateAccount)):
+            record_link_diagnostic(LinkStage.ADAPTER, LinkReason.PRIVATE)
             return None
         return item
     except ValueError, RecursionError:
+        record_link_diagnostic(LinkStage.ADAPTER, LinkReason.SCHEMA_MISMATCH)
         return None
 
 
@@ -211,8 +224,10 @@ def fetch_tiktok(url: str) -> LinkPost | None:
         record_link_diagnostic(LinkStage.ADAPTER, LinkReason.UNAVAILABLE if response is None else LinkReason.UNSUPPORTED)
         return None
     final_ref = _reference(final_url)
-    if final_ref is None or final_ref.id != ref.id or (item := _item(response[1], ref.id)) is None:
-        record_link_diagnostic(LinkStage.ADAPTER, LinkReason.INVALID_RESPONSE)
+    if final_ref is None or final_ref.id != ref.id:
+        record_link_diagnostic(LinkStage.ADAPTER, LinkReason.ID_MISMATCH if final_ref is not None else LinkReason.SCHEMA_MISMATCH)
+        return None
+    if (item := _item(response[1], ref.id)) is None:
         return None
     if item.imagePost is not None:
         assets = _photos(item.imagePost, ref.page_url, deadline)

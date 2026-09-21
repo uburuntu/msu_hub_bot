@@ -6,6 +6,7 @@ import json
 import pytest
 
 from msu_hub_bot.providers import tiktok
+from msu_hub_bot.providers.link_diagnostics import LinkReason, LinkStage, collect_link_diagnostics
 from msu_hub_bot.providers.link_models import LinkAsset
 
 POST_ID = "7598426984607173900"
@@ -230,6 +231,39 @@ def test_error_or_missing_status_is_not_a_success(status, transport, monkeypatch
 def test_missing_malformed_ambiguous_and_oversized_hydration_is_quiet(body, transport, monkeypatch):
     monkeypatch.setattr(tiktok, "request_page", lambda url, **kwargs: (url, body))
     assert tiktok.fetch_tiktok(PAGE) is None
+    assert not transport["videos"] and not transport["images"]
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        (b"<html>PRIVATE_PAYLOAD login shell</html>", LinkReason.MISSING_HYDRATION),
+        (b"\xff", LinkReason.SCHEMA_MISMATCH),
+        (html(payload()) * 2, LinkReason.SCHEMA_MISMATCH),
+        (html(payload(author="PRIVATE_PAYLOAD invalid author")), LinkReason.SCHEMA_MISMATCH),
+        (html(payload(), status=False), LinkReason.SCHEMA_MISMATCH),
+        (html(payload(), status=10204), LinkReason.UNAVAILABLE),
+        (html(payload(privateItem=True)), LinkReason.PRIVATE),
+        (html(payload(author={"privateAccount": True})), LinkReason.PRIVATE),
+        (html(payload(id="123")), LinkReason.ID_MISMATCH),
+        (b"x" * (2 * 1024 * 1024 + 1), LinkReason.TOO_LARGE),
+    ],
+    ids=["missing", "utf8", "duplicate", "schema", "status-shape", "unavailable", "private-post", "private-author", "id", "oversize"],
+)
+def test_hydration_failures_have_one_safe_diagnostic(body, reason, transport, monkeypatch):
+    monkeypatch.setattr(tiktok, "request_page", lambda url, **kwargs: (url, body))
+    result = collect_link_diagnostics(tiktok.fetch_tiktok, PAGE)
+    assert result.value is None
+    assert [(item.stage, item.reason) for item in result.diagnostics] == [(LinkStage.ADAPTER, reason)]
+    assert not transport["videos"] and not transport["images"]
+    assert "PRIVATE_PAYLOAD" not in repr(result.diagnostics) and POST_ID not in repr(result.diagnostics)
+
+
+def test_redirected_post_has_a_distinct_identity_diagnostic(transport, monkeypatch):
+    monkeypatch.setattr(tiktok, "request_page", lambda url, **kwargs: (PAGE.replace(POST_ID, "123"), html(payload())))
+    result = collect_link_diagnostics(tiktok.fetch_tiktok, PAGE)
+    assert result.value is None
+    assert [(item.stage, item.reason) for item in result.diagnostics] == [(LinkStage.ADAPTER, LinkReason.ID_MISMATCH)]
     assert not transport["videos"] and not transport["images"]
 
 
