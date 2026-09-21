@@ -1,7 +1,7 @@
 # Telegram plumbing
 
 - This layer contains the bot wrapper, extraction/filter helpers, middleware, storage and callback utilities.
-- [MetaCommand/MetaInfo and Extractor](filters.py) determine aliases, arguments, reply selection and media fallback; those details are part of command behavior.
+- Follow [the command API](../../../docs/commands.md) for typed `MetaCommand` declarations, `MetaInfo`, managed inputs and shared replies. Keep the legacy filter/extractors compatible; use `register_command` in the existing router slot.
 - [FSM storage](fsm_storage.py) and [scheduled deletions](deletions.py) use versioned feature documents. Preserve all aiogram key dimensions and atomic partial updates; event isolation remains process-local. [callbacks.py](callbacks.py) keeps process-local LRU text and locks.
 - [Settings middleware](middlewares/settings.py) persists per-chat preferences through the storage repository; keep Telegram and storage contracts coordinated.
 - Preserve authorization and chat preferences across message, callback, edited-message and automatic routes, including stale callback handling.

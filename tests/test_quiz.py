@@ -9,6 +9,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import AnswerCallbackQuery, EditMessageCaption, EditMessageMedia, SendMessage, SendPhoto
 
 from msu_hub_bot.commands import chess, geoguess
+from msu_hub_bot.commands.quiz_view import View
 from msu_hub_bot.games import definitions
 from msu_hub_bot.providers.exceptions import ExternalServiceError
 from quiz_helpers import PHOTO, PNG, PUZZLE, click, edits, restart, rig as rig, score_rows, score_values, settle, start, text_of
@@ -455,6 +456,26 @@ async def test_photo_failure_releases_slot_and_preserves_recent_history(rig):
     assert not any(isinstance(method, SendPhoto) for method in rig.session.methods)
     chat = await rig.quiz.collections[rig.feature].chats.get(record.scope, "state")
     assert chat.value.active is None and chat.value.recent == []
+
+
+@pytest.mark.parametrize("failure", ["rejected", "invalid_view"])
+async def test_fixed_publication_known_failure_releases_slot_without_substitute_view(rig, monkeypatch, failure):
+    attempts = []
+    if failure == "invalid_view":
+        monkeypatch.setattr(definitions.Definition, "render", lambda *args: View("x" * 1025, [], 0, 1))
+    else:
+
+        async def rejected(method):
+            attempts.append(method)
+            raise TelegramBadRequest(method=method, message="photo rejected")
+
+        rig.session.photo_hook = rejected
+    record = await start(rig)
+    assert record.value.phase == "abandoned" and record.value.message_id is None
+    assert len(attempts) == (1 if failure == "rejected" else 0)
+    assert [method.__api_method__ for method in rig.session.methods] == ["sendMessage"]
+    chat = await rig.quiz.collections[rig.feature].chats.get(record.scope, "state")
+    assert chat.value.active is None and not chat.value.recent
 
 
 async def test_initial_send_uncertainty_is_recovered_by_its_own_bot_callback(rig, monkeypatch):

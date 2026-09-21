@@ -3,6 +3,7 @@
 import re
 import time
 from collections.abc import Callable
+from typing import cast
 
 from aiogram import Bot
 from aiogram.enums import ContentType
@@ -17,6 +18,7 @@ from msu_hub_bot.media.limits import MAX_DOWNLOAD_BYTES
 from msu_hub_bot.providers.jev import MAX_REQUEST_LENGTH, JevClient, JevError, JevErrorReason, ReplyMetadata
 from msu_hub_bot.settings import MissingIntegration
 from msu_hub_bot.telegram.chat_actioner import ChatActioner
+from msu_hub_bot.telegram.command_api import invoke_command
 from msu_hub_bot.telegram.extraction import SimpleExtractor
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.telemetry import Boundary, Outcome, Provider, Telemetry
@@ -150,7 +152,7 @@ class IntentCommands:
         meta = MetaInfo(message=message, command=command)
         match command:
             case "pdf":
-                return await process_topdf(message, meta)
+                return cast(CommandResult, await invoke_command(process_topdf, message, meta=meta, bot=bot))
             case "text":
                 return await process_image_to_text(message, meta, cpu_executor)
             case "bg":

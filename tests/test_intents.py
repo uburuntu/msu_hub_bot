@@ -8,7 +8,7 @@ import pytest
 from aiogram import BaseMiddleware, Dispatcher
 from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import MessageEntity, Update, User
+from aiogram.types import Document, Message, MessageEntity, Update, User
 
 from msu_hub_bot.commands import intents
 from msu_hub_bot.commands.intents import IntentCommands
@@ -18,6 +18,7 @@ from msu_hub_bot.providers.wit import Wit
 from msu_hub_bot.providers.wolfram import WolframAPI
 from msu_hub_bot.routing import build_router
 from msu_hub_bot.settings import MissingIntegration, Settings
+from msu_hub_bot.telegram.command_api import DocumentInput, MetaCommand, MetaInfo
 from msu_hub_bot.telegram.extraction import Extractor, SimpleExtractor
 from msu_hub_bot.telegram.mentions import IntentMention
 from msu_hub_bot.telegram.middlewares.settings import Settings as ChatSettings
@@ -160,7 +161,7 @@ async def test_selected_adapter_keeps_source_caller_topic_and_empty_command_payl
         if command in {"pdf", "text"}:
             meta = args[1]
             assert meta.command == command and meta.text == "" and meta.arguments == []
-            assert meta.reply() is original
+            assert meta.reply_target() is original
             selected, media = await (meta.extract_doc() if command == "pdf" else meta.extract_image())
             if command == "text":
                 assert args[2] is runtime.executor
@@ -176,7 +177,16 @@ async def test_selected_adapter_keeps_source_caller_topic_and_empty_command_payl
         return await selected.reply("Processed")
 
     adapter = AsyncMock(side_effect=execute)
-    monkeypatch.setattr(intents, intents.COMMANDS[command][0], adapter)
+    if command == "pdf":
+
+        @MetaCommand("pdf", document=DocumentInput(reply=True))
+        async def pdf_adapter(document: Document, meta: MetaInfo) -> Message:
+            assert document is original.document
+            return await adapter(meta.message, meta)
+
+        monkeypatch.setattr(intents, "process_topdf", pdf_adapter)
+    else:
+        monkeypatch.setattr(intents, intents.COMMANDS[command][0], adapter)
     await runtime.service.handle(message, "REQUEST_ONLY", bot, runtime.executor)
     adapter.assert_awaited_once()
     profile.assert_not_awaited()
@@ -196,7 +206,13 @@ async def test_invalid_document_mime_is_omitted_without_blocking_pdf(runtime, mo
     message = invocation(runtime.bot, original)
     runtime.client.classify.return_value = JevDecision(command="pdf", confidence=0.9)
     adapter = AsyncMock(return_value=original)
-    monkeypatch.setattr(intents, "process_topdf", adapter)
+
+    @MetaCommand("pdf", document=DocumentInput(reply=True))
+    async def pdf_adapter(document: Document, meta: MetaInfo) -> Message:
+        assert document is original.document
+        return await adapter(meta.message, meta)
+
+    monkeypatch.setattr(intents, "process_topdf", pdf_adapter)
 
     assert await runtime.service.handle(message, "сделай PDF", runtime.bot, runtime.executor) is original
 

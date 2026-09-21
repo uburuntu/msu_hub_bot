@@ -6,13 +6,13 @@ from contextlib import closing
 
 from PIL import Image
 from aiogram.enums import ChatAction, ChatType
-from aiogram.types import Message
+from aiogram.types import Animation, Document, Message, Sticker, Video, VideoNote
 
 from msu_hub_bot.execution.executor import TPExecutor
 from msu_hub_bot.media.caption_layout import CaptionLayoutError, CaptionStyle, caption_image
 from msu_hub_bot.media.caption_video import caption_video
 from msu_hub_bot.telegram.chat_actioner import ChatActioner
-from msu_hub_bot.telegram.extraction import Extractor, SimpleExtractor
+from msu_hub_bot.telegram.command_api import MediaInput, MetaCommand, TextInput
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.telegram.files import DownloadableMedia, input_file
 from msu_hub_bot.telegram.keyboards import rate_keyboard
@@ -20,33 +20,22 @@ from msu_hub_bot.telegram.media_jobs import DownloadUnavailable, run_downloaded
 from msu_hub_bot.utils import image_bytes_io
 
 
-async def _caption_media(meta: MetaInfo) -> tuple[Message, DownloadableMedia | None, bool]:
-    # Prefer explicitly attached media over a different media type in the reply.
-    for target in Extractor.targets(meta.message, Extractor.ReplyPolicy.prefer_origin):
-        if video := await SimpleExtractor.video(target):
-            return target, video, True
-        if target.document and (target.document.mime_type or "").startswith("video/"):
-            return target, target.document, True
-        if image := await SimpleExtractor.image(target):
-            return target, image, False
-    target, image = await meta.extract_image(with_profile_photo=True)
-    return target, image, False
-
-
-async def _process_caption(message: Message, meta: MetaInfo, cpu_executor: TPExecutor, style: CaptionStyle) -> Message | bool:
-    _, text = meta.extract_text()
-    if not text:
-        return True
-    target, file, is_video = await _caption_media(meta)
-    if file is None:
-        return True
+async def _process_caption(text: str, media: DownloadableMedia, meta: MetaInfo, cpu_executor: TPExecutor, style: CaptionStyle) -> Message:
+    message = meta.message
+    is_video = (
+        isinstance(media, (Animation, Video, VideoNote))
+        or isinstance(media, Sticker)
+        and media.is_video
+        or isinstance(media, Document)
+        and (media.mime_type or "").startswith("video/")
+    )
 
     renderer: Callable[[io.BytesIO, str, CaptionStyle], Image.Image | io.BytesIO | None]
     renderer = caption_video if is_video else caption_image
     action = ChatAction.UPLOAD_VIDEO if is_video else ChatAction.UPLOAD_PHOTO
     async with ChatActioner(message, action):
         try:
-            result, timeouted = await run_downloaded(cpu_executor, file, renderer, text, style, bot=message.bot)
+            result, timeouted = await run_downloaded(cpu_executor, media, renderer, text, style, bot=message.bot)
         except DownloadUnavailable:
             return await message.reply("🤷🏻‍♂️ Не удалось скачать файл. Попробуй прислать его ещё раз.")
         except CaptionLayoutError as exc:
@@ -62,22 +51,46 @@ async def _process_caption(message: Message, meta: MetaInfo, cpu_executor: TPExe
         if isinstance(result, io.BytesIO):
             with result:
                 video = input_file(result, f"{style}.mp4")
-            return await target.reply_video(video, reply_markup=keyboard, supports_streaming=True)
+            return await meta.reply(video=video, reply_markup=keyboard, supports_streaming=True, fixed=True)
         with closing(result), image_bytes_io(result, ext="png") as output:
             photo = input_file(output, f"{style}.png")
-        return await target.reply_photo(photo, reply_markup=keyboard)
+        return await meta.reply(photo=photo, reply_markup=keyboard, fixed=True)
 
 
-async def process_lobster(message: Message, meta: MetaInfo, cpu_executor: TPExecutor) -> Message | bool:
-    return await _process_caption(message, meta, cpu_executor, "lobster")
+@MetaCommand(
+    "lobster",
+    "l",
+    "л",
+    "лобстер",
+    text=TextInput(reply=True),
+    media=MediaInput(kinds=("image", "video"), reply=True, avatar=True),
+    max_output_bytes=50 * 1024 * 1024,
+)
+async def process_lobster(text: str, media: DownloadableMedia, meta: MetaInfo, cpu_executor: TPExecutor) -> Message:
+    return await _process_caption(text, media, meta, cpu_executor, "lobster")
 
 
-async def process_demotivator(message: Message, meta: MetaInfo, cpu_executor: TPExecutor) -> Message | bool:
-    return await _process_caption(message, meta, cpu_executor, "demotivator")
+@MetaCommand(
+    "demotivator",
+    "de",
+    "д",
+    "де",
+    text=TextInput(reply=True),
+    media=MediaInput(kinds=("image", "video"), reply=True, avatar=True),
+    max_output_bytes=50 * 1024 * 1024,
+)
+async def process_demotivator(text: str, media: DownloadableMedia, meta: MetaInfo, cpu_executor: TPExecutor) -> Message:
+    return await _process_caption(text, media, meta, cpu_executor, "demotivator")
 
 
-async def process_meme(message: Message, meta: MetaInfo, cpu_executor: TPExecutor) -> Message | bool:
-    return await _process_caption(message, meta, cpu_executor, "meme")
+@MetaCommand(
+    "meme",
+    text=TextInput(reply=True),
+    media=MediaInput(kinds=("image", "video"), reply=True, avatar=True),
+    max_output_bytes=50 * 1024 * 1024,
+)
+async def process_meme(text: str, media: DownloadableMedia, meta: MetaInfo, cpu_executor: TPExecutor) -> Message:
+    return await _process_caption(text, media, meta, cpu_executor, "meme")
 
 
 async def process_atmta(message: Message, meta: MetaInfo) -> Message | bool:

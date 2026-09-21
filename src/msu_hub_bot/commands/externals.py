@@ -6,7 +6,7 @@ from urllib import parse
 from aiogram import html
 
 from aiogram.enums import ChatAction, ContentType
-from aiogram.types import Message, InputFile, InputMediaPhoto, InputMediaVideo, URLInputFile, LinkPreviewOptions
+from aiogram.types import Document, Message, InputFile, InputMediaPhoto, InputMediaVideo, URLInputFile, LinkPreviewOptions
 from aiogram.utils.markdown import hitalic, hbold, hlink, hcode
 from yarl import URL
 
@@ -21,6 +21,7 @@ from msu_hub_bot.telegram.media_jobs import DownloadUnavailable, run_downloaded
 from msu_hub_bot.providers.pdf import convert_to_pdf
 from msu_hub_bot.providers.urbandictionary import urban_dictionary
 from msu_hub_bot.telegram.chat_actioner import ChatActioner
+from msu_hub_bot.telegram.command_api import DocumentInput, MetaCommand
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.telegram.delivery import reply_album
 from msu_hub_bot.telegram.files import input_file
@@ -236,25 +237,22 @@ async def process_ud(message: Message, meta: MetaInfo) -> Message | bool:
     return await target.reply("\n".join(texts))
 
 
-async def process_topdf(message: Message, meta: MetaInfo) -> Message | bool:
-    target, dest = await meta.extract_doc()
-    if dest is None:
-        return True
-
-    try:
-        async with ChatActioner(message, ChatAction.UPLOAD_DOCUMENT):
-            file = await download(dest, max_bytes=MAX_DOWNLOAD_BYTES)
+@MetaCommand("pdf", "topdf", "to_pdf", document=DocumentInput(reply=True), max_output_bytes=50 * 1024 * 1024)
+async def process_topdf(document: Document, meta: MetaInfo) -> Message:
+    message = meta.message
+    async with ChatActioner(message, ChatAction.UPLOAD_DOCUMENT):
+        try:
+            file = await download(document, max_bytes=MAX_DOWNLOAD_BYTES)
             if file is None:
                 return await message.reply("Не удалось скачать файл. Попробуйте ещё раз.")
             with file:
-                with await convert_to_pdf(file, dest.file_name or "document", dest.mime_type or "application/octet-stream") as converted:
-                    document = input_file(converted, str(getattr(converted, "name", "document.pdf")))
-    except TimeoutError:
-        return await message.reply("Конвертация заняла слишком много времени. Попробуйте ещё раз позже.")
-    except ExternalServiceError:
-        return await message.reply("Не удалось преобразовать файл в PDF. Попробуйте позже.")
-
-    return await target.reply_document(document)
+                converted = await convert_to_pdf(file, document.file_name or "document", document.mime_type or "application/octet-stream")
+        except TimeoutError:
+            return await message.reply("Конвертация заняла слишком много времени. Попробуйте ещё раз позже.")
+        except ExternalServiceError:
+            return await message.reply("Не удалось преобразовать файл в PDF. Попробуйте позже.")
+        with converted:
+            return await meta.reply(document=input_file(converted, converted.name), fixed=True)
 
 
 async def process_porfirevich(message: Message, meta: MetaInfo) -> Message | bool:

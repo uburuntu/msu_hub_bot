@@ -9,6 +9,7 @@ from aiogram.types import BufferedInputFile, URLInputFile
 from msu_hub_bot.providers.pdf import PdfDocument
 
 from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.telegram.command_api import invoke_command
 from msu_hub_bot.commands import externals
 from telegram_helpers import make_bot, make_message
 
@@ -67,7 +68,7 @@ async def test_pdf_delivers_downloaded_bytes_with_the_document_filename(monkeypa
         "convert_to_pdf",
         AsyncMock(return_value=PdfDocument(b"%PDF-synthetic", filename="input.pdf")),
     )
-    await externals.process_topdf(message, MetaInfo(message))
+    await invoke_command(externals.process_topdf, message, meta=MetaInfo(message))
     method = bot.session.methods[-1]
     assert isinstance(method, SendDocument)
     assert isinstance(method.document, BufferedInputFile) and method.document.filename == "input.pdf"
@@ -94,7 +95,7 @@ async def test_pdf_unknown_size_is_stopped_while_streaming_before_conversion(mon
 
     monkeypatch.setattr(files, "_BoundedDownload", capture)
     with pytest.raises(files.DownloadTooLarge):
-        await externals.process_topdf(message, MetaInfo(message))
+        await invoke_command(externals.process_topdf, message, meta=MetaInfo(message))
     convert.assert_not_awaited()
     assert len(streams) == 1 and streams[0].closed
     assert not any(isinstance(method, SendDocument) for method in bot.session.methods)

@@ -18,7 +18,7 @@ class Rate(CallbackCommandBase):
 
     @classmethod
     async def process(cls, _message: Message, meta: MetaInfo) -> Message:
-        target = meta.reply()
+        target = meta.reply_target()
         msg = await target.reply(hbold("🤔"), reply_markup=cls.keyboard())
         return msg
 

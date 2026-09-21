@@ -9,7 +9,7 @@ from typing import Any
 from aiogram import Bot
 from aiogram.client.session.base import BaseSession
 from aiogram.client.session.middlewares.base import BaseRequestMiddleware, NextRequestMiddlewareType
-from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter, TelegramServerError
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter, TelegramServerError
 from aiogram.methods import Response, TelegramMethod
 from aiogram.methods.base import TelegramType
 from aiogram.types import InputMediaPhoto, InputMediaVideo, Message, ReplyParameters, Update
@@ -83,22 +83,19 @@ class TelegramRequestPolicy(BaseRequestMiddleware):
             try:
                 result = await make_request(bot, method)
             except TelegramRetryAfter as error:
-                if attempt + 1 == self.attempts or error.retry_after > self.max_retry_after:
+                # Multi-send responses can combine successful child sends with an
+                # error without returning their receipts. Replaying is unsafe.
+                if (
+                    method.__api_method__ in {"sendMediaGroup", "copyMessages", "forwardMessages"}
+                    or attempt + 1 == self.attempts
+                    or error.retry_after > self.max_retry_after
+                ):
                     raise
                 await asyncio.sleep(max(error.retry_after, 0))
             except TelegramNetworkError, TelegramServerError, TimeoutError:
                 if not is_read or attempt + 1 == self.attempts:
                     raise
                 await asyncio.sleep(2**attempt)
-            except TelegramBadRequest as error:
-                chat_id = getattr(method, "chat_id", None)
-                if (
-                    error.message.removeprefix("Bad Request: ").casefold() == "have no rights to send a message"
-                    and isinstance(chat_id, int)
-                    and chat_id < 0
-                ):
-                    await bot.leave_chat(chat_id)
-                raise
             else:
                 if method.__api_method__ == "getUpdates":
                     if self.membership_inbox is not None:

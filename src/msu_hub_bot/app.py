@@ -40,6 +40,7 @@ from msu_hub_bot.telegram.middlewares.skip777000 import Skip777000
 from msu_hub_bot.telegram.middlewares.updates import UpdatesMiddleware
 from msu_hub_bot.telegram.middlewares.telemetry import DispatchTelemetryMiddleware, HandlerTelemetryMiddleware
 from msu_hub_bot.telegram.middlewares.viewer import ViewerMiddleware, preview_policy
+from msu_hub_bot.telegram.recent_context import RecentMessages, RecentMessagesMiddleware
 from msu_hub_bot.telegram.runtime import AdmissionMiddleware, DrainTimeout, Supervisor
 from msu_hub_bot.telegram.state import (
     ReleasableEventIsolation,
@@ -161,6 +162,7 @@ class Application:
             jdoodle = ManyJDoodle(settings.jdoodle_tokens, telemetry=telemetry)
             stack.push_async_callback(jdoodle.close)
             intents = None
+            jev = None
             if settings.jev_enabled:
                 jev = JevClient(settings.openrouter_api_key)
                 stack.push_async_callback(jev.close)
@@ -171,6 +173,7 @@ class Application:
             stack.push_async_callback(health.stop)
             ecosystem = EcosystemManager(bot, database)
             events = EventsMiddleware(bot, database, settings.events_chat_id, em=ecosystem)
+            recent_messages = RecentMessages()
 
             dispatcher = Dispatcher(disable_fsm=True)
             dispatcher.update.outer_middleware(AdmissionMiddleware(supervisor))
@@ -187,6 +190,7 @@ class Application:
             # These automatic behaviors apply only to new messages. Running them
             # for edits or channel posts would repeat previews and membership work.
             dispatcher.message.outer_middleware(Skip777000())
+            dispatcher.message.outer_middleware(RecentMessagesMiddleware(recent_messages))
             dispatcher.message.outer_middleware(CheckGets())
             dispatcher.message.outer_middleware(events)
             dispatcher.message.outer_middleware(ViewerMiddleware(bot, vk_api, executor, telemetry=telemetry))
@@ -208,6 +212,8 @@ class Application:
                 wolfram=wolfram,
                 jdoodle=jdoodle,
                 intents=intents,
+                jev=jev,
+                recent_messages=recent_messages,
                 cpu_executor=executor,
                 crypto_exchange=crypto_exchange,
                 em=ecosystem,

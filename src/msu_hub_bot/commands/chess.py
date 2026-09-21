@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message
 
 from msu_hub_bot.games.quiz import QuizService
 from msu_hub_bot.telegram.context import bot_for
+from msu_hub_bot.telegram.filters import MetaInfo
 
 
 class ChessCallback(CallbackData, prefix="chess"):
@@ -18,8 +19,8 @@ class Chess:
     callback_data = ChessCallback
 
     @staticmethod
-    async def process(message: Message, quiz: QuizService) -> Message | None:
-        return await quiz.start("chess", message)
+    async def process(message: Message, meta: MetaInfo, quiz: QuizService) -> Message | None:
+        return await quiz.start("chess", message, meta=meta)
 
     @staticmethod
     async def process_cb(query: CallbackQuery, callback_data: ChessCallback, quiz: QuizService) -> bool | None:

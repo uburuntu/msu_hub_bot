@@ -11,8 +11,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.filters.callback_data import CallbackData
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hbold, hcode
+from aiogram.utils.formatting import Code, Text
 
 from msu_hub_bot.telegram.callbacks import CallbackCommandBase
+from msu_hub_bot.telegram.command_api import Argument, MetaCommand
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.utils import one_liner, outdated, parse_int, percent_chance
 
@@ -50,14 +52,10 @@ def get_roll(digits: int) -> Tuple[str, str]:
     return roll, name
 
 
-async def process_roll(message: Message, meta: MetaInfo) -> Message | bool:
-    args = meta.arguments
-    digits = min(max(int(args[0]), 1), 100) if len(args) > 0 and args[0].isdigit() else 3
-
+@MetaCommand("roll", "ролл", digits=Argument(clamp=(1, 100)))
+async def process_roll(digits: int = 3) -> Text:
     roll, name = get_roll(digits)
-    note = f" — {name}" if name else ""
-
-    return await message.reply(hcode(roll) + note)
+    return Text(Code(roll), f" — {name}" if name else "")
 
 
 async def process_random(message: Message, meta: MetaInfo) -> Message | bool:
@@ -198,7 +196,7 @@ class Rolls(CallbackCommandBase):
 async def process_truth(_message: Message, meta: MetaInfo) -> Message | bool:
     answers: Final = ("да", "нет", "это не важно", "да, хотя зря", "никогда", "100%", "1 из 100")
 
-    target = meta.reply()
+    target = meta.reply_target()
     return await target.reply(random.choice(answers))
 
 

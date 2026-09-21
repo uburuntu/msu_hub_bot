@@ -38,6 +38,8 @@ from msu_hub_bot.storage.features import (
     Transaction,
 )
 from msu_hub_bot.storage.supabase import RepositoryError, RepositoryUnavailable
+from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.telegram.responses import ResponseDeliveryError, ResponseError
 
 logger = logging.getLogger(__name__)
 SEND_TIMEOUT = 15
@@ -172,7 +174,8 @@ class QuizService:
             run_at=self.clock() if immediate else max(self.clock(), closed + RESULT_TTL),
         )
 
-    async def start(self, feature: str, message: Message) -> Message | None:
+    async def start(self, feature: str, message: Message, *, meta: MetaInfo | None = None) -> Message | None:
+        context = meta or MetaInfo(message.as_(self.bot))
         scope, definitions = self._scope(message.chat.id), DEFINITIONS[feature]
         collections = self.collections[feature]
         token = self._token(self.bot.id, message.chat.id, message.message_id)
@@ -235,14 +238,15 @@ class QuizService:
                 view = definitions.render(state, [])
                 markup = self.keyboard(definitions, state, view)
                 sending = True
-                sent = await self._send(
-                    message.reply_photo(
-                        photo,
-                        caption=view.caption,
-                        caption_entities=view.entities,
-                        parse_mode=None,
-                        reply_markup=markup,
-                    )
+                sent = await context.reply(
+                    view.caption,
+                    photo=photo,
+                    entities=view.entities,
+                    reply_markup=markup,
+                    fixed=True,
+                    to=message,
+                    allow_remote_media=feature == "geoguess",
+                    request_timeout=SEND_TIMEOUT,
                 )
                 await self._bind(feature, scope, token, sent, self.clock())
                 self._presentations[feature, message.chat.id, token] = Presentation(
@@ -254,11 +258,11 @@ class QuizService:
             if not sending:
                 await asyncio.shield(self._abandon(feature, scope, token))
             raise
-        except TelegramBadRequest, TelegramForbiddenError:
+        except TelegramBadRequest, TelegramForbiddenError, ResponseError:
             await self._abandon(feature, scope, token)
             return await self._send(message.reply("Ошибка, попробуйте еще раз"))
-        except Exception:
-            if not sending:
+        except Exception as error:
+            if not sending or isinstance(error, ResponseDeliveryError) and not error.uncertain:
                 await self._abandon(feature, scope, token)
                 return await self._send(message.reply("Ошибка, попробуйте еще раз"))
             # The photo may exist even when Telegram's acknowledgement was lost.

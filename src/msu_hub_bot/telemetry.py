@@ -137,6 +137,7 @@ OPERATIONS = frozenset(
         "web.request",
         "jdoodle.execute",
         "jev.classify",
+        "jev.resolve_languages",
         "intent.execute",
         "wit.recognize",
         "wolfram.query",
@@ -307,8 +308,13 @@ def safe_failure(error: BaseException) -> dict[str, str | int]:
     from msu_hub_bot.execution.executor import ExecutorBusy
     from msu_hub_bot.media.limits import MediaDimensionsError
     from msu_hub_bot.telegram.files import DownloadTooLarge
+    from msu_hub_bot.telegram.responses import ResponseDeliveryError, ResponseError
+
+    if isinstance(error, ResponseDeliveryError):
+        return {"error.type": "ResponseDeliveryError", "error.reason": "delivery_uncertain" if error.uncertain else "delivery_rejected"}
 
     classes: tuple[tuple[type[BaseException], str, int | None], ...] = (
+        (ResponseError, "response_invalid", None),
         (ExecutorBusy, "worker_busy", None),
         (DownloadTooLarge, "media_too_large", None),
         (MediaDimensionsError, "media_dimensions", None),
@@ -547,7 +553,12 @@ def failure_outcome(error: BaseException) -> Outcome:
     from msu_hub_bot.execution.executor import ExecutorBusy
     from msu_hub_bot.media.limits import MediaDimensionsError
     from msu_hub_bot.telegram.files import DownloadTooLarge
+    from msu_hub_bot.telegram.responses import ResponseDeliveryError, ResponseError
 
+    if isinstance(error, ResponseDeliveryError):
+        return Outcome.UNAVAILABLE if error.uncertain else Outcome.REJECTED
+    if isinstance(error, ResponseError):
+        return Outcome.REJECTED
     if isinstance(error, SkipHandler):
         return Outcome.IGNORED
     if isinstance(error, (CancelHandler, ExecutorBusy, DownloadTooLarge, MediaDimensionsError)):
@@ -575,6 +586,7 @@ class Operation:
         media_record: Callable[[MediaKind, MediaReason, int, int, float], None] | None = None,
         link_record: Callable[[LinkDiagnostic], None] | None = None,
         intent_record: Callable[[int | None, int | None, float | None], None] | None = None,
+        model_record: Callable[[int | None, int | None, float | None], None] | None = None,
     ) -> None:
         self.owner, self._span = owner, span
         self.outcome = Outcome.SUCCESS
@@ -586,6 +598,8 @@ class Operation:
         self._media = _MediaSummary() if media_record is not None else None
         self._intent_record = intent_record
         self._intent_recorded = False
+        self._model_record = model_record
+        self._model_recorded = False
 
     def _owned(self) -> bool:
         try:
@@ -635,6 +649,28 @@ class Operation:
             self._intent_record(input_tokens, output_tokens, float(cost) if cost is not None else None)
         except Exception:
             logger.warning("Telemetry intent diagnostics failed")
+
+    def model_usage(self, input_tokens: int | None = None, output_tokens: int | None = None, cost: float | None = None) -> None:
+        """Record bounded model usage once, without prompts, output or conversation text."""
+        if not self._owned() or self._model_record is None or self._model_recorded:
+            return
+        if any(value is not None and (type(value) is not int or not 0 <= value <= 10**12) for value in (input_tokens, output_tokens)) or (
+            cost is not None and (type(cost) not in {int, float} or not 0 <= cost <= 10**6 or not math.isfinite(cost))
+        ):
+            return
+        self._model_recorded = True
+        if input_tokens is not None:
+            self.details["gen_ai.usage.input_tokens"] = input_tokens
+        if output_tokens is not None:
+            self.details["gen_ai.usage.output_tokens"] = output_tokens
+        if cost is not None:
+            self.details["model.cost_usd"] = float(cost)
+        try:
+            if self._span is not None:
+                self._span.set_attributes(self.details)
+            self._model_record(input_tokens, output_tokens, float(cost) if cost is not None else None)
+        except Exception:
+            logger.warning("Telemetry model diagnostics failed")
 
     def link_diagnostics(self, diagnostics: Sequence[LinkDiagnostic]) -> None:
         if not self._owned() or self._link_record is None:
@@ -974,6 +1010,10 @@ class Telemetry:
                         View(instrument_name=name, meter_name="msu_hub_bot.telemetry", attribute_keys={"provider"})
                         for name in ("bot.intent.input_tokens", "bot.intent.output_tokens", "bot.intent.cost")
                     ],
+                    *[
+                        View(instrument_name=name, meter_name="msu_hub_bot.telemetry", attribute_keys={"provider", "operation"})
+                        for name in ("bot.model.input_tokens", "bot.model.output_tokens", "bot.model.cost")
+                    ],
                     View(
                         instrument_name="bot.media.download.attempts", meter_name="msu_hub_bot.telemetry", attribute_keys=MEDIA_METRIC_KEYS
                     ),
@@ -1014,6 +1054,9 @@ class Telemetry:
             self._intent_input_tokens = meter.create_counter("bot.intent.input_tokens", unit="{token}")
             self._intent_output_tokens = meter.create_counter("bot.intent.output_tokens", unit="{token}")
             self._intent_cost = meter.create_counter("bot.intent.cost", unit="USD")
+            self._model_input_tokens = meter.create_counter("bot.model.input_tokens", unit="{token}")
+            self._model_output_tokens = meter.create_counter("bot.model.output_tokens", unit="{token}")
+            self._model_cost = meter.create_counter("bot.model.cost", unit="USD")
             self._media_attempts = meter.create_counter("bot.media.download.attempts", unit="1")
             self._media_duration = meter.create_histogram("bot.media.download.duration", unit="s")
             self._media_size = meter.create_histogram("bot.media.download.size", unit="By")
@@ -1088,6 +1131,10 @@ class Telemetry:
         span = handle._span
         if boundary is Boundary.PROVIDER and attributes.get("operation") == "jev.classify" and attributes.get("provider") == "jev":
             event = "bot.intent.classified"
+        elif boundary is Boundary.PROVIDER and attributes.get("operation") == "jev.resolve_languages":
+            if not failed:
+                return
+            event = "bot.model.failed"
         elif attributes.get("operation") == "links.preview":
             event = "bot.link.completed"
         elif attributes.get("operation") == "links.step":
@@ -1158,6 +1205,17 @@ class Telemetry:
             self._intent_output_tokens.add(output_tokens, attributes)
         if cost is not None:
             self._intent_cost.add(cost, attributes)
+
+    def _record_model_usage(self, input_tokens: int | None, output_tokens: int | None, cost: float | None) -> None:
+        if not self._available():
+            return
+        attributes = {"provider": Provider.JEV.value, "operation": "jev.resolve_languages"}
+        if input_tokens is not None:
+            self._model_input_tokens.add(input_tokens, attributes)
+        if output_tokens is not None:
+            self._model_output_tokens.add(output_tokens, attributes)
+        if cost is not None:
+            self._model_cost.add(cost, attributes)
 
     def _record_link_step(
         self, diagnostic: LinkDiagnostic, provider: Provider | None, parent: Operation, attributes: dict[str, str | int]
@@ -1293,6 +1351,9 @@ class Telemetry:
             media_record=record_asset if boundary is Boundary.MEDIA and key == "x.media.prepare" else None,
             intent_record=self._record_intent_usage
             if boundary is Boundary.PROVIDER and key == "jev.classify" and provider is Provider.JEV
+            else None,
+            model_record=self._record_model_usage
+            if boundary is Boundary.PROVIDER and key == "jev.resolve_languages" and provider is Provider.JEV
             else None,
         )
         if key == "links.preview":

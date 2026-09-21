@@ -13,6 +13,9 @@ from aiogram.types import PhotoSize
 from msu_hub_bot.commands import lobster
 from msu_hub_bot.media.caption_layout import CaptionLayoutError
 from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.telegram.command_api import invoke_command
+from msu_hub_bot.telegram.extraction import SimpleExtractor
+from msu_hub_bot.telegram.responses import ResponseDeliveryError
 from msu_hub_bot.telegram.media_jobs import DownloadUnavailable
 from telegram_helpers import make_bot, make_message
 
@@ -88,7 +91,7 @@ async def test_image_caption_keeps_long_text_reply_topic_and_closes_rendered_ima
     result = Image.new("RGB", (320, 240), "red")
     downloaded.return_value = result, False
 
-    await getattr(lobster, handler)(message, MetaInfo(message, text=text), SimpleNamespace())
+    await invoke_command(getattr(lobster, handler), message, meta=MetaInfo(message, text=text), cpu_executor=SimpleNamespace())
 
     assert downloaded.call_args.args[1].file_id == "source"
     assert downloaded.call_args.args[2:] == (lobster.caption_image, text.strip(), style)
@@ -115,7 +118,7 @@ async def test_all_video_inputs_use_full_media_not_thumbnail(bot, actions, downl
     result = io.BytesIO(b"converted mp4")
     downloaded.return_value = result, False
 
-    await getattr(lobster, handler)(message, MetaInfo(message, text=text), SimpleNamespace())
+    await invoke_command(getattr(lobster, handler), message, meta=MetaInfo(message, text=text), cpu_executor=SimpleNamespace())
 
     assert downloaded.call_args.args[1].file_id == "source"
     assert downloaded.call_args.args[2:] == (lobster.caption_video, text.strip(), style)
@@ -140,7 +143,7 @@ async def test_attached_media_has_priority_over_reply_media(bot, actions, downlo
     is_video = origin == "video"
     downloaded.return_value = (io.BytesIO(b"video") if is_video else Image.new("RGB", (320, 240))), False
 
-    await lobster.process_meme(message, MetaInfo(message, text="мой кот"), SimpleNamespace())
+    await invoke_command(lobster.process_meme, message, meta=MetaInfo(message, text="мой кот"), cpu_executor=SimpleNamespace())
 
     assert downloaded.call_args.args[2] is (lobster.caption_video if is_video else lobster.caption_image)
     assert bot.session.methods[-1].reply_parameters.message_id == 11
@@ -151,10 +154,10 @@ async def test_profile_photo_fallback_keeps_replied_user_as_target(bot, actions,
     message = make_message(bot, text="/meme мой кот", reply_to_message=target)
     photo = PhotoSize(file_id="profile", file_unique_id="profile", width=320, height=240)
     profile = AsyncMock(return_value=photo)
-    monkeypatch.setattr(lobster.SimpleExtractor, "profile_photo", profile)
+    monkeypatch.setattr(SimpleExtractor, "profile_photo", profile)
     downloaded.return_value = Image.new("RGB", (320, 240)), False
 
-    await lobster.process_meme(message, MetaInfo(message, text="мой кот"), SimpleNamespace())
+    await invoke_command(lobster.process_meme, message, meta=MetaInfo(message, text="мой кот"), cpu_executor=SimpleNamespace())
 
     assert profile.call_args.args[0].message_id == 10
     assert downloaded.call_args.args[1] is photo
@@ -172,7 +175,7 @@ async def test_caption_failures_reply_without_upload_and_stop_chat_action(bot, a
     else:
         downloaded.return_value = None, failure == "timeout"
 
-    await lobster.process_meme(message, MetaInfo(message, text="мой кот"), SimpleNamespace())
+    await invoke_command(lobster.process_meme, message, meta=MetaInfo(message, text="мой кот"), cpu_executor=SimpleNamespace())
 
     assert [method.__api_method__ for method in bot.session.methods] == ["sendMessage"]
     assert bot.session.methods[0].text
@@ -186,9 +189,10 @@ async def test_upload_failure_still_closes_rendered_media_and_stops_chat_action(
     downloaded.return_value = result, False
     monkeypatch.setattr(bot.session, "make_request", AsyncMock(side_effect=RuntimeError("synthetic upload failure")))
 
-    with pytest.raises(RuntimeError, match="synthetic upload failure"):
-        await lobster.process_meme(message, MetaInfo(message, text="мой кот"), SimpleNamespace())
+    with pytest.raises(ResponseDeliveryError) as failure:
+        await invoke_command(lobster.process_meme, message, meta=MetaInfo(message, text="мой кот"), cpu_executor=SimpleNamespace())
 
+    assert failure.value.uncertain
     if isinstance(result, io.BytesIO):
         assert result.closed
     else:
@@ -200,13 +204,14 @@ async def test_upload_failure_still_closes_rendered_media_and_stops_chat_action(
 async def test_empty_caption_does_not_download_or_fetch_profile(bot, actions, downloaded, monkeypatch):
     message = make_message(bot, text="/meme")
     profile = AsyncMock()
-    monkeypatch.setattr(lobster.SimpleExtractor, "profile_photo", profile)
+    monkeypatch.setattr(SimpleExtractor, "profile_photo", profile)
 
-    assert await lobster.process_meme(message, MetaInfo(message), SimpleNamespace()) is True
+    await invoke_command(lobster.process_meme, message, meta=MetaInfo(message), cpu_executor=SimpleNamespace())
 
     downloaded.assert_not_awaited()
     profile.assert_not_awaited()
-    assert bot.session.methods == []
+    assert len(bot.session.methods) == 1
+    assert "/meme" in bot.session.methods[0].text
     assert actions == []
 
 

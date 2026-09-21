@@ -57,6 +57,16 @@ Never export message text, captions, command arguments, prompts, speech/transcri
 
 Never export credentials, environment snapshots, connection strings, headers, cookies, resolved media URLs, HTTP bodies, SQL text or arbitrary query parameters. The sole URL exception is the link source contract below. Telegram credentials can appear in URL paths; provider keys can appear in query strings. Allowing a field called `url` is therefore insufficient protection.
 
+### Command argument resolution
+
+`jev.resolve_languages` records optional translation argument inference. Explicit
+supported language codes bypass the model. Numeric `gen_ai.usage.input_tokens`,
+`gen_ai.usage.output_tokens` and `model.cost_usd` are bounded and recorded once;
+`bot.model.input_tokens`, `bot.model.output_tokens` and `bot.model.cost` count
+usage regardless of trace sampling, labelled only by fixed provider/operation.
+Successful calls add no extra log; failures emit `bot.model.failed`. Prompts,
+translations, language guesses and recent chat text are never exported.
+
 ### On-demand intent routing
 
 An explicit mention with a reply owns one `process_intent` handler span. `jev.classify`

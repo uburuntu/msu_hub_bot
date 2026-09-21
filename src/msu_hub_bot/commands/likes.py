@@ -25,7 +25,7 @@ class Like(CallbackCommandBase):
 
     @classmethod
     async def process(cls, _message: Message, meta: MetaInfo) -> Message | bool | None:
-        target = meta.reply()
+        target = meta.reply_target()
         msg = await target.reply(hbold("Мне нравится"), reply_markup=cls.keyboard())
         return msg
 

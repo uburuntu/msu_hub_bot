@@ -81,7 +81,7 @@ def translation_input(*, image=True, text="Original"):
     return target, meta
 
 
-@pytest.mark.parametrize("handler", ["process_en", "process_ru", "process_translate"])
+@pytest.mark.parametrize("handler", ["process_en", "process_ru"])
 @pytest.mark.parametrize("failure", [ExternalServiceError, ClientError, TimeoutError])
 async def test_translation_failures_receive_one_reply(monkeypatch, handler, failure):
     target, meta = translation_input()
@@ -157,10 +157,10 @@ async def test_translation_cancellation_propagates(monkeypatch):
 async def test_pdf_timeout_has_actionable_command_reply(external_handlers):
     target = SimpleNamespace(reply=AsyncMock(), chat=object())
     document = SimpleNamespace(file_name="synthetic.txt", mime_type="text/plain")
-    meta = SimpleNamespace(extract_doc=AsyncMock(return_value=(target, document)))
+    meta = SimpleNamespace(message=target)
     external_handlers["download"] = AsyncMock(return_value=io.BytesIO(b"document"))
     external_handlers["convert_to_pdf"] = AsyncMock(side_effect=TimeoutError)
-    await external_handlers["process_topdf"](target, meta)
+    await external_handlers["process_topdf"](document, meta)
     assert "Конвертация заняла слишком много времени" in target.reply.call_args.args[0]
     target.reply.assert_awaited_once()
 

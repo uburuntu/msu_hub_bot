@@ -585,7 +585,7 @@ pronouns = (
 
 
 async def process_gender(_message: Message, meta: MetaInfo) -> Message:
-    target = meta.reply()
+    target = meta.reply_target()
     rand = RandomizerForDay.random(
         target.sender_chat.id if target.sender_chat else target.from_user.id if target.from_user else target.chat.id
     )

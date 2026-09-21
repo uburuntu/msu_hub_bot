@@ -1,11 +1,10 @@
 from itertools import cycle
 
-from aiogram.types import Message
-from aiogram.utils.markdown import hpre
+from aiogram.utils.formatting import Pre
 from pyfiglet import Figlet
 from transliterate import translit
 
-from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.telegram.command_api import MetaCommand, TextInput
 
 figlet_fonts = (
     Figlet(font="3-d"),
@@ -27,11 +26,8 @@ figlet_fonts = (
 figlets = cycle(figlet_fonts)
 
 
-async def process_figlet(_message: Message, meta: MetaInfo) -> Message:
-    target, text = meta.extract_text()
-    if not text:
-        text = "kek"
-
+@MetaCommand("figlet", text=TextInput(reply=True, max_chars=200), rich=False, soft_messages=1)
+async def process_figlet(text: str = "kek") -> Pre:
     text = translit(text, "ru", reversed=True)
     figlet = next(figlets)
-    return await target.reply(hpre(figlet.renderText(text)[:4096]))
+    return Pre(figlet.renderText(text))

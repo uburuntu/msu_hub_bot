@@ -30,7 +30,7 @@ class HelpMessage(CallbackCommandBase):
 
     @classmethod
     async def process(cls, message: Message, meta: MetaInfo, supervisor: Supervisor) -> Message:
-        target = meta.reply()
+        target = meta.reply_target()
         result = await target.reply(cmd_help, disable_web_page_preview=True)
         if message.chat.type != ChatType.PRIVATE:
             supervisor.create_job(lambda: cls.edit(result))

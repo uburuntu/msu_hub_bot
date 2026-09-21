@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock
 import pytest
 from aiogram.types import RichBlockBlockQuotation, RichBlockParagraph, RichMessage, UserProfilePhotos
 
-from msu_hub_bot.commands.lobster import _caption_media
+from msu_hub_bot.commands import lobster
+from msu_hub_bot.telegram.command_api import invoke_command
 from msu_hub_bot.telegram.extraction import Extractor, SimpleExtractor
 from msu_hub_bot.telegram.filters import MetaCommand, MetaInfo, SlashCommand
 from msu_hub_bot.telegram.rich_input import rich_media, rich_text
@@ -123,24 +124,26 @@ async def test_caption_commands_choose_rich_reply_media_before_bot_profile(monke
         rich_message={"blocks": [{"type": "collage", "blocks": [{"type": kind, kind: media}]}]},
     )
     message = make_message(bot, text=f"/{command} Some text", reply_to_message=reply)
-    parsed = await MetaCommand(command)(message, bot)
-
-    target, selected, is_video = await _caption_media(parsed["meta"])
-
-    assert target == reply
+    render = AsyncMock(return_value=None)
+    monkeypatch.setattr(lobster, "_process_caption", render)
+    await invoke_command(getattr(lobster, f"process_{command}"), message, cpu_executor=object())
+    text, selected, meta, _, style = render.await_args.args
+    assert text == "Some text" and style == command
+    assert meta.input_sources["media"] == reply
     assert selected.file_id == kind
-    assert is_video is (kind != "photo")
     profile.assert_not_awaited()
 
 
-async def test_explicit_origin_media_and_ordinary_photo_keep_precedence():
+async def test_explicit_origin_media_and_ordinary_photo_keep_precedence(monkeypatch):
     bot = make_bot()
     reply = make_message(bot, rich_message={"blocks": [{"type": "video", "video": VIDEO}]})
     message = make_message(bot, photo=[PHOTO], caption="/meme Label", reply_to_message=reply)
-    target, selected, is_video = await _caption_media(MetaInfo(message, text="Label"))
-    assert target == message
+    render = AsyncMock(return_value=None)
+    monkeypatch.setattr(lobster, "_process_caption", render)
+    await invoke_command(lobster.process_meme, message, cpu_executor=object())
+    _, selected, meta, _, _ = render.await_args.args
+    assert meta.input_sources["media"] == message
     assert selected.file_id == "photo"
-    assert is_video is False
 
     message = make_message(photo=[PHOTO], rich_message={"blocks": [{"type": "photo", "photo": [{**PHOTO, "file_id": "rich-photo"}]}]})
     assert (await SimpleExtractor.image(message)).file_id == "photo"

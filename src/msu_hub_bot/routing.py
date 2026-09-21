@@ -4,6 +4,7 @@ from aiogram import F, Router
 from aiogram.enums import ContentType
 from aiogram.filters import StateFilter
 from msu_hub_bot.telegram.filters import MetaCommand, SlashCommand
+from msu_hub_bot.telegram.command_api import register_command
 from msu_hub_bot.telegram.state import UpdateStateContext
 from msu_hub_bot.settings import Settings
 from msu_hub_bot.providers.wit import Wit
@@ -415,21 +416,21 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
     group("prog").message.register(
         process_code, MetaCommand("prog", "pr"), StateFilter(None), flags={"handler_key": "process_code", "fsm_release": True}
     )
-    group("lobster").message.register(
+    register_command(
+        group("lobster").message,
         process_lobster,
-        MetaCommand("lobster", "l", "л", "лобстер"),
         StateFilter(None),
         flags={"handler_key": "process_lobster", "fsm_release": True},
     )
-    group("lobster").message.register(
+    register_command(
+        group("lobster").message,
         process_demotivator,
-        MetaCommand("demotivator", "de", "д", "де"),
         StateFilter(None),
         flags={"handler_key": "process_demotivator", "fsm_release": True},
     )
-    group("lobster").message.register(
+    register_command(
+        group("lobster").message,
         process_meme,
-        MetaCommand("meme"),
         StateFilter(None),
         flags={"handler_key": "process_meme", "fsm_release": True},
     )
@@ -454,8 +455,8 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
     group("tyan").callback_query.register(
         Tyan.process_cb, Tyan.callback_data.filter(), StateFilter(None), flags={"handler_key": "Tyan.process_cb", "fsm_release": True}
     )
-    group("externals").message.register(
-        process_topdf, MetaCommand("pdf", "topdf", "to_pdf"), StateFilter(None), flags={"handler_key": "process_topdf", "fsm_release": True}
+    register_command(
+        group("externals").message, process_topdf, StateFilter(None), flags={"handler_key": "process_topdf", "fsm_release": True}
     )
     group("externals").message.register(
         process_bg, MetaCommand("removebg", "bg"), StateFilter(None), flags={"handler_key": "process_bg", "fsm_release": True}
@@ -762,9 +763,7 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
     group("rate").callback_query.register(
         Rate.process_cb, Rate.callback_data.filter(), StateFilter(None), flags={"handler_key": "Rate.process_cb", "fsm_release": True}
     )
-    group("rolls").message.register(
-        process_roll, MetaCommand("roll", "ролл"), StateFilter(None), flags={"handler_key": "process_roll", "fsm_release": True}
-    )
+    register_command(group("rolls").message, process_roll, StateFilter(None), flags={"handler_key": "process_roll", "fsm_release": True})
     group("rolls").message.register(
         Rolls.process,
         MetaCommand("rolls", "роллим", "рулетка"),
@@ -832,9 +831,9 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
         F.content_type == ContentType.TEXT,
         flags={"handler_key": "process_zalgo", "fsm_release": True},
     )
-    group("figlet").message.register(
+    register_command(
+        group("figlet").message,
         process_figlet,
-        MetaCommand("figlet"),
         StateFilter(None),
         F.content_type == ContentType.TEXT,
         flags={"handler_key": "process_figlet", "fsm_release": True},
@@ -940,9 +939,9 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
         F.content_type == ContentType.TEXT,
         flags={"handler_key": "process_arxiv", "fsm_release": True},
     )
-    group("lingvanex").message.register(
+    register_command(
+        group("lingvanex").message,
         process_translate,
-        MetaCommand("translate", "tr", args=2),
         StateFilter(None),
         F.content_type == ContentType.TEXT,
         flags={"handler_key": "process_translate", "fsm_release": True},

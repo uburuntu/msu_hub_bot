@@ -30,6 +30,15 @@ confidence is a routing signal, not a guarantee of correctness.
 The provider is optional and does not run when disabled. Each user can have one
 request in flight, with a five-second cooldown; four requests can run concurrently.
 
+## Translation
+
+`/tr en ru Hello` translates using explicit codes from `/langs`. With Jev enabled,
+`/tr на русский` replying to text can resolve missing language arguments. The
+resolver may receive the request, replied-to text and up to five recent human
+messages from the same topic; explicit codes bypass this model call. Inline
+natural-language instructions need a clear body boundary, such as
+`/tr на русский: Hello`. `/en` and `/ru` retain their fixed-language behavior.
+
 ## Chat quizzes
 
 `/geoguess` asks you to locate a photo; `/chess` asks for the best move in a
@@ -66,6 +75,9 @@ Completed matches remain available for 24 hours; ratings do not expire.
 Game buttons work during another conversation without changing its draft.
 
 ## Development
+
+See [the command API](docs/commands.md) for typed handlers, prepared inputs,
+service injection and bounded replies, from a simple roll to a persistent game.
 
 Use Python 3.14 and uv 0.12.15 or newer. Native development works on macOS; the
 ACRCloud native SDK is installed only on Linux x86-64. FFmpeg and Tesseract are

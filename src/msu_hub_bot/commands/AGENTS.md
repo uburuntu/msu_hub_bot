@@ -1,5 +1,6 @@
 # Command behavior
 
+- Use [the command API](../../../docs/commands.md) for typed handlers: declare unusual inputs beside the function, return native content or await `meta.reply`, and keep temporary outputs alive through sending.
 - Registrations and access filters live in [routing.py](../routing.py); speech and Wolfram handlers also live in [providers/wit.py](../providers/wit.py) and [providers/wolfram.py](../providers/wolfram.py).
 - Follow each feature through aliases, callbacks, FSM steps, edited messages and automatic triggers before changing or retiring it.
 - Preserve selected inside jokes, personal sticker replies and small novelty commands; polish reliability without sanding away their character.

@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message
 
 from msu_hub_bot.games.quiz import QuizService
 from msu_hub_bot.telegram.context import bot_for
+from msu_hub_bot.telegram.filters import MetaInfo
 
 
 class GeoguessCallback(CallbackData, prefix="geoguess"):
@@ -18,8 +19,8 @@ class Geoguess:
     callback_data = GeoguessCallback
 
     @staticmethod
-    async def process(message: Message, quiz: QuizService) -> Message | None:
-        return await quiz.start("geoguess", message)
+    async def process(message: Message, meta: MetaInfo, quiz: QuizService) -> Message | None:
+        return await quiz.start("geoguess", message, meta=meta)
 
     @staticmethod
     async def process_cb(query: CallbackQuery, callback_data: GeoguessCallback, quiz: QuizService) -> bool | None:

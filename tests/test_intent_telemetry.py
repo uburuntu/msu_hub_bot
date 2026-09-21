@@ -208,3 +208,82 @@ async def test_execution_records_separately_from_the_single_entry_handler_and_up
     assert execution.parent_span_id == entry.span_id
     assert attributes(execution.attributes)["handler"] == "process_topdf"
     assert attributes(execution.attributes)["command.kind"] == "mention"
+
+
+@pytest.mark.parametrize("sample_rate", [0, 1])
+async def test_language_resolution_usage_survives_sampling_without_extra_success_logs(sample_rate):
+    capture = Capture()
+    telemetry = Telemetry(config(sample_rate=sample_rate), transport=capture)
+    await telemetry.start()
+    try:
+        with telemetry.context(user_id=42, chat_id=-10042):
+            with telemetry.operation(Boundary.PROVIDER, "jev.resolve_languages", provider=Provider.JEV) as operation:
+                for invalid in (True, -1, 10**400, CANARY):
+                    operation.model_usage(input_tokens=invalid)
+                    assert not operation.details
+                operation.model_usage(100, 20, 0.0001)
+                operation.model_usage(999, 999, 999)
+            operation.model_usage(999, 999, 999)
+    finally:
+        await telemetry.close()
+    assert not capture.logs()
+    assert len(capture.spans()) == sample_rate
+    for span in capture.spans():
+        result = attributes(span.attributes)
+        assert result["gen_ai.usage.input_tokens"] == 100
+        assert result["model.cost_usd"] == 0.0001
+        assert "intent.command" not in result
+    expected = {"bot.model.input_tokens": 100, "bot.model.output_tokens": 20, "bot.model.cost": 0.0001}
+    for name, total in expected.items():
+        points = metrics(capture)[name].sum.data_points
+        assert len(points) == 1
+        assert getattr(points[0], points[0].WhichOneof("value")) == pytest.approx(total)
+        assert attributes(points[0].attributes) == {"provider": "jev", "operation": "jev.resolve_languages"}
+        assert not points[0].exemplars
+    assert CANARY not in capture.serialized()
+
+
+async def test_model_usage_is_owned_by_active_language_resolution_and_failure_is_safe():
+    capture = Capture()
+    telemetry = Telemetry(config(sample_rate=0), transport=capture)
+    await telemetry.start()
+    try:
+        with telemetry.operation(Boundary.PROVIDER, "http.request", provider=Provider.JEV) as unrelated:
+            unrelated.model_usage(999, 999, 999)
+        with pytest.raises(TimeoutError):
+            with telemetry.operation(Boundary.PROVIDER, "jev.resolve_languages", provider=Provider.JEV) as operation:
+
+                async def detached():
+                    operation.model_usage(999, 999, 999)
+
+                await asyncio.create_task(detached())
+                assert not operation.details
+                raise TimeoutError(CANARY)
+    finally:
+        await telemetry.close()
+    assert not any(name.startswith("bot.model.") for name in metrics(capture))
+    (record,) = capture.logs()
+    assert record.body.string_value == "bot.model.failed"
+    assert attributes(record.attributes)["outcome"] == "timeout"
+    assert CANARY not in capture.serialized()
+
+
+@pytest.mark.parametrize("uncertain,expected", [(False, "rejected"), (True, "unavailable")])
+async def test_command_delivery_failures_keep_safe_classification_without_raw_cause(uncertain, expected):
+    from msu_hub_bot.telegram.responses import ResponseDeliveryError, ResponseProgress
+
+    capture = Capture()
+    telemetry = Telemetry(config(sample_rate=0), handler_keys={"test.delivery"}, transport=capture)
+    await telemetry.start()
+    error = ResponseDeliveryError(ResponseProgress(uncertain=uncertain, attempted_part=0, total_parts=1), RuntimeError(CANARY))
+    try:
+        with pytest.raises(ResponseDeliveryError):
+            with telemetry.operation(Boundary.HANDLER, "test.delivery"):
+                raise error
+    finally:
+        await telemetry.close()
+    (record,) = capture.logs()
+    fields = attributes(record.attributes)
+    assert fields["outcome"] == expected
+    assert fields["error.reason"] == ("delivery_uncertain" if uncertain else "delivery_rejected")
+    assert CANARY not in capture.serialized()

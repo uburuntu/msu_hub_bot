@@ -78,7 +78,7 @@ class Tyan(CallbackCommandBase):
 
     @classmethod
     async def process(cls, _message: Message, meta: MetaInfo, settings: Settings) -> Message | bool | None:
-        target = meta.reply()
+        target = meta.reply_target()
         return await target.reply(hbold("База аниме тяночек 👩🏻‍🦰👱🏻‍♀️👩🏻"), reply_markup=cls.keyboard(settings.with_nsfw))
 
     @classmethod
