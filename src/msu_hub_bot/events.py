@@ -8,16 +8,18 @@ from time import monotonic
 from contextlib import suppress
 from enum import Enum
 
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram import Bot
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatType
-from aiogram.types import ChatFullInfo, Message, TelegramObject, InlineKeyboardMarkup
+from aiogram.types import Chat, ChatFullInfo, ChatMemberUpdated, Message, TelegramObject, InlineKeyboardMarkup
 from aiogram.utils.markdown import hbold, hitalic, hlink, hcode, hide_link
 from cachetools import TTLCache
 
 from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.models import DirectoryPatch, DirectoryRecord
+from msu_hub_bot.telemetry import Boundary, Outcome, Provider, Telemetry
+from msu_hub_bot.telegram.errors import telegram_error_reason
 from msu_hub_bot.telegram.utils import chat_url, chat_link, sender_mention
 from msu_hub_bot.utils import random_cycle
 
@@ -47,14 +49,25 @@ class EventsMiddleware(BaseMiddleware):
     async def send_event(self, text: str, preview: bool = False, keyboard: InlineKeyboardMarkup | None = None) -> Message | None:
         if not self.events_chat_id:
             return None
-        return await self.bot.send_message(self.events_chat_id, text, disable_web_page_preview=not preview, reply_markup=keyboard)
+        return await self.em.request(
+            lambda: self.bot.send_message(self.events_chat_id, text, disable_web_page_preview=not preview, reply_markup=keyboard)
+        )
 
     async def log_event_from_ic(self, message: Message) -> Message | None:
+        membership_changed = bool(message.new_chat_members or message.left_chat_member)
+        if not membership_changed and (
+            not self.events_chat_id
+            or not (message.new_chat_title or message.new_chat_photo or message.delete_chat_photo or message.pinned_message)
+        ):
+            return None
         if message.chat.id not in await self.em.directory():
             return None
 
+        if not self.events_chat_id:
+            await self.em.update_pins()
+            return None
         chat = message.chat
-        link = await chat_link(chat, force_link=True)
+        link = await self.em.chat_link(chat)
 
         if message.new_chat_members:
             text = f"👤 Новый пользователь " if len(message.new_chat_members) == 1 else f"👥 Новые пользователи "
@@ -98,23 +111,26 @@ class EventsMiddleware(BaseMiddleware):
         return None
 
     async def log_event(self, message: Message) -> None:
-        if message.new_chat_members:
+        if self.events_chat_id and message.new_chat_members:
             for member in message.new_chat_members:
                 if member.id == self.bot.id:
                     user_link = sender_mention(message)
-                    link = await chat_link(message.chat, force_link=True)
-                    members = await self.bot.get_chat_member_count(message.chat.id)
+                    link = await self.em.chat_link(message.chat)
+                    members = await self.em.request(lambda: self.bot.get_chat_member_count(message.chat.id))
+                    if members is None:
+                        break
                     text = f"❇️ {user_link} добавил бота в чат:\n— {link}, {members} уч."
                     await self.send_event(text)
                     break
 
-        if message.group_chat_created or message.supergroup_chat_created or message.channel_chat_created:
+        if self.events_chat_id and (message.group_chat_created or message.supergroup_chat_created or message.channel_chat_created):
             user_link = sender_mention(message)
-            link = await chat_link(message.chat, force_link=True)
-            members = await self.bot.get_chat_member_count(message.chat.id)
-            chat_type = "канал" if message.chat.type == ChatType.CHANNEL else "чат"
-            text = f"❇️ {user_link} создал {chat_type} с ботом:\n— {link}, {members} уч."
-            await self.send_event(text)
+            link = await self.em.chat_link(message.chat)
+            members = await self.em.request(lambda: self.bot.get_chat_member_count(message.chat.id))
+            if members is not None:
+                chat_type = "канал" if message.chat.type == ChatType.CHANNEL else "чат"
+                text = f"❇️ {user_link} создал {chat_type} с ботом:\n— {link}, {members} уч."
+                await self.send_event(text)
 
         if message.migrate_from_chat_id:
             await message.answer(
@@ -128,20 +144,44 @@ class EventsMiddleware(BaseMiddleware):
     async def __call__(
         self, handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]], event: TelegramObject, data: dict[str, Any]
     ) -> Any:
-        if isinstance(event, Message):
-            await self.log_event(event)
-            await self.log_event_from_ic(event)
+        if isinstance(event, ChatMemberUpdated) and event.new_chat_member.user.id == self.bot.id:
+            self.em.invalidate_chat(event.chat.id)
+        elif isinstance(event, Message) and any(
+            (
+                event.new_chat_members,
+                event.left_chat_member,
+                event.new_chat_title,
+                event.new_chat_photo,
+                event.delete_chat_photo,
+                event.pinned_message,
+                event.group_chat_created,
+                event.supergroup_chat_created,
+                event.channel_chat_created,
+                event.migrate_from_chat_id,
+            )
+        ):
+            with self.em.telemetry.operation(Boundary.PROVIDER, "ecosystem.events", provider=Provider.TELEGRAM) as observation:
+                await self.log_event(event)
+                await self.log_event_from_ic(event)
+                if self.em.throttled:
+                    observation.set_outcome(Outcome.UNAVAILABLE)
         return await handler(event, data)
 
 
 class EcosystemManager:
-    def __init__(self, bot: Bot, db: BotRepository) -> None:
+    def __init__(self, bot: Bot, db: BotRepository, *, telemetry: Telemetry | None = None) -> None:
         self.bot = bot
         self.db = db
+        self.telemetry = telemetry or Telemetry()
         self._directory: dict[int, DirectoryRecord] = {}
         self._directory_until = 0.0
         self._directory_lock = asyncio.Lock()
         self._chats: TTLCache[int, ChatFullInfo | None] = TTLCache(maxsize=1024, ttl=600, timer=monotonic)
+        self._chat_lock = asyncio.Lock()
+        self._requests = asyncio.Semaphore(3)
+        self._retry_until = 0.0
+        self._uneditable_pins: TTLCache[int, int] = TTLCache(maxsize=1024, ttl=3600, timer=monotonic)
+        self._chat_epoch = 0
         self._pins_until = 0.0
         self._pins_lock = asyncio.Lock()
 
@@ -161,6 +201,29 @@ class EcosystemManager:
     def invalidate_directory(self) -> None:
         self._directory_until = 0.0
 
+    def invalidate_chat(self, chat_id: int) -> None:
+        self._chats.pop(chat_id, None)
+        self._uneditable_pins.pop(chat_id, None)
+        self._chat_epoch += 1
+        self._pins_until = 0.0
+
+    @property
+    def throttled(self) -> bool:
+        return monotonic() < self._retry_until
+
+    async def request[T](self, make_request: Callable[[], Awaitable[T]]) -> T | None:
+        """Defer optional maintenance without making the next update wait for Telegram."""
+        if self.throttled:
+            return None
+        async with self._requests:
+            if self.throttled:
+                return None
+            try:
+                return await make_request()
+            except TelegramRetryAfter as error:
+                self._retry_until = max(self._retry_until, monotonic() + max(1, error.retry_after))
+                return None
+
     async def directory(self, *, refresh: bool = False) -> dict[int, DirectoryRecord]:
         async with self._directory_lock:
             if refresh or monotonic() >= self._directory_until:
@@ -169,9 +232,11 @@ class EcosystemManager:
             return dict(self._directory)
 
     async def pin(self, chat_id: int, forced: bool = False) -> Message | bool:
+        if self.throttled:
+            return False
         e_chat = (await self.directory()).get(chat_id)
         if forced:
-            self._chats.pop(chat_id, None)
+            self.invalidate_chat(chat_id)
         if await self.get_chat(chat_id) is None:
             return False
 
@@ -190,36 +255,56 @@ class EcosystemManager:
         return pin_msg
 
     async def update_pins(self, *, forced: bool = False) -> None:
+        if self.throttled or (not forced and self._pins_lock.locked()):
+            return
         async with self._pins_lock:
-            if not forced and monotonic() < self._pins_until:
+            if self.throttled or (not forced and monotonic() < self._pins_until):
                 return
             if forced:
                 self._chats.clear()
-            await self._update_pins()
-            self._pins_until = monotonic() + 600
+                self._uneditable_pins.clear()
+                self._chat_epoch += 1
+            with self.telemetry.operation(Boundary.PROVIDER, "ecosystem.refresh", provider=Provider.TELEGRAM) as observation:
+                await self._update_pins()
+                if self.throttled:
+                    observation.set_outcome(Outcome.UNAVAILABLE)
+                else:
+                    self._pins_until = monotonic() + 600
 
     async def _update_pins(self) -> None:
         await self.update_ic_members()
+        if self.throttled:
+            return
 
         e_chats = await self.directory(refresh=True)
 
         async def update_pin(ec: DirectoryRecord) -> None:
-            if not ec.pinned_message_id or await self.get_chat(ec.chat_id) is None:
+            if (
+                not ec.pinned_message_id
+                or self._uneditable_pins.get(ec.chat_id) == ec.pinned_message_id
+                or await self.get_chat(ec.chat_id) is None
+            ):
                 return
             text = await self.text(ec.chat_id)
+            epoch = self._chat_epoch
             try:
-                await self.bot.edit_message_text(text, chat_id=ec.chat_id, message_id=ec.pinned_message_id)
+                await self.request(lambda: self.bot.edit_message_text(text, chat_id=ec.chat_id, message_id=ec.pinned_message_id))
             except (TelegramBadRequest, TelegramForbiddenError) as error:
                 if _chat_unavailable(error):
-                    self._chats[ec.chat_id] = None
+                    if epoch == self._chat_epoch:
+                        self._chats[ec.chat_id] = None
                     return
                 if isinstance(error, TelegramBadRequest):
-                    description = error.message.casefold().removeprefix("bad request: ")
-                    if description in {
-                        "message is not modified",
-                        "message to edit not found",
-                        "message can't be edited",
-                    } or description.startswith("message is not modified: "):
+                    reason = telegram_error_reason(error)
+                    if reason == "message_not_found":
+                        await self.db.clear_directory_pin(ec.chat_id, ec.pinned_message_id)
+                        self.invalidate_directory()
+                        return
+                    if reason == "message_not_editable":
+                        if epoch == self._chat_epoch:
+                            self._uneditable_pins[ec.chat_id] = ec.pinned_message_id
+                        return
+                    if reason == "message_not_modified":
                         return
                 raise
 
@@ -235,14 +320,16 @@ class EcosystemManager:
             chat = await self.get_chat(ec.chat_id)
             if chat is None:
                 return None
+            epoch = self._chat_epoch
             try:
-                members = await self.bot.get_chat_member_count(chat.id)
+                members = await self.request(lambda: self.bot.get_chat_member_count(chat.id))
             except (TelegramBadRequest, TelegramForbiddenError) as error:
                 if not _chat_unavailable(error):
                     raise
-                self._chats[ec.chat_id] = None
+                if epoch == self._chat_epoch:
+                    self._chats[ec.chat_id] = None
                 return None
-            if members != ec.members:
+            if members is not None and members != ec.members:
                 return await self.db.patch_directory(ec.chat_id, DirectoryPatch(members=members))
             return None
 
@@ -260,15 +347,29 @@ class EcosystemManager:
             return self._chats[chat_id]
         except KeyError:
             pass
-        try:
-            chat = await self.bot.get_chat(chat_id)
-        except (TelegramBadRequest, TelegramForbiddenError) as error:
-            if not _chat_unavailable(error):
-                raise
-            chat = None
-        # Access can return later; never remove directory data for a failed lookup.
-        self._chats[chat_id] = chat
-        return chat
+        async with self._chat_lock:
+            if chat_id in self._chats:
+                return self._chats[chat_id]
+            epoch = self._chat_epoch
+            try:
+                chat = await self.request(lambda: self.bot.get_chat(chat_id))
+                if chat is None:
+                    return None
+            except (TelegramBadRequest, TelegramForbiddenError) as error:
+                if not _chat_unavailable(error):
+                    raise
+                chat = None
+            # Access can return later; never remove directory data for a failed lookup.
+            if epoch == self._chat_epoch:
+                self._chats[chat_id] = chat
+            return chat
+
+    async def chat_link(self, chat: Chat) -> str:
+        if chat.username or chat.type == ChatType.PRIVATE:
+            return await chat_link(chat)
+        full = await self.get_chat(chat.id)
+        url = await chat_url(full, force_link=True) if full is not None else None
+        return hlink(chat.full_name, url) if url else chat.full_name
 
     async def link(self, chat_id: int) -> str:
         chat = await self.get_chat(chat_id)

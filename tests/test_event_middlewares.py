@@ -8,9 +8,9 @@ from uuid import UUID
 import pytest
 from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError
-from aiogram.methods import EditMessageText, GetChat, GetChatMemberCount
-from aiogram.types import Chat, ChatFullInfo, Document, Message, Update, User
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError, TelegramRetryAfter
+from aiogram.methods import EditMessageText, GetChat, GetChatMemberCount, UnpinChatMessage
+from aiogram.types import Chat, ChatFullInfo, ChatMemberUpdated, Document, Message, Update, User
 
 from msu_hub_bot.telegram.middlewares.check_gets import CheckGets
 from msu_hub_bot.telegram.middlewares.logs import LoggingMiddleware
@@ -218,7 +218,7 @@ async def test_log_middleware_never_records_update_text_names_or_ids(caplog):
 async def test_membership_side_effects_continue_to_handler_without_ambient_bot(monkeypatch):
     bot = SimpleNamespace(id=123, send_message=AsyncMock(), get_chat_member_count=AsyncMock(return_value=5))
     middleware = EventsMiddleware(bot, SimpleNamespace(list_directory=AsyncMock(return_value=[])), 999)
-    monkeypatch.setattr("msu_hub_bot.events.chat_link", AsyncMock(return_value="Synthetic chat"))
+    monkeypatch.setattr(middleware.em, "chat_link", AsyncMock(return_value="Synthetic chat"))
     handler = AsyncMock(return_value="handled")
     event = message(from_user=None, new_chat_members=[User(id=123, is_bot=True, first_name="Bot")])
     assert await middleware(handler, event, {}) == "handled"
@@ -320,9 +320,16 @@ def ecosystem(monkeypatch):
         entries[chat_id] = entries[chat_id].model_copy(update=changes.model_dump(exclude_unset=True))
         return entries[chat_id]
 
+    async def clear_pin(chat_id, expected_message_id):
+        current = entries.get(chat_id)
+        if current is not None and current.pinned_message_id == expected_message_id:
+            entries[chat_id] = current.model_copy(update={"pinned_message_id": None})
+        return entries.get(chat_id)
+
     repository = SimpleNamespace(
         list_directory=AsyncMock(side_effect=lambda: list(entries.values())),
         patch_directory=AsyncMock(side_effect=patch),
+        clear_directory_pin=AsyncMock(side_effect=clear_pin),
         delete_directory=AsyncMock(),
     )
     bot = SimpleNamespace(
@@ -468,6 +475,370 @@ async def test_membership_event_with_stale_directory_chat_still_reaches_handler(
     assert await middleware(handler, event, {}) == "handled"
     handler.assert_awaited_once()
     rig.bot.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.parametrize("events_chat_id", [0, 999])
+async def test_ordinary_directory_messages_do_not_fetch_metadata_or_run_maintenance(ecosystem, events_chat_id):
+    rig = ecosystem
+    middleware = EventsMiddleware(rig.bot, rig.repository, events_chat_id, em=rig.manager)
+    handler = AsyncMock(return_value="handled")
+    event = message(chat=Chat(id=-101, type="supergroup", title="Synthetic"))
+    assert await middleware(handler, event, {}) == "handled"
+    rig.repository.list_directory.assert_not_awaited()
+    rig.bot.get_chat.assert_not_awaited()
+    rig.bot.get_chat_member_count.assert_not_awaited()
+    rig.bot.edit_message_text.assert_not_awaited()
+    handler.assert_awaited_once()
+
+
+async def test_disabled_event_notifications_skip_metadata_but_keep_membership_maintenance(ecosystem):
+    rig = ecosystem
+    middleware = EventsMiddleware(rig.bot, rig.repository, 0, em=rig.manager)
+    rig.manager.update_pins = AsyncMock()
+    handler = AsyncMock()
+    await middleware(handler, message(new_chat_title="New title"), {})
+    rig.repository.list_directory.assert_not_awaited()
+    await middleware(
+        handler,
+        message(chat=Chat(id=-101, type="supergroup", title="Synthetic"), new_chat_members=[User(id=123, is_bot=True, first_name="Bot")]),
+        {},
+    )
+    rig.manager.update_pins.assert_awaited_once()
+    rig.bot.get_chat.assert_not_awaited()
+    rig.bot.get_chat_member_count.assert_not_awaited()
+    rig.bot.send_message.assert_not_awaited()
+
+
+async def test_event_links_share_cached_metadata_without_losing_new_titles(ecosystem):
+    rig = ecosystem
+    middleware = EventsMiddleware(rig.bot, rig.repository, 999, em=rig.manager)
+    handler = AsyncMock()
+    for title in ("First title", "Changed title"):
+        await middleware(handler, message(chat=Chat(id=-101, type="supergroup", title=title), new_chat_title=title), {})
+    rig.bot.get_chat.assert_awaited_once_with(-101)
+    assert "Changed title" in rig.bot.send_message.call_args.args[1]
+    assert "https://t.me/synthetic_101" in rig.bot.send_message.call_args.args[1]
+    assert handler.await_count == 2
+
+
+async def test_concurrent_chat_cache_misses_share_one_bounded_lookup(ecosystem):
+    rig = ecosystem
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def lookup(chat_id):
+        entered.set()
+        await release.wait()
+        return ecosystem_chat(chat_id)
+
+    rig.bot.get_chat.side_effect = lookup
+    tasks = [asyncio.create_task(rig.manager.get_chat(-101)) for _ in range(8)]
+    await entered.wait()
+    await asyncio.sleep(0)
+    rig.bot.get_chat.assert_awaited_once()
+    release.set()
+    result = await asyncio.gather(*tasks)
+    assert all(chat.id == -101 for chat in result)
+    rig.bot.get_chat.assert_awaited_once()
+
+
+async def test_membership_change_during_lookup_does_not_cache_stale_access(ecosystem):
+    rig = ecosystem
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def lookup(chat_id):
+        entered.set()
+        await release.wait()
+        raise TelegramForbiddenError(GetChat(chat_id=chat_id), "Forbidden: bot was kicked from the supergroup chat")
+
+    rig.bot.get_chat.side_effect = lookup
+    task = asyncio.create_task(rig.manager.get_chat(-101))
+    await entered.wait()
+    middleware = EventsMiddleware(rig.bot, rig.repository, 0, em=rig.manager)
+    await middleware(AsyncMock(), bot_rights_update(), {})
+    release.set()
+    assert await task is None
+    assert -101 not in rig.manager._chats
+    rig.bot.get_chat.side_effect = ecosystem_chat
+    assert (await rig.manager.get_chat(-101)).id == -101
+
+
+async def test_directory_refresh_bounds_active_telegram_requests(ecosystem):
+    rig = ecosystem
+    rig.entries.update({index: rig.entries[-101].model_copy(update={"chat_id": index}) for index in range(-110, -102)})
+    for chat_id in rig.entries:
+        rig.manager._chats[chat_id] = ecosystem_chat(chat_id)
+    active = 0
+    peak = 0
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def members(chat_id):
+        nonlocal active, peak
+        active += 1
+        peak = max(active, peak)
+        if active == 3:
+            entered.set()
+        await release.wait()
+        active -= 1
+        return 5
+
+    rig.bot.get_chat_member_count.side_effect = members
+    task = asyncio.create_task(rig.manager.update_pins())
+    await entered.wait()
+    await asyncio.sleep(0)
+    assert active == 3
+    release.set()
+    await task
+    assert peak == 3 and rig.bot.get_chat_member_count.await_count == len(rig.entries)
+
+
+@pytest.mark.parametrize("stage", ["lookup", "members", "edit"])
+async def test_rate_limited_maintenance_continues_dispatch_and_honors_server_cooldown(ecosystem, stage):
+    rig = ecosystem
+    target = {"lookup": rig.bot.get_chat, "members": rig.bot.get_chat_member_count, "edit": rig.bot.edit_message_text}[stage]
+    target.side_effect = TelegramRetryAfter(GetChat(chat_id=-101), "Synthetic flood wait", retry_after=31)
+    middleware = EventsMiddleware(rig.bot, rig.repository, 0, em=rig.manager)
+    handler = AsyncMock(return_value="handled")
+    event = message(
+        chat=Chat(id=-101, type="supergroup", title="Synthetic"), new_chat_members=[User(id=42, is_bot=False, first_name="Test")]
+    )
+    assert await middleware(handler, event, {}) == "handled"
+    assert rig.manager.throttled
+    calls = target.await_count
+    assert calls >= 1
+    await rig.manager.update_pins(forced=True)
+    assert await rig.manager.pin(-101, forced=True) is False
+    await middleware(handler, event, {})
+    assert target.await_count == calls
+    handler.assert_awaited()
+    assert all(chat is not None for chat in rig.manager._chats.values())
+    rig.repository.clear_directory_pin.assert_not_awaited()
+    target.side_effect = ecosystem_chat if stage == "lookup" else (lambda chat_id: 5) if stage == "members" else None
+    rig.clock.now += 31
+    await rig.manager.update_pins()
+    assert not rig.manager.throttled and target.await_count > calls
+
+
+async def test_overlapping_automatic_refresh_does_not_wait_for_running_refresh(ecosystem):
+    rig = ecosystem
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def refresh():
+        entered.set()
+        await release.wait()
+
+    rig.manager._update_pins = AsyncMock(side_effect=refresh)
+    task = asyncio.create_task(rig.manager.update_pins())
+    await entered.wait()
+    await asyncio.wait_for(rig.manager.update_pins(), timeout=0.1)
+    rig.manager._update_pins.assert_awaited_once()
+    release.set()
+    await task
+
+
+async def test_confirmed_missing_pin_is_cleared_once_without_replacing_messages(ecosystem):
+    rig = ecosystem
+    before = rig.entries[-101].model_dump()
+
+    async def edit(text, chat_id, message_id):
+        if chat_id == -101:
+            raise TelegramBadRequest(EditMessageText(chat_id=chat_id, message_id=message_id, text=text), "message to edit not found")
+
+    rig.bot.edit_message_text.side_effect = edit
+    await rig.manager.update_pins()
+    assert rig.entries[-101].model_dump() == before | {"pinned_message_id": None}
+    rig.repository.clear_directory_pin.assert_awaited_once_with(-101, 7)
+    rig.clock.now += 601
+    await rig.manager.update_pins()
+    assert [call.kwargs["chat_id"] for call in rig.bot.edit_message_text.await_args_list].count(-101) == 1
+    rig.bot.send_message.assert_not_awaited()
+    rig.bot.delete_message.assert_not_awaited()
+    rig.repository.delete_directory.assert_not_awaited()
+
+
+async def test_stale_edit_cannot_clear_a_concurrent_pin_replacement(ecosystem):
+    rig = ecosystem
+
+    async def edit(text, chat_id, message_id):
+        if chat_id == -101 and message_id == 7:
+            rig.entries[chat_id] = rig.entries[chat_id].model_copy(update={"pinned_message_id": 99})
+            raise TelegramBadRequest(EditMessageText(chat_id=chat_id, message_id=message_id, text=text), "message to edit not found")
+
+    rig.bot.edit_message_text.side_effect = edit
+    await rig.manager.update_pins()
+    rig.repository.clear_directory_pin.assert_awaited_once_with(-101, 7)
+    assert rig.entries[-101].pinned_message_id == 99
+    rig.clock.now += 601
+    await rig.manager.update_pins()
+    assert any(call.kwargs == {"chat_id": -101, "message_id": 99} for call in rig.bot.edit_message_text.await_args_list)
+
+
+def bot_rights_update(chat_id=-101, user_id=123):
+    member = {
+        "status": "administrator",
+        "user": {"id": user_id, "is_bot": True, "first_name": "Synthetic bot"},
+        "is_anonymous": False,
+        **dict.fromkeys(
+            (
+                "can_be_edited",
+                "can_manage_chat",
+                "can_delete_messages",
+                "can_manage_video_chats",
+                "can_restrict_members",
+                "can_promote_members",
+                "can_change_info",
+                "can_invite_users",
+                "can_post_stories",
+                "can_edit_stories",
+                "can_delete_stories",
+                "can_send_welcome_messages",
+            ),
+            False,
+        ),
+    }
+    return ChatMemberUpdated.model_validate(
+        {
+            "chat": {"id": chat_id, "type": "supergroup", "title": "Synthetic"},
+            "from": {"id": 42, "is_bot": False, "first_name": "Synthetic"},
+            "date": 1_700_000_000,
+            "old_chat_member": member | {"can_pin_messages": False},
+            "new_chat_member": member | {"can_pin_messages": True},
+        }
+    )
+
+
+@pytest.mark.parametrize("recovery", ["expiry", "membership", "forced"])
+async def test_uneditable_pin_cooldown_preserves_id_and_recovers(ecosystem, recovery):
+    rig = ecosystem
+
+    async def edit(text, chat_id, message_id):
+        if chat_id == -101:
+            raise TelegramBadRequest(EditMessageText(chat_id=chat_id, message_id=message_id, text=text), "message can't be edited")
+
+    rig.bot.edit_message_text.side_effect = edit
+    await rig.manager.update_pins()
+    rig.clock.now += 601
+    await rig.manager.update_pins()
+    assert [call.kwargs["chat_id"] for call in rig.bot.edit_message_text.await_args_list].count(-101) == 1
+    assert rig.entries[-101].pinned_message_id == 7
+    rig.repository.clear_directory_pin.assert_not_awaited()
+    if recovery == "expiry":
+        rig.clock.now += 3000
+    elif recovery == "membership":
+        middleware = EventsMiddleware(rig.bot, rig.repository, 0, em=rig.manager)
+        await middleware(AsyncMock(), bot_rights_update(), {})
+        assert -101 not in rig.manager._chats
+    rig.bot.edit_message_text.side_effect = None
+    await rig.manager.update_pins(forced=recovery == "forced")
+    assert [call.kwargs["chat_id"] for call in rig.bot.edit_message_text.await_args_list].count(-101) == 2
+
+
+@pytest.mark.parametrize("recovery", ["expiry", "membership"])
+async def test_automatic_unpin_permission_cooldown_recovers(monkeypatch, recovery):
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr("msu_hub_bot.telegram.middlewares.skip777000.monotonic", lambda: clock.now)
+    unpin = AsyncMock(
+        side_effect=[
+            TelegramBadRequest(UnpinChatMessage(chat_id=-101, message_id=1), "Not enough rights to manage pinned messages in the chat"),
+            True,
+        ]
+    )
+    monkeypatch.setattr(Message, "unpin", unpin)
+    middleware = Skip777000(bot_id=123)
+    handler = AsyncMock()
+    event = message(chat=Chat(id=-101, type="supergroup", title="Synthetic"), is_automatic_forward=True)
+    await middleware(handler, event, {})
+    await middleware(handler, event.model_copy(update={"message_id": 2}), {})
+    unpin.assert_awaited_once()
+    handler.assert_not_awaited()
+    if recovery == "expiry":
+        clock.now += 300
+    else:
+        await middleware(handler, bot_rights_update(user_id=999), {})
+        await middleware(handler, event, {})
+        unpin.assert_awaited_once()
+        await middleware(handler, bot_rights_update(), {})
+    await middleware(handler, event.model_copy(update={"message_id": 3}), {})
+    assert unpin.await_count == 2
+
+
+async def test_automatic_unpin_missing_message_does_not_disable_other_messages(monkeypatch):
+    unpin = AsyncMock(side_effect=[TelegramBadRequest(UnpinChatMessage(chat_id=-101, message_id=1), "message to unpin not found"), True])
+    monkeypatch.setattr(Message, "unpin", unpin)
+    middleware = Skip777000()
+    handler = AsyncMock()
+    event = message(is_automatic_forward=True)
+    await middleware(handler, event, {})
+    await middleware(handler, event, {})
+    await middleware(handler, event.model_copy(update={"message_id": 2}), {})
+    assert unpin.await_count == 2
+    handler.assert_not_awaited()
+
+
+async def test_automatic_unpin_targets_exact_forward_without_permissions_lookup():
+    session = RecordingSession()
+    bot = Bot("123456789:" + "a" * 35, session=session)
+    event = message(is_automatic_forward=True, message_id=77, business_connection_id="synthetic-business").as_(bot)
+    try:
+        await Skip777000(bot_id=bot.id)(AsyncMock(), event, {})
+        [method] = session.methods
+        assert isinstance(method, UnpinChatMessage)
+        assert (method.chat_id, method.message_id, method.business_connection_id) == (event.chat.id, 77, "synthetic-business")
+    finally:
+        await session.close()
+
+
+@pytest.mark.parametrize("error_type", [TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError, asyncio.CancelledError])
+async def test_automatic_unpin_does_not_silence_unrelated_errors(monkeypatch, error_type):
+    error = (
+        asyncio.CancelledError()
+        if error_type is asyncio.CancelledError
+        else error_type(UnpinChatMessage(chat_id=-101), "Synthetic unrelated failure")
+    )
+    monkeypatch.setattr(Message, "unpin", AsyncMock(side_effect=error))
+    with pytest.raises(error_type):
+        await Skip777000()(AsyncMock(), message(is_automatic_forward=True), {})
+
+
+async def test_unpin_rate_limit_defers_retries_and_does_not_block_ordinary_messages(monkeypatch):
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr("msu_hub_bot.telegram.middlewares.skip777000.monotonic", lambda: clock.now)
+    unpin = AsyncMock(side_effect=[TelegramRetryAfter(UnpinChatMessage(chat_id=-101), "Synthetic rate limit", retry_after=31), True])
+    monkeypatch.setattr(Message, "unpin", unpin)
+    middleware = Skip777000(bot_id=123)
+    handler = AsyncMock(return_value="handled")
+    event = message(is_automatic_forward=True)
+    await middleware(handler, event, {})
+    await middleware(handler, bot_rights_update(), {})
+    await middleware(handler, event.model_copy(update={"message_id": 2}), {})
+    unpin.assert_awaited_once()
+    assert await middleware(handler, message(text="/help"), {}) == "handled"
+    clock.now += 31
+    await middleware(handler, event.model_copy(update={"message_id": 3}), {})
+    assert unpin.await_count == 2
+
+
+async def test_rights_update_during_unpin_does_not_reintroduce_old_permission_cooldown(monkeypatch):
+    entered, release = asyncio.Event(), asyncio.Event()
+    attempts = 0
+
+    async def unpin(_message):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            entered.set()
+            await release.wait()
+            raise TelegramBadRequest(UnpinChatMessage(chat_id=-101), "Not enough rights to manage pinned messages in the chat")
+
+    monkeypatch.setattr(Message, "unpin", unpin)
+    middleware = Skip777000(bot_id=123)
+    event = message(chat=Chat(id=-101, type="supergroup", title="Synthetic"), is_automatic_forward=True)
+    task = asyncio.create_task(middleware(AsyncMock(), event, {}))
+    await entered.wait()
+    await middleware(AsyncMock(), bot_rights_update(), {})
+    release.set()
+    await task
+    await middleware(AsyncMock(), event.model_copy(update={"message_id": 2}), {})
+    assert attempts == 2
 
 
 async def test_automatic_pdf_unknown_size_stops_streaming_without_reply(monkeypatch):

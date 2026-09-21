@@ -181,8 +181,9 @@ class Application:
             stack.push_async_callback(crypto_exchange.close)
             health = HealthCheck(settings.health_check_url)
             stack.push_async_callback(health.stop)
-            ecosystem = EcosystemManager(bot, database)
+            ecosystem = EcosystemManager(bot, database, telemetry=telemetry)
             events = EventsMiddleware(bot, database, settings.events_chat_id, em=ecosystem)
+            skip_automatic_forward = Skip777000(bot_id=bot.id, telemetry=telemetry)
 
             dispatcher = Dispatcher(disable_fsm=True)
             dispatcher.update.outer_middleware(AdmissionMiddleware(supervisor))
@@ -198,7 +199,9 @@ class Application:
                     observer.middleware(HandlerTelemetryMiddleware(telemetry, diagnostics=diagnostics))
             # These automatic behaviors apply only to new messages. Running them
             # for edits or channel posts would repeat previews and membership work.
-            dispatcher.message.outer_middleware(Skip777000())
+            dispatcher.message.outer_middleware(skip_automatic_forward)
+            dispatcher.my_chat_member.outer_middleware(skip_automatic_forward)
+            dispatcher.my_chat_member.outer_middleware(events)
             dispatcher.message.outer_middleware(CheckGets())
             dispatcher.message.outer_middleware(events)
             dispatcher.message.outer_middleware(ViewerMiddleware(bot, vk_api, executor, telemetry=telemetry))
