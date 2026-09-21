@@ -22,7 +22,7 @@ def _json_default(value: object) -> int:
 async def process_json(message: Message) -> Message:
     """Return complete identifiers and valid JSON; larger dumps become files."""
     target_message = message.reply_to_message or message
-    target = target_message.model_dump(mode="python", by_alias=True, exclude_none=True)
+    target = target_message.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
     text = json.dumps(redact_json(target), ensure_ascii=False, indent=True, default=_json_default)
     if len(text.encode("utf-16-le")) // 2 > TELEGRAM_MESSAGE_MAX_LEN:
         document = BufferedInputFile(text.encode("utf-8"), filename=f"message-{target_message.message_id}.json")
