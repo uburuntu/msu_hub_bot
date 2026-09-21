@@ -81,7 +81,7 @@
           "spec": {
             "display": {
               "name": "Acknowledged job outcomes",
-              "description": "Unsampled state acknowledgments. Retry, hold and expiry are distinct; an unavailable acknowledgment cannot be counted as complete."
+              "description": "Unsampled state acknowledgments. Retry, hold and expiry are distinct; an unavailable acknowledgment cannot be counted as complete. Totals separate process/counter epochs and include initial values only for epochs starting within the selected window."
             },
             "plugin": {
               "kind": "Table",
@@ -94,7 +94,7 @@
                   "plugin": {
                     "kind": "LogfireNonTimeSeriesQuery",
                     "spec": {
-                      "query": "WITH streams AS (SELECT service_version,attributes->>'feature' AS feature,attributes->>'job.kind' AS kind,attributes->>'state' AS state,metric_increase(value,recorded_timestamp) AS n FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name='bot.feature_jobs.transitions' GROUP BY service_version,feature,kind,state) SELECT feature,kind,state,SUM(n) AS transitions FROM streams GROUP BY feature,kind,state HAVING SUM(n)>0 ORDER BY transitions DESC LIMIT 100"
+                      "query": "WITH streams AS (SELECT service_version, service_instance_id, process_pid,\n        CASE WHEN aggregation_temporality = 'cumulative' THEN start_timestamp END AS counter_epoch,\n        aggregation_temporality,attributes->>'feature' AS feature,attributes->>'job.kind' AS kind,attributes->>'state' AS state,metric_increase(value, recorded_timestamp)\n            + CASE WHEN aggregation_temporality = 'cumulative'\n                AND MIN(start_timestamp) >= CAST($__from_iso_string AS TIMESTAMPTZ)\n                AND MIN(start_timestamp) <= CAST($__to_iso_string AS TIMESTAMPTZ)\n                THEN COALESCE(MIN(scalar_value), 0) ELSE 0 END AS n FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name='bot.feature_jobs.transitions' GROUP BY service_version, service_instance_id, process_pid, counter_epoch, aggregation_temporality,feature,kind,state) SELECT feature,kind,state,SUM(n) AS transitions FROM streams GROUP BY feature,kind,state HAVING SUM(n)>0 ORDER BY transitions DESC LIMIT 100"
                     }
                   }
                 }
