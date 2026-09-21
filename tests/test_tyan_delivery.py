@@ -10,7 +10,9 @@ from aiogram.types import CallbackQuery
 
 from msu_hub_bot.commands.tyan import Tyan, TyanCallback
 from msu_hub_bot.providers.tyan import TyanImage, TyanUnavailable
+from msu_hub_bot.telemetry import Boundary, Telemetry
 from telegram_helpers import make_bot, make_message
+from telemetry_helpers import Capture, config
 
 
 def query(bot):
@@ -115,3 +117,53 @@ async def test_only_known_media_url_rejection_can_select_another_image(monkeypat
             assert len(bot.session.methods) == 2
     finally:
         await bot.session.close()
+
+
+@pytest.mark.parametrize(
+    ("result", "expected_outcome", "expected_reason", "expected_attempts"),
+    [
+        ("provider_unavailable", "unavailable", "provider_unavailable", 0),
+        ("media_rejected", "rejected", "media_reference_invalid", 3),
+        ("recovered", "success", None, 2),
+    ],
+)
+async def test_handler_outcome_distinguishes_guidance_from_successful_image(
+    monkeypatch, result, expected_outcome, expected_reason, expected_attempts
+):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    capture = Capture()
+    telemetry = Telemetry(config(), {"tyan.callback"}, transport=capture)
+    bot = make_bot()
+    request = AsyncMock(return_value=TyanImage("https://provider.example/private-image.png", False))
+    if result == "provider_unavailable":
+        request.side_effect = TyanUnavailable()
+    monkeypatch.setattr(Tyan, "request_tyan", request)
+    original = bot.session.make_request
+    attempts = []
+
+    async def send(bot, method, timeout=None):
+        if isinstance(method, SendPhoto):
+            attempts.append(method)
+            if result == "media_rejected" or (result == "recovered" and len(attempts) == 1):
+                raise TelegramBadRequest(method, "wrong file identifier/HTTP URL specified: private-provider-detail")
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(bot.session, "make_request", send)
+    await telemetry.start()
+    try:
+        with telemetry.operation(Boundary.HANDLER, "tyan.callback"):
+            await Tyan.process_cb(
+                query(bot), TyanCallback(type="sfw", category="neko"), SimpleNamespace(with_nsfw=False), telemetry=telemetry
+            )
+    finally:
+        await bot.session.close()
+        await telemetry.close()
+
+    assert len(attempts) == expected_attempts
+    assert bot.session.methods[-1].__api_method__ == ("sendPhoto" if result == "recovered" else "sendMessage")
+    handler = next(span for span in capture.spans() if span.name == "bot.handler")
+    attributes = {item.key: getattr(item.value, item.value.WhichOneof("value")) for item in handler.attributes}
+    assert attributes["outcome"] == expected_outcome
+    assert attributes.get("error.reason") == expected_reason
+    assert "private-image" not in capture.serialized()
+    assert "private-provider-detail" not in capture.serialized()

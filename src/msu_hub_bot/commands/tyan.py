@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hbold, hlink
 
 from msu_hub_bot.providers.tyan import TyanImage, TyanProvider, TyanUnavailable, category_available
-from msu_hub_bot.telemetry import Telemetry
+from msu_hub_bot.telemetry import Telemetry, record_handled_failure
 from msu_hub_bot.telegram.callbacks import CallbackCommandBase
 from msu_hub_bot.telegram.context import bot_for
 from msu_hub_bot.telegram.filters import MetaInfo
@@ -118,10 +118,11 @@ class Tyan(CallbackCommandBase):
             return await query.answer("Эта категория сейчас недоступна. Выбери другую.", show_alert=True)
 
         await query.answer(cache_time=1)
-        for _ in range(3):
+        for attempt in range(3):
             try:
                 image = await cls.request_tyan(type_, category, telemetry=telemetry)
             except TyanUnavailable as error:
+                record_handled_failure(error)
                 # The button was already acknowledged. Use a durable reply so
                 # a provider outage cannot disappear with an expired callback.
                 return await message.reply(error.text, parse_mode=None)
@@ -146,6 +147,8 @@ class Tyan(CallbackCommandBase):
             except TelegramBadRequest as error:
                 if not any(detail in error.message.lower() for detail in ("failed to get http url content", "wrong file identifier")):
                     raise
+                if attempt == 2:
+                    record_handled_failure(error)
         return await message.reply("Не получилось загрузить картинку. Попробуй другую категорию.", parse_mode=None)
 
     @classmethod
