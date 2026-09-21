@@ -199,6 +199,21 @@ class ApplicationDocuments:
             lambda current: None if current is None else _validate(DirectoryDocument, current.model_dump(mode="json") | patch),
         )
 
+    async def clear_directory_pin(self, chat_id: int, expected_message_id: int) -> DirectoryRecord | None:
+        """Clear only the missing pin that was observed, even after a concurrent repair."""
+        _key(expected_message_id)
+        if expected_message_id <= 0:
+            raise ValueError("A pinned message identifier must be positive")
+        return await self._change(
+            self.directory,
+            _key(chat_id),
+            lambda current: (
+                current.model_copy(update={"pinned_message_id": None})
+                if current is not None and current.pinned_message_id == expected_message_id
+                else current
+            ),
+        )
+
     async def delete_directory(self, chat_id: int) -> bool:
         key = _key(chat_id)
         for _ in range(_ATTEMPTS):

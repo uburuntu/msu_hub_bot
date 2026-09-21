@@ -178,6 +178,53 @@ async def test_missing_directory_patch_delete_do_not_create_data_and_delete_is_r
     assert not await documents.delete_directory(-100)
 
 
+async def test_missing_pin_removal_preserves_fields_and_replays_uncertain_commit():
+    backend, documents, _ = setup()
+    original = directory_payload(future={"keep": CANARY})
+    seed(backend, documents.directory, "-100", original)
+    backend.lose_after_commit = 1
+    result = await documents.clear_directory_pin(-100, 42)
+    assert result.pinned_message_id is None
+    assert result.model_dump(mode="json") == original | {"pinned_message_id": None}
+    assert len(writes(backend)) == 2 and writes(backend)[0] == writes(backend)[1]
+    assert writes(backend)[0]["guards"] == [{"collection": "chats", "key": "-100", "etag": str(UUID(int=1))}]
+    assert not writes(backend)[0]["deletes"]
+    assert writes(backend)[0]["puts"][0]["expires_at"] is None
+    await documents.clear_directory_pin(-100, 42)
+    assert len(writes(backend)) == 2
+
+
+@pytest.mark.parametrize("replacement", [99, None])
+async def test_missing_pin_removal_rechecks_id_after_concurrent_repair_or_deletion(replacement):
+    class ConcurrentRepair(FeatureFixture):
+        async def feature_request(self, operation, request):
+            if operation == "commit" and not self.calls[-1][0] == "commit":
+                identity = ("ecosystem", "application", "global", "chats", "-100")
+                if replacement is None:
+                    self.records.pop(identity)
+                else:
+                    self.records[identity]["etag"] = str(UUID(int=2))
+                    self.records[identity]["payload"].update(pinned_message_id=replacement, name="Concurrent repair")
+            return await super().feature_request(operation, request)
+
+    backend, documents, _ = setup(backend=ConcurrentRepair())
+    seed(backend, documents.directory, "-100", directory_payload())
+    result = await documents.clear_directory_pin(-100, 42)
+    if replacement is None:
+        assert result is None and not backend.records
+    else:
+        assert result.pinned_message_id == replacement and result.name == "Concurrent repair"
+    assert len(writes(backend)) == 1 and not backend.receipts
+
+
+async def test_missing_pin_removal_does_not_create_directory_or_change_another_pin():
+    backend, documents, _ = setup()
+    assert await documents.clear_directory_pin(-100, 42) is None
+    seed(backend, documents.directory, "-100", directory_payload(pinned_message_id=99))
+    assert (await documents.clear_directory_pin(-100, 42)).pinned_message_id == 99
+    assert not writes(backend)
+
+
 async def test_directory_pages_exceed_rest_default_cap_and_restore_numeric_order():
     backend, documents, _ = setup()
     for chat_id in range(-1005, 0):

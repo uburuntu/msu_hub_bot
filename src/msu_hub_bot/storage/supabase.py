@@ -402,6 +402,9 @@ class SupabaseRepository:
     async def patch_directory(self, chat_id: int, changes: DirectoryPatch) -> DirectoryRecord | None:
         return await self.documents.patch_directory(chat_id, changes)
 
+    async def clear_directory_pin(self, chat_id: int, expected_message_id: int) -> DirectoryRecord | None:
+        return await self.documents.clear_directory_pin(chat_id, expected_message_id)
+
     async def delete_directory(self, chat_id: int) -> bool:
         return await self.documents.delete_directory(chat_id)
 
