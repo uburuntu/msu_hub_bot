@@ -266,11 +266,12 @@ class EcosystemManager:
                 self._chats.clear()
                 self._uneditable_pins.clear()
                 self._chat_epoch += 1
+            epoch = self._chat_epoch
             with self.telemetry.operation(Boundary.PROVIDER, "ecosystem.refresh", provider=Provider.TELEGRAM) as observation:
                 await self._update_pins()
                 if self.throttled:
                     observation.set_outcome(Outcome.UNAVAILABLE)
-                else:
+                elif epoch == self._chat_epoch:
                     self._pins_until = monotonic() + 600
 
     async def _update_pins(self) -> None:

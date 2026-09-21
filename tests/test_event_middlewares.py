@@ -721,6 +721,29 @@ def bot_rights_update(chat_id=-101, user_id=123):
     )
 
 
+async def test_membership_change_during_refresh_allows_retry_after_old_edit_finishes(ecosystem):
+    rig = ecosystem
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def edit(text, chat_id, message_id):
+        if chat_id == -101:
+            entered.set()
+            await release.wait()
+            raise TelegramBadRequest(EditMessageText(chat_id=chat_id, message_id=message_id, text=text), "message can't be edited")
+
+    rig.bot.edit_message_text.side_effect = edit
+    task = asyncio.create_task(rig.manager.update_pins())
+    await entered.wait()
+    middleware = EventsMiddleware(rig.bot, rig.repository, 0, em=rig.manager)
+    await middleware(AsyncMock(), bot_rights_update(), {})
+    release.set()
+    await task
+    rig.bot.edit_message_text.side_effect = None
+    await rig.manager.update_pins()
+    assert [call.kwargs["chat_id"] for call in rig.bot.edit_message_text.await_args_list].count(-101) == 2
+    assert rig.entries[-101].pinned_message_id == 7
+
+
 @pytest.mark.parametrize("recovery", ["expiry", "membership", "forced"])
 async def test_uneditable_pin_cooldown_preserves_id_and_recovers(ecosystem, recovery):
     rig = ecosystem
