@@ -70,8 +70,6 @@ class Settings(BaseSettings):
     jev_confidence: float = Field(default=0.8, ge=0.5, le=1)
     dumps_chat_id: int = 0
     events_chat_id: int = 0
-    feedback_chat_id: int = 0
-    feedback_destination_name: str = Field(default="Event Tracking", min_length=1, max_length=100)
     error_chat_id: int = 0
     owner_id: int = 0
     founder_ids: list[int] = Field(default_factory=list)

@@ -91,7 +91,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
       - run: uv sync --locked
       - name: Exercise schema, isolation, quiz scoring, atomic mutations and retention
-        run: uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py tests/test_application_postgres.py tests/test_membership_postgres.py tests/test_reminders.py tests/test_chess_match_postgres.py tests/test_raffle_postgres.py tests/test_telegram_state_postgres.py
+        run: uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py tests/test_application_postgres.py tests/test_membership_postgres.py tests/test_reminders.py tests/test_chess_match_postgres.py tests/test_raffle_postgres.py tests/test_telegram_state_postgres.py tests/test_feedback_context_postgres.py tests/test_feedback_store_postgres.py
         env:
           HUB_TEST_POSTGRES_DSN: postgresql://postgres:test-only-postgres@localhost:5432/hub_test_ci
 

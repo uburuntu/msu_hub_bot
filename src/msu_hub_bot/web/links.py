@@ -14,6 +14,12 @@ from aiogram.types import InlineKeyboardButton, Message, WebAppInfo
 LAUNCH_SECONDS = 2 * 60 * 60
 
 
+def feedback_report_id(argument: str | None) -> str | None:
+    """A review link identifies a report; the authenticated API grants access."""
+    match = re.fullmatch(r"feedback_([0-9a-f]{16})", argument or "")
+    return match[1] if match else None
+
+
 class LaunchError(ValueError):
     def __init__(self) -> None:
         super().__init__("Ссылка устарела. Открой приложение из исходного чата ещё раз.")
@@ -82,6 +88,18 @@ class WebAppLinks:
 
     def private_button(self, launch: str, *, label: str = "Открыть приложение") -> InlineKeyboardButton:
         return InlineKeyboardButton(text=label, web_app=WebAppInfo(url=self.url + "/?" + urlencode({"launch": launch})))
+
+    def feedback_button(self, report_id: str) -> InlineKeyboardButton | None:
+        if feedback_report_id("feedback_" + report_id) is None:
+            raise ValueError("Invalid feedback report ID")
+        if not self.url or not self.username:
+            return None
+        return InlineKeyboardButton(text="Открыть отзыв", url=f"https://t.me/{self.username}?start=feedback_{report_id}")
+
+    def private_feedback_button(self, report_id: str) -> InlineKeyboardButton:
+        if feedback_report_id("feedback_" + report_id) is None:
+            raise ValueError("Invalid feedback report ID")
+        return InlineKeyboardButton(text="Открыть отзыв", web_app=WebAppInfo(url=self.url + "/?" + urlencode({"feedback": report_id})))
 
     @staticmethod
     def request_message_id(user_id: int, request_id: str) -> int:

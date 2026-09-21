@@ -107,6 +107,7 @@ files = [
     "src/msu_hub_bot/community/summaries.py",
     "src/msu_hub_bot/web/access.py",
     "src/msu_hub_bot/web/community.py",
+    "src/msu_hub_bot/web/feedback.py",
     "src/msu_hub_bot/web/server.py",
     "src/msu_hub_bot/web/__init__.py",
     "src/msu_hub_bot/web/links.py",

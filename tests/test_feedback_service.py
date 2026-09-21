@@ -9,14 +9,16 @@ import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
 from aiogram.methods import SendDocument, SendMessage
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InlineKeyboardButton
 from pydantic import ValidationError
 
 from msu_hub_bot.feedback import (
+    FeedbackAccessDenied,
     FeedbackContext,
     FeedbackDiagnostic,
     FeedbackError,
     FeedbackMessage,
+    FeedbackNotFound,
     FeedbackOrigin,
     FeedbackSelection,
     FeedbackService,
@@ -45,10 +47,10 @@ class FeedbackSession(RecordingSession):
         )
 
 
-def restart(rig, *, destination=DESTINATION):
+def restart(rig, *, destination=DESTINATION, reviewer_ids=(99,)):
     rig.store = FeatureStore(rig.backend)
     rig.worker = FeatureWorker(rig.store)
-    rig.service = FeedbackService(rig.bot, rig.store, rig.worker, destination_chat_id=destination)
+    rig.service = FeedbackService(rig.bot, rig.store, rig.worker, destination_chat_id=destination, reviewer_ids=reviewer_ids)
     rig.service.clock = lambda: rig.backend.now
 
 
@@ -195,7 +197,7 @@ async def test_creation_memory_has_a_fixed_bounded_day_window(rig):
         await create(rig, message_id=70)
     rig.backend.now += DRAFT_RETENTION
     current = await create(rig, message_id=70)
-    activity = await rig.service.activity.get(rig.service.scope(42), "current")
+    activity = await rig.service.activity.get(rig.service.scope(42), "user:42")
     assert len(activity.value.creations) == 1 and current.key != first.key
 
 
@@ -263,6 +265,11 @@ async def test_submit_atomically_discards_unselected_context_and_replays_same_re
     )
     assert commit["deletes"] == [{"collection": "drafts", "key": record.key}]
     assert len(commit["jobs"]) == 1
+    assert {item["collection"] for item in commit["puts"]} == {"reports", "activity", "review_index"}
+    assert first.value.review_key is not None
+    review = await rig.service.review_index.get(rig.service.scope(42), first.value.review_key)
+    assert review.value.report_id == first.key and review.value.status == "new"
+    assert "Selected reply" not in review.value.model_dump_json() and "context" not in review.value.model_dump_json()
     with pytest.raises(FeedbackError):
         await create(rig)
     with pytest.raises(FeedbackError):
@@ -391,7 +398,7 @@ async def test_maximal_unicode_report_stays_within_feature_document_budgets(rig)
         assert len(json.dumps(value.model_dump(mode="json"), ensure_ascii=False).encode()) < 64 * 1024
 
 
-async def test_worker_sends_exact_preview_once_and_keeps_permanent_receipt(rig):
+async def test_worker_notifies_without_context_and_keeps_permanent_receipt(rig):
     report = await submit(rig)
     await drain(rig)
     saved = await rig.service.get_report(42, report.key)
@@ -399,7 +406,9 @@ async def test_worker_sends_exact_preview_once_and_keeps_permanent_receipt(rig):
     assert saved.expires_at is None
     (method,) = rig.bot.session.methods
     assert isinstance(method, SendMessage)
-    assert method.chat_id == DESTINATION and method.text == report.value.rendered_text and method.parse_mode is None
+    assert method.chat_id == DESTINATION and report.key in method.text and method.parse_mode is None
+    assert report.value.description in method.text and report.value.author_name in method.text
+    assert "Selected reply" not in method.text and "process_roll" not in method.text
     rig.backend.now += timedelta(days=100)
     restart(rig)
     await drain(rig)
@@ -407,15 +416,32 @@ async def test_worker_sends_exact_preview_once_and_keeps_permanent_receipt(rig):
     assert len(rig.bot.session.methods) == 1
 
 
-async def test_oversize_preview_is_delivered_as_one_complete_utf8_file(rig):
+async def test_oversize_preview_is_complete_file_but_notification_stays_one_short_message(rig):
     context = candidates()
     context.reply.text = "😀" * 700
     report = await submit(rig, description="😀" * 2000, context=context)
-    await drain(rig)
-    (method,) = rig.bot.session.methods
+    method = presentation.report_method(report.value, -123)
     assert isinstance(method, SendDocument) and isinstance(method.document, BufferedInputFile)
     assert method.document.filename == "report.txt" and method.document.data.decode() == report.value.rendered_text
+    await drain(rig)
+    (notification,) = rig.bot.session.methods
+    assert isinstance(notification, SendMessage) and len(notification.text.encode("utf-16-le")) // 2 <= 4096
     assert (await rig.service.get_report(42, report.key)).value.status == "sent"
+
+
+async def test_notification_review_button_is_built_from_the_persisted_report_identity(rig):
+    report = await submit(rig)
+    seen = []
+
+    def button(report_id):
+        seen.append(report_id)
+        return InlineKeyboardButton(text="Review", url=f"https://example.test/?report={report_id}")
+
+    rig.service.review_button = button
+    await drain(rig)
+    (method,) = rig.bot.session.methods
+    assert seen == [report.key]
+    assert method.reply_markup.inline_keyboard[0][0].url.endswith(report.key)
 
 
 @pytest.mark.parametrize("error_kind", ["timeout", "network"])
@@ -534,3 +560,128 @@ async def test_definitive_rejection_stops_and_rate_limit_is_bounded_safe_retry(r
     second = await submit(rig, message_id=21)
     await drain(rig)
     assert (await rig.service.get_report(42, second.key)).value.failure == "rejected"
+
+
+async def test_shared_inbox_keeps_owned_records_and_activity_separate(rig):
+    mine = await bind(rig, await create(rig, author_id=42))
+    theirs = await bind(rig, await create(rig, author_id=43), message_id=101)
+    assert mine.scope == theirs.scope and mine.scope.key == "inbox" and mine.scope.owner == "bot"
+    with pytest.raises(FeedbackError):
+        await rig.service.get(43, mine.key, ui_chat_id=-123, ui_message_id=100)
+    mine = await submit(rig, await preview(rig, mine))
+    with pytest.raises(FeedbackError):
+        await rig.service.get_report(43, mine.key)
+    assert await rig.service.drafts.get(theirs.scope, theirs.key) is not None
+    activity = await rig.service.activity.list(mine.scope)
+    assert {record.key for record in activity} == {"user:42", "user:43"}
+    assert {record.value.author_id for record in activity} == {42, 43}
+
+
+async def test_review_authorization_is_explicit_and_precedes_every_storage_read(rig):
+    report = await submit(rig)
+    assert rig.service.is_reviewer(99) and not rig.service.is_reviewer(42)
+    assert not rig.service.is_reviewer(True)
+    rig.backend.calls.clear()
+    for user_id in (42, 43, 0, -1):
+        with pytest.raises(FeedbackAccessDenied):
+            await rig.service.review_list(user_id)
+        with pytest.raises(FeedbackAccessDenied):
+            await rig.service.review_get(user_id, report.key)
+        with pytest.raises(FeedbackAccessDenied):
+            await rig.service.review_update(user_id, report.key, expected_etag="wrong", status="done", note="No access")
+    assert rig.backend.calls == []
+    restart(rig, reviewer_ids=())
+    assert not rig.service.is_reviewer(99)
+    with pytest.raises(FeedbackAccessDenied):
+        await rig.service.review_list(99)
+
+
+async def test_review_queue_is_newest_first_filterable_and_paginates_without_payload_reads(rig):
+    first = await submit(rig, message_id=20)
+    rig.backend.now += timedelta(milliseconds=1)
+    draft = await bind(rig, await create(rig, message_id=21))
+    draft = await rig.service.change(42, draft.key, kind="idea", **controls(draft))
+    second = await submit(rig, await preview(rig, draft))
+    rig.backend.now += timedelta(milliseconds=1)
+    third = await submit(rig, message_id=22)
+    _, review = await rig.service.review_get(99, first.key)
+    await rig.service.review_update(99, first.key, expected_etag=review.etag, status="done", note="Fixed")
+    rig.backend.calls.clear()
+    page = await rig.service.review_list(99, limit=2)
+    assert [record.value.report_id for record in page] == [third.key, second.key]
+    assert len(rig.backend.calls) == 1 and rig.backend.calls[0][0] == "list"
+    remainder = await rig.service.review_list(99, after=page[-1].key, limit=2)
+    assert [record.value.report_id for record in remainder] == [first.key]
+    assert [record.value.report_id for record in await rig.service.review_list(99, kind="idea")] == [second.key]
+    assert [record.value.report_id for record in await rig.service.review_list(99, status="new", kind="bug")] == [third.key]
+    assert [record.value.report_id for record in await rig.service.review_list(99, status="done")] == [first.key]
+
+
+async def test_review_index_has_only_bounded_summary_and_detail_retains_exact_selected_snapshot(rig):
+    report = await submit(rig, description="A sentence. " * 150)
+    detail, review = await rig.service.review_get(99, report.key)
+    assert detail.value.rendered_text == report.value.rendered_text
+    assert detail.value.context.reply.text == "Selected reply"
+    assert review.value.author_name == "Reporter" and len(review.value.summary) == 240 and review.value.summary.endswith("…")
+    payload = review.value.model_dump_json()
+    assert "Selected reply" not in payload and "process_roll" not in payload and "UNSELECTED" not in payload
+    assert "rendered_text" not in payload and "context" not in payload
+    with pytest.raises(FeedbackNotFound):
+        await rig.service.review_get(99, "0" * 16)
+    with pytest.raises(FeedbackNotFound):
+        await rig.service.review_get(99, "invalid")
+
+
+async def test_review_updates_require_exact_review_revision_and_record_reviewer(rig):
+    report = await submit(rig)
+    original_report, review = await rig.service.review_get(99, report.key)
+    rig.backend.now += timedelta(minutes=1)
+    updated = await rig.service.review_update(99, report.key, expected_etag=review.etag, status="in_progress", note="Investigating")
+    assert updated.value.reviewer_id == 99 and updated.value.reviewed_at == rig.backend.now
+    assert updated.value.note == "Investigating" and updated.value.status == "in_progress"
+    assert (await rig.service.get_report(42, report.key)).etag == original_report.etag
+    with pytest.raises(Conflict):
+        await rig.service.review_update(99, report.key, expected_etag=review.etag, status="dismissed", note="Stale")
+    with pytest.raises(FeedbackError):
+        await rig.service.review_update(99, report.key, expected_etag=updated.etag, status="done", note="x" * 2001)
+    assert (await rig.service.review_get(99, report.key))[1].value.note == "Investigating"
+
+
+async def test_lost_review_commit_response_retries_frozen_update_without_changing_report(rig):
+    report = await submit(rig)
+    _, review = await rig.service.review_get(99, report.key)
+    rig.backend.lose_after_commit = 1
+    updated = await rig.service.review_update(99, report.key, expected_etag=review.etag, status="done", note="Resolved")
+    requests = [request for operation, request in rig.backend.calls if operation == "commit"]
+    assert requests[-1] == requests[-2]
+    assert [item["collection"] for item in requests[-1]["puts"]] == ["review_index"]
+    assert updated.value.status == "done"
+    assert (await rig.service.get_report(42, report.key)).etag == report.etag
+
+
+async def test_review_update_during_notification_does_not_make_delivery_uncertain(rig, monkeypatch):
+    report = await submit(rig)
+    _, review = await rig.service.review_get(99, report.key)
+    original = rig.bot.session.make_request
+
+    async def reviewing(bot, method, timeout=None):
+        assert (await rig.service.get_report(42, report.key)).value.status == "sending"
+        await rig.service.review_update(99, report.key, expected_etag=review.etag, status="done", note="Reviewed during send")
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(rig.bot.session, "make_request", reviewing)
+    await drain(rig)
+    detail, reviewed = await rig.service.review_get(99, report.key)
+    assert detail.value.status == "sent" and detail.value.delivered_message_id == 101
+    assert reviewed.value.status == "done" and reviewed.value.note == "Reviewed during send"
+    assert len(rig.bot.session.methods) == 1
+
+
+@pytest.mark.parametrize(
+    "parameters", [{"limit": 0}, {"limit": 51}, {"limit": True}, {"after": "invalid"}, {"status": "sending"}, {"kind": "unknown"}]
+)
+async def test_review_listing_rejects_unbounded_or_invalid_parameters_before_storage(rig, parameters):
+    rig.backend.calls.clear()
+    with pytest.raises(FeedbackError):
+        await rig.service.review_list(99, **parameters)
+    assert rig.backend.calls == []

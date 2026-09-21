@@ -45,7 +45,8 @@ def render_report(report: FeedbackReport) -> str:
     sections = [
         f"Обратная связь · {KINDS[report.kind]}\n\n{report.description}",
         f"Автор: {report.author_name}\nTelegram ID: {report.author_id}\nСоздано: {_time(report.created_at)}",
-        f"Получатель: {report.destination_name}. Выбранный снимок сохраняется навсегда.\nID: {report.report_id}",
+        "Получатель полного снимка: владелец бота, в закрытом разделе приложения. Хранение — навсегда.\n"
+        f"Уведомление с описанием и автором: {report.destination_name}.\nID: {report.report_id}",
     ]
     context = report.context
     if context.origin is not None:
@@ -85,7 +86,8 @@ def report_caption(report: FeedbackReport) -> str:
     header = f"Обратная связь · {KINDS[report.kind]}\n\n"
     footer = (
         f"\n\nАвтор: {compact(report.author_name, 128)} (ID {report.author_id})\nID: {report.report_id}\n"
-        f"Полный выбранный снимок — в report.txt.\nПолучатель: {report.destination_name}. Хранение — навсегда."
+        "Полный снимок — в report.txt; после отправки доступен владельцу бота в приложении. Хранение — навсегда.\n"
+        f"Уведомление с описанием и автором: {report.destination_name}."
     )
     summary_budget = min(480, max(0, 1024 - text_size(header + footer)))
     return header + compact(report.description, summary_budget) + footer
@@ -102,6 +104,23 @@ def report_method(report: FeedbackReport, chat_id: int) -> SendMessage | SendDoc
         document=BufferedInputFile(text.encode("utf-8"), filename="report.txt"),
         caption=report_caption(report),
         parse_mode=None,
+    )
+
+
+def notification_method(report: FeedbackReport, *, button: InlineKeyboardButton | None = None) -> SendMessage:
+    """Notify administrators without forwarding the user's selected context."""
+    text = (
+        f"📝 {KINDS[report.kind]} · Обратная связь\n\n{compact(report.description, 2000)}\n\n"
+        f"Автор: {compact(report.author_name, 128)} (ID {report.author_id})\n"
+        f"Создано: {_time(report.created_at)}\nID: {report.report_id}\n"
+        "Полный отзыв и выбранный контекст доступны владельцу бота в приложении."
+    )
+    return SendMessage(
+        chat_id=report.destination_chat_id,
+        text=text,
+        parse_mode=None,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button]]) if button else None,
     )
 
 
@@ -127,8 +146,9 @@ def draft_text(record: Record[FeedbackDraft]) -> str:
         notes.append("Диагностика — только твои команды с запуска бота, без аргументов и текстов ошибок.")
     return (
         f"📝 Обратная связь · {KINDS[draft.kind]}\n\n{compact(draft.description, 400)}\n\n"
-        f"Получатель: {draft.destination_name}.\n"
-        "После отправки описание и выбранный контекст сохранятся навсегда. "
+        "Полный отзыв увидит владелец бота в закрытом разделе приложения. "
+        f"В {draft.destination_name} отправлю уведомление с описанием и автором.\n"
+        "Описание и выбранный контекст сохранятся навсегда. "
         f"Твои имя ({draft.author_name}), Telegram ID ({draft.author_id}) и время создания включаются всегда.\n\n"
         "Выбери, что приложить. Перед отправкой покажу точный снимок; сообщения могут быть представлены фрагментами.\n"
         + "\n".join(notes)

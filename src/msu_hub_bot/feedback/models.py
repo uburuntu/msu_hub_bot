@@ -9,12 +9,23 @@ from msu_hub_bot.storage.features import Payload
 type FeedbackKind = Literal["bug", "idea", "other"]
 type FeedbackStatus = Literal["queued", "sending", "sent", "uncertain", "failed"]
 type FeedbackFailure = Literal["rejected", "rate_limit", "uncertain"]
+type FeedbackReviewStatus = Literal["new", "in_progress", "done", "dismissed"]
 type Identifier = Annotated[int, Field(strict=True, ge=-(2**63), lt=2**63)]
 type PositiveIdentifier = Annotated[int, Field(strict=True, gt=0, lt=2**63)]
 
 
 class FeedbackError(ValueError):
     """A fixed, safe explanation suitable for the draft's owner."""
+
+
+class FeedbackAccessDenied(FeedbackError):
+    def __init__(self) -> None:
+        super().__init__("Просмотр обратной связи доступен только разработчику бота.")
+
+
+class FeedbackNotFound(FeedbackError):
+    def __init__(self) -> None:
+        super().__init__("Отзыв не найден.")
 
 
 class FeedbackOrigin(Payload):
@@ -97,6 +108,7 @@ class FeedbackReport(Payload):
     ui_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     submission_etag: str | None = None
     submitted_at: AwareDatetime | None = None
+    review_key: str | None = Field(default=None, pattern=r"^[0-9]{16}:[a-f0-9]{16}$")
     status: FeedbackStatus = "queued"
     attempts: int = Field(default=0, strict=True, ge=0)
     sending_at: AwareDatetime | None = None
@@ -154,3 +166,25 @@ class FeedbackActivity(Payload):
     active_until: AwareDatetime | None = None
     submissions: list[AwareDatetime] = Field(default_factory=list, max_length=5)
     creations: list[FeedbackCreation] = Field(default_factory=list, max_length=50)
+
+
+class FeedbackReview(Payload):
+    """Searchable inbox metadata; review edits never mutate delivery state."""
+
+    report_id: str = Field(pattern=r"^[a-f0-9]{16}$")
+    author_id: PositiveIdentifier
+    author_name: str = Field(max_length=128)
+    kind: FeedbackKind
+    summary: str = Field(min_length=1, max_length=240)
+    created_at: AwareDatetime
+    submitted_at: AwareDatetime
+    status: FeedbackReviewStatus = "new"
+    note: str = Field(default="", max_length=2000)
+    reviewer_id: PositiveIdentifier | None = None
+    reviewed_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def review_attribution(self) -> Self:
+        if (self.reviewer_id is None) != (self.reviewed_at is None):
+            raise ValueError("Feedback review attribution requires both actor and time")
+        return self

@@ -105,13 +105,16 @@ async def _show_preview(message: Message, record: Record[FeedbackDraft], feedbac
 
 def _submitted(report: FeedbackReport) -> str:
     statuses = {
-        "queued": "Отзыв в очереди на доставку.",
-        "sending": "Отправляю отзыв.",
-        "sent": "Отзыв доставлен.",
-        "uncertain": "Доставка не подтверждена. Автоматического повтора не будет — разработчик проверит её отдельно.",
-        "failed": "Доставить отзыв не удалось. Он сохранён, разработчик сможет проверить доставку.",
+        "queued": "Уведомление в очереди на доставку.",
+        "sending": "Отправляю уведомление.",
+        "sent": "Уведомление доставлено.",
+        "uncertain": "Доставка уведомления не подтверждена. Разработчик проверит её отдельно.",
+        "failed": "Уведомление доставить не удалось. Сам отзыв доступен в приложении.",
     }
-    return f"Спасибо! Отзыв {report.report_id} сохранён.\nПолучатель: {report.destination_name}.\n{statuses[report.status]}"
+    return (
+        f"Спасибо! Отзыв {report.report_id} сохранён для владельца бота.\n"
+        f"Уведомление: {report.destination_name}.\n{statuses[report.status]}"
+    )
 
 
 class Feedback(CallbackCommandBase):

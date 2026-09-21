@@ -20,6 +20,8 @@ from aiohttp import web
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from msu_hub_bot.community.reposts import RepostError, Reposts
+from msu_hub_bot.feedback.models import FeedbackAccessDenied, FeedbackError, FeedbackNotFound
+from msu_hub_bot.feedback.service import FeedbackService
 from msu_hub_bot.providers.vk.api import VkApi
 from msu_hub_bot.reminders import ReminderService, Schedule, parse_schedule
 from msu_hub_bot.reminders.models import Recurrence, Reminder, ReminderError
@@ -33,6 +35,7 @@ from .auth import AuthenticationError, WebUser, authenticate
 from .links import Destination, LaunchError, WebAppLinks
 from .access import AccessDenied
 from .community import CommunityAPI
+from .feedback import FeedbackAPI
 
 logger = logging.getLogger(__name__)
 USER = web.RequestKey("user", WebUser)
@@ -84,6 +87,7 @@ class WebServer:
         static_path: Path | None = None,
         vk_api: VkApi | None = None,
         settings_changed: Callable[[int], Awaitable[None]] | None = None,
+        feedback: FeedbackService | None = None,
     ) -> None:
         self.bot, self.reminders, self.database, self.links, self.telemetry = bot, reminders, database, links, telemetry
         self.port = port
@@ -97,6 +101,7 @@ class WebServer:
         self._requests = asyncio.Semaphore(32)
         self._label_queries = asyncio.Semaphore(8)
         self.community = CommunityAPI(self, Reposts(reminders.store, vk_api))
+        self.feedback = FeedbackAPI(self, feedback)
 
     @web.middleware
     async def _boundary(self, request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]) -> web.StreamResponse:
@@ -128,6 +133,12 @@ class WebServer:
             response = error(422, "launch", str(exc))
         except AccessDenied as exc:
             response = error(403, "access", str(exc))
+        except FeedbackAccessDenied as exc:
+            response = error(403, "access", str(exc))
+        except FeedbackNotFound as exc:
+            response = error(404, "not_found", str(exc))
+        except FeedbackError as exc:
+            response = error(422, "feedback", str(exc))
         except RepostError as exc:
             response = error(422, "repost", str(exc))
         except Conflict:
@@ -135,7 +146,8 @@ class WebServer:
         except ReminderError as exc:
             response = error(422, "reminder", str(exc))
         except ValidationError, ValueError, json.JSONDecodeError, RecursionError:
-            response = error(422, "input", "Проверь текст, время и часовой пояс.")
+            message = "Проверь данные отзыва." if request.path.startswith("/api/feedback") else "Проверь текст, время и часовой пояс."
+            response = error(422, "input", message)
         except TimeoutError, RepositoryError, FeatureError, TelegramAPIError:
             response = error(503, "unavailable", "Не удалось подтвердить ответ. Попробуй ещё раз.")
         except web.HTTPException as exc:
@@ -164,6 +176,7 @@ class WebServer:
         app.router.add_get("/api/reminders/{key}", self._get)
         app.router.add_post("/api/reminders/{key}/{action:reschedule|cancel|retry}", self._change)
         self.community.register(app)
+        self.feedback.register(app)
         app.router.add_get("/", self._index)
         if (self.static_path / "assets").is_dir():
             app.router.add_static("/assets", self.static_path / "assets", show_index=False, follow_symlinks=False)
@@ -212,6 +225,7 @@ class WebServer:
                     "label": await self._label(user.id, destination),
                 },
                 "default_timezone": await self.community.preferences.timezone(user.id),
+                "capabilities": {"feedback_review": self.feedback.allowed(user.id)},
                 "now": self.clock().isoformat(),
             }
         )

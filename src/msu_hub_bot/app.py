@@ -132,15 +132,16 @@ class Application:
             raffles = RaffleStore(bot.id, features)
             chess_matches = ChessMatchService(bot, features, feature_worker)
             reminders = ReminderService(bot, features, feature_worker)
+            web_apps = WebAppLinks(bot.token, settings.web_app_url)
             feedback = FeedbackService(
                 bot,
                 features,
                 feature_worker,
-                destination_chat_id=settings.feedback_chat_id or settings.events_chat_id,
-                destination_name=settings.feedback_destination_name,
+                destination_chat_id=settings.events_chat_id,
+                reviewer_ids=(settings.owner_id,) if settings.owner_id > 0 else (),
+                review_button=web_apps.feedback_button,
             )
             diagnostics = DiagnosticBuffer(release=telemetry.config.release)
-            web_apps = WebAppLinks(bot.token, settings.web_app_url)
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
             vk_api = VkApi(token=settings.vk_user_token)
@@ -158,6 +159,7 @@ class Application:
                     port=settings.web_port,
                     vk_api=vk_api,
                     settings_changed=preferences.invalidate,
+                    feedback=feedback,
                 )
                 if settings.web_app_url
                 else None

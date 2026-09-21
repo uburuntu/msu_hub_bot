@@ -5,11 +5,12 @@ from datetime import UTC, datetime
 from aiogram.filters import CommandObject
 from aiogram.types import InlineKeyboardMarkup, Message
 
-from msu_hub_bot.web.links import WebAppLinks
+from msu_hub_bot.feedback import FeedbackService
+from msu_hub_bot.web.links import WebAppLinks, feedback_report_id
 
 
 def is_app_start(message: Message, command: CommandObject) -> bool:
-    return message.chat.type == "private" and bool(command.args and command.args.startswith("app_"))
+    return message.chat.type == "private" and bool(command.args and (command.args.startswith("app_") or feedback_report_id(command.args)))
 
 
 async def process_app(message: Message, web_apps: WebAppLinks) -> Message:
@@ -24,7 +25,26 @@ async def process_app(message: Message, web_apps: WebAppLinks) -> Message:
     )
 
 
-async def process_app_start(message: Message, command: CommandObject, web_apps: WebAppLinks) -> Message:
+async def process_app_start(
+    message: Message, command: CommandObject, web_apps: WebAppLinks, feedback: FeedbackService | None = None
+) -> Message:
+    report_id = feedback_report_id(command.args)
+    if report_id is not None:
+        if (
+            message.chat.type != "private"
+            or message.sender_chat is not None
+            or message.from_user is None
+            or message.from_user.is_bot
+            or feedback is None
+            or not feedback.is_reviewer(message.from_user.id)
+        ):
+            return await message.reply("Отзывы доступны только владельцу бота.")
+        if not web_apps.url:
+            return await message.reply("Раздел отзывов пока недоступен. Сам отзыв сохранён.")
+        return await message.reply(
+            "Отзыв, выбранный контекст и заметки — в закрытом разделе приложения.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[web_apps.private_feedback_button(report_id)]]),
+        )
     if not web_apps.url or message.from_user is None:
         return await process_app(message, web_apps)
     launch = (command.args or "")[4:]

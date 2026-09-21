@@ -2,13 +2,14 @@
 
 import asyncio
 import hashlib
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNotFound, TelegramRetryAfter, TelegramUnauthorizedError
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, Message
 from pydantic import ValidationError
 
 from msu_hub_bot.storage.errors import RepositoryUnavailable
@@ -27,6 +28,7 @@ from msu_hub_bot.storage.features import (
 )
 
 from .models import (
+    FeedbackAccessDenied,
     FeedbackActivity,
     FeedbackContext,
     FeedbackCreation,
@@ -36,8 +38,11 @@ from .models import (
     FeedbackFailure,
     FeedbackKind,
     FeedbackMessage,
+    FeedbackNotFound,
     FeedbackOrigin,
     FeedbackReport,
+    FeedbackReview,
+    FeedbackReviewStatus,
     FeedbackSelection,
     FeedbackStatus,
     SelectedFeedbackContext,
@@ -50,6 +55,15 @@ MAX_DRAFT_CREATIONS = 50
 SEND_TIMEOUT = 15
 MAX_DELIVERY_ATTEMPTS = 8
 MAX_CONFLICT_RETRIES = 4
+SCOPE = Scope("inbox")
+
+
+def _review_key(submitted_at: datetime, report_id: str) -> str:
+    elapsed = submitted_at.astimezone(UTC) - datetime(1970, 1, 1, tzinfo=UTC)
+    milliseconds = elapsed.days * 86_400_000 + elapsed.seconds * 1000 + elapsed.microseconds // 1000
+    if not 0 <= milliseconds <= 9_999_999_999_999_999:
+        raise InvalidPayload()
+    return f"{9_999_999_999_999_999 - milliseconds:016d}:{report_id}"
 
 
 def _ui_digest(author_id: int, key: str, chat_id: int, message_id: int) -> str:
@@ -85,7 +99,15 @@ def _selected(context: FeedbackContext, selection: FeedbackSelection) -> Selecte
 
 class FeedbackService:
     def __init__(
-        self, bot: Bot, store: FeatureStore, worker: FeatureWorker, *, destination_chat_id: int, destination_name: str = "Event Tracking"
+        self,
+        bot: Bot,
+        store: FeatureStore,
+        worker: FeatureWorker,
+        *,
+        destination_chat_id: int,
+        destination_name: str = "Event Tracking",
+        reviewer_ids: Iterable[int] = (),
+        review_button: Callable[[str], InlineKeyboardButton | None] | None = None,
     ) -> None:
         if type(destination_chat_id) is not int or not -(2**63) <= destination_chat_id < 2**63:
             raise ValueError("Invalid feedback destination")
@@ -94,10 +116,16 @@ class FeedbackService:
         if not isinstance(destination_name, str) or not destination_name.strip() or len(destination_name) > 100:
             raise ValueError("Invalid feedback destination name")
         self.destination_name = destination_name
+        reviewers = tuple(reviewer_ids)
+        if any(type(user_id) is not int or not 0 < user_id < 2**63 for user_id in reviewers):
+            raise ValueError("Invalid feedback reviewer identity")
+        self.reviewer_ids = frozenset(reviewers)
+        self.review_button = review_button
         self.clock: Callable[[], datetime] = lambda: datetime.now(UTC)
         self.drafts = store.collection("feedback", "drafts", FeedbackDraft, retention=DRAFT_RETENTION, version=1)
         self.reports = store.collection("feedback", "reports", FeedbackReport, retention=None, version=1)
         self.activity = store.collection("feedback", "activity", FeedbackActivity, retention=DRAFT_RETENTION, version=1)
+        self.review_index = store.collection("feedback", "review_index", FeedbackReview, retention=None, version=1)
         worker.register("feedback", "deliver", self._deliver, max_attempts=1024)
         worker.register("feedback", "reconcile", self._reconcile, max_attempts=1024)
 
@@ -105,7 +133,7 @@ class FeedbackService:
     def scope(author_id: int) -> Scope:
         if type(author_id) is not int or not 0 < author_id < 2**63:
             raise FeedbackError("Обратную связь можно отправить от личного аккаунта.")
-        return Scope(f"user:{author_id}")
+        return SCOPE
 
     def _tx(self, author_id: int) -> Transaction:
         return self.store.transaction("feedback", self.scope(author_id), operation_id=uuid4().hex)
@@ -129,7 +157,7 @@ class FeedbackService:
         return record
 
     async def _activity(self, author_id: int) -> tuple[Record[FeedbackActivity] | None, FeedbackActivity]:
-        record = await self.activity.get(self.scope(author_id), "current")
+        record = await self.activity.get(self.scope(author_id), f"user:{author_id}")
         if record is not None and record.value.author_id != author_id:
             raise InvalidPayload()
         value = FeedbackActivity(author_id=author_id) if record is None else record.value.model_copy(deep=True)
@@ -138,11 +166,12 @@ class FeedbackService:
         return record, value
 
     def _put_activity(self, tx: Transaction, record: Record[FeedbackActivity] | None, value: FeedbackActivity) -> None:
+        key = f"user:{value.author_id}"
         if record is None:
-            tx.expect_absent("activity", "current")
+            tx.expect_absent("activity", key)
         else:
             tx.expect(record)
-        tx.put(self.activity, "current", value, expires_at=self.clock() + DRAFT_RETENTION)
+        tx.put(self.activity, key, value, expires_at=self.clock() + DRAFT_RETENTION)
 
     @staticmethod
     def _rate(value: FeedbackActivity) -> None:
@@ -201,7 +230,10 @@ class FeedbackService:
                 if existing.value.author_id != author_id:
                     raise InvalidPayload()
                 return existing
-            if await self.reports.get(self.scope(author_id), key) is not None:
+            saved = await self.reports.get(self.scope(author_id), key)
+            if saved is not None:
+                if (saved.value.author_id, saved.value.report_id) != (author_id, key):
+                    raise InvalidPayload()
                 raise FeedbackError("Этот отзыв уже сохранён для отправки.")
             activity, owner = await self._activity(author_id)
             self._rate(owner)
@@ -321,6 +353,98 @@ class FeedbackService:
             raise FeedbackError("Отзыв не найден среди твоих отзывов.")
         return record
 
+    def is_reviewer(self, user_id: int) -> bool:
+        return type(user_id) is int and user_id in self.reviewer_ids
+
+    def _require_reviewer(self, user_id: int) -> None:
+        if not self.is_reviewer(user_id):
+            raise FeedbackAccessDenied()
+
+    @staticmethod
+    def _check_review(record: Record[FeedbackReview], report: Record[FeedbackReport] | None = None) -> None:
+        value = record.value
+        if record.key != _review_key(value.submitted_at, value.report_id) or (record.parent, record.status) != (value.kind, value.status):
+            raise InvalidPayload()
+        if report is not None and (
+            (value.report_id, value.author_id, value.kind, value.created_at, value.submitted_at)
+            != (report.key, report.value.author_id, report.value.kind, report.value.created_at, report.value.submitted_at)
+            or report.value.review_key != record.key
+        ):
+            raise InvalidPayload()
+
+    async def review_list(
+        self,
+        reviewer_id: int,
+        *,
+        status: FeedbackReviewStatus | None = None,
+        kind: FeedbackKind | None = None,
+        after: str | None = None,
+        limit: int = 20,
+    ) -> list[Record[FeedbackReview]]:
+        self._require_reviewer(reviewer_id)
+        if (
+            type(limit) is not int
+            or not 1 <= limit <= 50
+            or (status is not None and status not in ("new", "in_progress", "done", "dismissed"))
+            or (kind is not None and kind not in ("bug", "idea", "other"))
+            or (after is not None and re.fullmatch(r"[0-9]{16}:[a-f0-9]{16}", after) is None)
+        ):
+            raise FeedbackError("Неверные параметры списка отзывов.")
+        records = await self.review_index.list(SCOPE, parent=kind, status=status, after=after, limit=limit)
+        for record in records:
+            self._check_review(record)
+        return records
+
+    async def review_get(self, reviewer_id: int, report_id: str) -> tuple[Record[FeedbackReport], Record[FeedbackReview]]:
+        self._require_reviewer(reviewer_id)
+        if re.fullmatch(r"[a-f0-9]{16}", report_id) is None:
+            raise FeedbackNotFound()
+        report = await self.reports.get(SCOPE, report_id)
+        if report is None:
+            raise FeedbackNotFound()
+        if report.value.report_id != report_id or report.value.review_key is None:
+            raise InvalidPayload()
+        review = await self.review_index.get(SCOPE, report.value.review_key)
+        if review is None:
+            raise InvalidPayload()
+        self._check_review(review, report)
+        return report, review
+
+    async def review_update(
+        self,
+        reviewer_id: int,
+        report_id: str,
+        *,
+        expected_etag: str,
+        status: FeedbackReviewStatus,
+        note: str,
+    ) -> Record[FeedbackReview]:
+        _, record = await self.review_get(reviewer_id, report_id)
+        if record.etag != expected_etag:
+            raise Conflict()
+        try:
+            value = FeedbackReview.model_validate(
+                {
+                    **record.value.model_dump(),
+                    "status": status,
+                    "note": note,
+                    "reviewer_id": reviewer_id,
+                    "reviewed_at": self.clock(),
+                }
+            )
+            value.note.encode("utf-8")
+        except ValidationError, UnicodeError:
+            raise FeedbackError("Выбери статус отзыва и оставь заметку до 2000 символов.") from None
+        tx = self._tx(record.value.author_id)
+        tx.expect(record)
+        tx.put(self.review_index, record.key, value, parent=value.kind, status=value.status, expires_at=None)
+        await self._commit(tx)
+        updated = await self.review_index.get(SCOPE, record.key)
+        if updated is None:
+            raise InvalidPayload()
+        self._check_review(updated)
+        return updated
+
     async def submit(self, author_id: int, key: str, *, expected_etag: str, ui_chat_id: int, ui_message_id: int) -> Record[FeedbackReport]:
         for _ in range(MAX_CONFLICT_RETRIES):
             saved = await self.reports.get(self.scope(author_id), key)
@@ -350,11 +474,27 @@ class FeedbackService:
                 raise FeedbackError("Предпросмотр изменился. Посмотри его ещё раз перед отправкой.")
             activity, owner = await self._activity(author_id)
             self._rate(owner)
-            report = report.model_copy(update={"submission_etag": expected_etag, "submitted_at": self.clock()}, deep=True)
+            submitted_at = self.clock()
+            review_key = _review_key(submitted_at, report.report_id)
+            report = report.model_copy(
+                update={"submission_etag": expected_etag, "submitted_at": submitted_at, "review_key": review_key}, deep=True
+            )
+            summary = " ".join(report.description.split())
+            review = FeedbackReview(
+                report_id=report.report_id,
+                author_id=report.author_id,
+                author_name=report.author_name,
+                kind=report.kind,
+                summary=summary if len(summary) <= 240 else summary[:239] + "…",
+                created_at=report.created_at,
+                submitted_at=submitted_at,
+            )
             tx = self._tx(author_id)
             tx.delete(record)
             tx.expect_absent("reports", key)
             tx.put(self.reports, key, report, status="queued", expires_at=None)
+            tx.expect_absent("review_index", review_key)
+            tx.put(self.review_index, review_key, review, parent=review.kind, status=review.status, expires_at=None)
             self._schedule(tx, key, "deliver", self.clock())
             owner.submissions = [*owner.submissions, self.clock()]
             if owner.active_draft == key:
@@ -426,7 +566,7 @@ class FeedbackService:
             raise JobRetry() from None
 
     async def _delivery(self, context: JobContext) -> None:
-        from .presentation import report_method
+        from .presentation import notification_method
 
         record = await self._job_record(context)
         if record is None or not await context.current():
@@ -436,7 +576,8 @@ class FeedbackService:
             return
         if record.value.status != "queued":
             return
-        method = report_method(record.value, record.value.destination_chat_id)
+        button = self.review_button(record.key) if self.review_button is not None else None
+        method = notification_method(record.value, button=button)
         value = record.value.model_copy(
             update={"status": "sending", "sending_at": self.clock(), "attempts": record.value.attempts + 1}, deep=True
         )
