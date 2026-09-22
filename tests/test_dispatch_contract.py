@@ -61,6 +61,8 @@ def aliases(handler):
 
 def is_added_route(handler):
     return aliases(handler) == ["py_stdin", "python_stdin"] or handler.flags["handler_key"] in {
+        "Quest.process",
+        "Quest.callback",
         "Chess.process",
         "Chess.top",
         "Chess.process_cb",
