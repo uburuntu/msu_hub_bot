@@ -48,3 +48,18 @@ def user_label_size(name: str, username: str | None) -> int:
 def user_label(user_id: int, name: str, username: str | None) -> Text:
     label, handle = _user_label_parts(name, username)
     return Text(TextLink(label, url=f"tg://user?id={user_id}"), handle)
+
+
+def user_label_plain(name: str, username: str | None) -> Text:
+    """Build a plain-text user label without a Telegram user link.
+
+    Args:
+        name: The user's display name, compacted to fit caption limits.
+        username: Optional Telegram username, rendered in parentheses.
+
+    Returns:
+        A Text object with name and optional (@username) handle, containing
+        no clickable entity or user reference.
+    """
+    label, handle = _user_label_parts(name, username)
+    return Text(label, handle)
