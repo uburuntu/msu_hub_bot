@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.formatting import Bold, Text
 
 from msu_hub_bot.commands.chess_play_view import PlayCallback
-from msu_hub_bot.commands.quiz_view import user_label, user_label_plain
+from msu_hub_bot.commands.quiz_view import user_label
 from msu_hub_bot.games.chess_play.models import GameError
 from msu_hub_bot.games.chess_play.service import ChessMatchService
 from msu_hub_bot.telegram.context import bot_for
@@ -50,14 +50,13 @@ class ChessRating:
             board, person = await chess_matches.rating(user.id, page=max(0, page))
         rows: list[Text | str] = [Bold("♟ Общий шахматный рейтинг"), "\nЗа всё время · старт 800 · Elo\n"]
         for index, player in enumerate(board.players, board.page * 10 + 1):
-            rows.append(Text(f"\n{index}. ", user_label_plain(player.name, player.username), f" — {player.rating}"))
+            rows.append(Text(f"\n{index}. ", user_label(player.user_id, player.name, player.username), f" — {player.rating}"))
         if not board.players:
             rows.append("\nПока никто не сыграл. Начни с /chess_play.")
-            
         rows.append(
             Text(
-                "\n",
-                user_label_plain(user.full_name, user.username),
+                "\n\n",
+                user_label(user.id, user.full_name, user.username),
                 f": {person.rating}",
                 f" · место {person.rank}" if person.rank is not None else " · ещё нет партий",
             )
