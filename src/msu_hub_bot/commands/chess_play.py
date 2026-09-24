@@ -84,7 +84,7 @@ class ChessRating:
             logger.exception("Chess ratings unavailable")
             text, markup = Text("Рейтинг сейчас недоступен. Попробуй чуть позже."), None
         async with asyncio.timeout(15):
-            return await bot_for(message)(message.reply(**text.as_kwargs(), reply_markup=markup), request_timeout=15)
+            return await bot_for(message)(message.reply(**text.as_kwargs(), reply_markup=markup, disable_notification=True), request_timeout=15)
 
     @classmethod
     async def callback(cls, query: CallbackQuery, callback_data: RatingCallback, chess_matches: ChessMatchService) -> None:
