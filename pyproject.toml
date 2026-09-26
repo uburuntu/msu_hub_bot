@@ -5,6 +5,7 @@ description = "The revived MSU Hub Telegram bot"
 requires-python = ">=3.14,<3.15"
 license = "GPL-3.0-only"
 dependencies = [
+    "teleforge[media]",
     "aiocache==0.12.3",
     "aiodns==4.0.4",
     "aiogram[proxy]==3.31.0",
@@ -51,6 +52,12 @@ msu-hub-bot = "msu_hub_bot.cli:main"
 [build-system]
 requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
+
+[tool.uv.workspace]
+members = ["packages/teleforge"]
+
+[tool.uv.sources]
+teleforge = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/msu_hub_bot"]
@@ -269,6 +276,11 @@ files = [
     "src/msu_hub_bot/telemetry.py",
     "src/msu_hub_bot/telegram/errors.py",
     "src/msu_hub_bot/providers/tyan.py",
+    "src/msu_hub_bot/features/__init__.py",
+    "src/msu_hub_bot/features/captions.py",
+    "src/msu_hub_bot/features/command.py",
+    "src/msu_hub_bot/features/integration.py",
+    "src/msu_hub_bot/features/reactions.py",
     "tools/check_types.py",
     "tools/migrate_storage.py",
 ]

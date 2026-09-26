@@ -2,18 +2,13 @@
 
 from typing import Literal
 
-from aiogram.enums import ChatMemberStatus, ChatType
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import InlineKeyboardButton, Message
 from aiogram.utils.formatting import Bold, Text, TextLink
-from cachetools import TTLCache
 from pydantic import field_validator
 
 from msu_hub_bot.commands.quiz_view import compact
-from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.reactions import ReactionRank, ReactionScoreboard
-from msu_hub_bot.telegram.callbacks import CallbackCommandBase
 
 View = Literal["getters", "givers", "posts", "pulse"]
 Days = Literal[1, 7, 30]
@@ -126,76 +121,24 @@ def render_scoreboard(board: ReactionScoreboard, message: Message, view: View, *
     return Text(*parts)
 
 
-class Reactions(CallbackCommandBase):
-    callback_data = ReactionCallback
-    permissions: TTLCache[tuple[int, int], bool] = TTLCache(maxsize=512, ttl=60)
-
-    @staticmethod
-    def keyboard(view: View, days: Days) -> InlineKeyboardMarkup:
-        views: list[tuple[View, str]] = [("getters", "🧲 Получают"), ("givers", "💛 Дарят"), ("posts", "🔥 Посты"), ("pulse", "📊 Пульс")]
-        buttons = [
-            InlineKeyboardButton(
-                text=("• " if selected == view else "") + label, callback_data=ReactionCallback(view=selected, days=days).pack()
-            )
-            for selected, label in views
-        ]
-        periods: tuple[Days, ...] = (1, 7, 30)
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                buttons[:2],
-                buttons[2:],
-                [
-                    InlineKeyboardButton(
-                        text=("• " if period == days else "") + PERIODS[period],
-                        callback_data=ReactionCallback(view=view, days=period).pack(),
-                    )
-                    for period in periods
-                ],
-                [InlineKeyboardButton(text="↻ Обновить", callback_data=ReactionCallback(view=view, days=days).pack())],
-            ]
+def keyboard(view: View, days: Days) -> list[list[InlineKeyboardButton]]:
+    views: list[tuple[View, str]] = [("getters", "🧲 Получают"), ("givers", "💛 Дарят"), ("posts", "🔥 Посты"), ("pulse", "📊 Пульс")]
+    buttons = [
+        InlineKeyboardButton(
+            text=("• " if selected == view else "") + label, callback_data=ReactionCallback(view=selected, days=days).pack()
         )
-
-    @classmethod
-    async def _administrator(cls, message: Message) -> bool | None:
-        assert message.bot is not None
-        key = (message.bot.id, message.chat.id)
-        if key in cls.permissions:
-            return cls.permissions[key]
-        try:
-            member = await message.bot.get_chat_member(message.chat.id, message.bot.id)
-        except TelegramAPIError:
-            return None
-        result = member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}
-        cls.permissions[key] = result
-        return result
-
-    @classmethod
-    async def process(cls, message: Message, db: BotRepository) -> Message:
-        if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
-            return await message.reply(
-                "Рейтинг живёт в групповом чате: напиши там /reactions. Для сбора реакций мне нужны права администратора."
+        for selected, label in views
+    ]
+    periods: tuple[Days, ...] = (1, 7, 30)
+    return [
+        buttons[:2],
+        buttons[2:],
+        [
+            InlineKeyboardButton(
+                text=("• " if period == days else "") + PERIODS[period],
+                callback_data=ReactionCallback(view=view, days=period).pack(),
             )
-        board = await db.reaction_scoreboard(message.chat.id)
-        content = render_scoreboard(board, message, "getters", administrator=await cls._administrator(message))
-        return await message.reply(**content.as_kwargs(), reply_markup=cls.keyboard("getters", 30), disable_web_page_preview=True)
-
-    @classmethod
-    async def process_cb(cls, query: CallbackQuery, callback_data: ReactionCallback, db: BotRepository) -> Message | bool:
-        message = query.message
-        if not isinstance(message, Message) or message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
-            return await query.answer("Открой /reactions в групповом чате.")
-        await query.answer()
-        lock = cls.lock(message)
-        if lock.locked():
-            return True
-        async with lock:
-            board = await db.reaction_scoreboard(message.chat.id, days=callback_data.days)
-            content = render_scoreboard(board, message, callback_data.view, administrator=await cls._administrator(message))
-            try:
-                return await message.edit_text(
-                    **content.as_kwargs(), reply_markup=cls.keyboard(callback_data.view, callback_data.days), disable_web_page_preview=True
-                )
-            except TelegramBadRequest as error:
-                if not error.message.removeprefix("Bad Request: ").casefold().startswith("message is not modified"):
-                    raise
-        return True
+            for period in periods
+        ],
+        [InlineKeyboardButton(text="↻ Обновить", callback_data=ReactionCallback(view=view, days=days).pack())],
+    ]

@@ -1,6 +1,21 @@
 """Fixed Telegram error reasons shared by recovery policy and diagnostics."""
 
 from aiogram.exceptions import TelegramAPIError
+from teleforge.cards import CardRefreshError
+from teleforge.delivery import DeliveryError
+
+
+def failure_cause(error: BaseException) -> BaseException:
+    """Classify known presentation wrappers without discarding their delivery facts."""
+    seen: set[int] = set()
+    while id(error) not in seen:
+        seen.add(id(error))
+        cause = error.cause if isinstance(error, DeliveryError) else error.__cause__ if isinstance(error, CardRefreshError) else None
+        if cause is None:
+            break
+        error = cause
+    return error
+
 
 _REASONS = {
     "chat not found": "chat_not_found",

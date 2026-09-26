@@ -43,7 +43,7 @@ class RecordingSession(BaseSession):
         elif name == "sendMediaGroup":
             result = [make_message(bot, message_id=index + 1) for index, _ in enumerate(method.media)]
         elif name.startswith(("send", "edit", "copy")):
-            result = make_message(bot)
+            result = make_message(bot, text=getattr(method, "text", None), entities=getattr(method, "entities", None))
         else:
             result = True
         return cast(TelegramType, result)

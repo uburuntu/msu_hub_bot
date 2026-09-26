@@ -9,12 +9,16 @@ from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.methods import AnswerCallbackQuery, EditMessageText, GetChatMember, SendMessage
-from aiogram.types import CallbackQuery, InaccessibleMessage
+from aiogram.types import CallbackQuery, InaccessibleMessage, Message, Update, User
 from aiogram.utils.formatting import Text
-from cachetools import LRUCache, TTLCache
+from cachetools import TTLCache
 from pydantic import ValidationError
+from teleforge.app import App
+from teleforge.cards import CardRefreshError
 
-from msu_hub_bot.commands.reactions import PERIODS, TITLES, ReactionCallback, Reactions, render_scoreboard
+from msu_hub_bot.commands.reactions import PERIODS, TITLES, ReactionCallback, keyboard, render_scoreboard
+from msu_hub_bot.features.reactions import ReactionsFeature
+from msu_hub_bot.storage.base import BotRepository
 from msu_hub_bot.storage.reactions import ReactionScoreboard
 from telegram_helpers import RecordingSession, make_message
 
@@ -147,9 +151,9 @@ def test_basic_group_posts_have_no_invented_private_message_links():
 @pytest.mark.parametrize("view", TITLES)
 @pytest.mark.parametrize("days", [1, 7, 30])
 def test_every_keyboard_button_roundtrips_through_the_actual_wire_parser(view, days):
-    keyboard = Reactions.keyboard(view, days)
-    assert [len(row) for row in keyboard.inline_keyboard] == [2, 2, 3, 1]
-    buttons = [button for row in keyboard.inline_keyboard for button in row]
+    rows = keyboard(view, days)
+    assert [len(row) for row in rows] == [2, 2, 3, 1]
+    buttons = [button for row in rows for button in row]
     parsed = []
     for button in buttons:
         assert 0 < len(button.callback_data.encode()) <= 64
@@ -192,28 +196,53 @@ class ReactionSession(RecordingSession):
         return await super().make_request(bot, method, timeout)
 
 
+def reaction_repository():
+    repository = SimpleNamespace(**{name: AsyncMock() for name in vars(BotRepository) if not name.startswith("_")})
+    repository.reaction_scoreboard.side_effect = lambda chat_id, *, days=30: scoreboard(days=days)
+    return repository
+
+
 @pytest.fixture
-async def rig(monkeypatch):
+async def rig():
     session = ReactionSession()
     bot = Bot("123456789:" + "a" * 35, session=session)
     clock = [0.0]
-    monkeypatch.setattr(Reactions, "permissions", TTLCache(maxsize=512, ttl=60, timer=lambda: clock[0]))
-    monkeypatch.setattr(Reactions, "locks", LRUCache(maxsize=512))
-    db = SimpleNamespace(reaction_scoreboard=AsyncMock(return_value=scoreboard()))
-    message = make_message(bot, message_id=100, message_thread_id=17, is_topic_message=True)
-    yield SimpleNamespace(session=session, bot=bot, db=db, message=message, clock=clock)
-    await bot.session.close()
+    feature = ReactionsFeature()
+    feature.permissions = TTLCache(maxsize=512, ttl=60, timer=lambda: clock[0])
+    db = reaction_repository()
+    app = App(feature)
+    dispatcher = app.create_dispatcher()
+    dispatcher["db"] = db
+    message = make_message(bot, message_id=100, message_thread_id=17, is_topic_message=True, text="/reactions")
+    try:
+        yield SimpleNamespace(
+            session=session, bot=bot, db=db, message=message, clock=clock, feature=feature, app=app, dispatcher=dispatcher
+        )
+    finally:
+        await app.aclose()
+        await bot.session.close()
+
+
+async def dispatch_message(rig, message=None):
+    return await rig.dispatcher.feed_update(rig.bot, Update(update_id=1, message=message or rig.message))
+
+
+async def dispatch_callback(rig, query=None):
+    return await rig.dispatcher.feed_update(rig.bot, Update(update_id=2, callback_query=query or callback(rig)[0]))
 
 
 def callback(rig, message=None, *, view="pulse", days=7):
     data = ReactionCallback(view=view, days=days)
+    message = message or rig.message
+    if isinstance(message, Message):
+        message = message.model_copy(update={"from_user": User(id=rig.bot.id, is_bot=True, first_name="Bot")})
     query = CallbackQuery.model_validate(
         dict(
             id="synthetic",
             chat_instance="synthetic",
             from_user=dict(id=77, is_bot=False, first_name="Clicker"),
             data=data.pack(),
-            message=message or rig.message,
+            message=message,
         ),
         context={"bot": rig.bot},
     )
@@ -221,20 +250,20 @@ def callback(rig, message=None, *, view="pulse", days=7):
 
 
 async def test_command_queries_only_current_chat_and_replies_with_default_period(rig):
-    await Reactions.process(rig.message, rig.db)
-    rig.db.reaction_scoreboard.assert_awaited_once_with(CHAT_ID)
+    await dispatch_message(rig)
+    rig.db.reaction_scoreboard.assert_awaited_once_with(CHAT_ID, days=30)
     sent = next(method for method in rig.session.methods if isinstance(method, SendMessage))
     assert sent.chat_id == CHAT_ID and sent.message_thread_id == 17
     assert sent.reply_parameters.message_id == rig.message.message_id
     assert "30 дней" in sent.text and "Магниты реакций" in sent.text
     assert sent.parse_mode is None and sent.entities
-    assert sent.disable_web_page_preview is True
+    assert sent.link_preview_options.is_disabled is True
 
 
 @pytest.mark.parametrize("chat_type", ["private", "channel"])
 async def test_command_outside_groups_explains_scope_without_reading_database(rig, chat_type):
-    message = make_message(rig.bot, chat=dict(id=123, type=chat_type))
-    await Reactions.process(message, rig.db)
+    message = make_message(rig.bot, chat=dict(id=123, type=chat_type), text="/reactions")
+    await dispatch_message(rig, message)
     rig.db.reaction_scoreboard.assert_not_awaited()
     assert [type(method) for method in rig.session.methods] == [SendMessage]
     assert "групповом чате" in rig.session.methods[0].text
@@ -249,6 +278,7 @@ async def test_callback_without_accessible_group_is_acknowledged_without_databas
                 chat_instance="synthetic",
                 from_user=dict(id=77, is_bot=False, first_name="Clicker"),
                 inline_message_id="synthetic-inline",
+                data="react:getters:30",
             ),
             context={"bot": rig.bot},
         )
@@ -260,10 +290,12 @@ async def test_callback_without_accessible_group_is_acknowledged_without_databas
             else make_message(rig.bot, chat=dict(id=123, type=kind))
         )
         query, data = callback(rig, message)
-    await Reactions.process_cb(query, data, rig.db)
+    await dispatch_callback(rig, query)
     rig.db.reaction_scoreboard.assert_not_awaited()
     assert [type(method) for method in rig.session.methods] == [AnswerCallbackQuery]
-    assert "групповом чате" in rig.session.methods[0].text
+    assert rig.session.methods[0].text
+    if kind not in {"inline", "inaccessible"}:
+        assert "групповом чате" in rig.session.methods[0].text
 
 
 async def test_callback_acknowledges_before_database_and_edits_only_its_current_chat_message(rig):
@@ -273,9 +305,9 @@ async def test_callback_acknowledges_before_database_and_edits_only_its_current_
         return scoreboard(days=days)
 
     rig.db.reaction_scoreboard.side_effect = read
-    other = make_message(rig.bot, chat=dict(id=-1009876543210, type="supergroup"), message_id=900)
+    other = make_message(rig.bot, chat=dict(id=-1009876543210, type="supergroup"), message_id=900, text="Old scoreboard")
     query, data = callback(rig, other)
-    await Reactions.process_cb(query, data, rig.db)
+    await dispatch_callback(rig, query)
     edited = next(method for method in rig.session.methods if isinstance(method, EditMessageText))
     assert edited.chat_id == other.chat.id and edited.message_id == 900
     assert edited.parse_mode is None and edited.entities
@@ -293,16 +325,15 @@ async def test_overlapping_callbacks_acknowledge_both_and_perform_only_one_read_
 
     rig.db.reaction_scoreboard.side_effect = read
     query, data = callback(rig)
-    first = asyncio.create_task(Reactions.process_cb(query, data, rig.db))
+    first = asyncio.create_task(dispatch_callback(rig, query))
     await entered.wait()
     second_query, second_data = callback(rig, view="posts", days=30)
-    assert await Reactions.process_cb(second_query, second_data, rig.db) is True
+    await dispatch_callback(rig, second_query)
     finish.set()
     await first
     rig.db.reaction_scoreboard.assert_awaited_once()
     assert sum(isinstance(method, AnswerCallbackQuery) for method in rig.session.methods) == 2
     assert sum(isinstance(method, EditMessageText) for method in rig.session.methods) == 1
-    assert not Reactions.lock(rig.message).locked()
 
 
 @pytest.mark.parametrize(
@@ -310,24 +341,32 @@ async def test_overlapping_callbacks_acknowledge_both_and_perform_only_one_read_
 )
 async def test_noop_refresh_is_successful_after_callback_acknowledgement(rig, error):
     rig.session.edit_error = error
-    assert await Reactions.process_cb(*callback(rig), rig.db) is True
+    await dispatch_callback(rig)
     assert isinstance(rig.session.methods[0], AnswerCallbackQuery)
-    assert not Reactions.lock(rig.message).locked()
 
 
 async def test_real_edit_failure_propagates_and_releases_message_lock(rig):
     rig.session.edit_error = "Bad Request: chat not found"
-    with pytest.raises(TelegramBadRequest, match="chat not found"):
-        await Reactions.process_cb(*callback(rig), rig.db)
-    assert not Reactions.lock(rig.message).locked()
+    with pytest.raises(CardRefreshError) as caught:
+        await dispatch_callback(rig)
+    outcome = caught.value.teleforge_outcome
+    assert outcome.handler_returned and outcome.acknowledgement.confirmed
+    assert outcome.presentations[0].attempted and not outcome.presentations[0].uncertain
+    rig.session.edit_error = None
+    await dispatch_callback(rig)
 
 
 async def test_database_failure_is_acknowledged_and_releases_message_lock(rig):
     rig.db.reaction_scoreboard.side_effect = RuntimeError("Synthetic database outage")
-    with pytest.raises(RuntimeError, match="database outage"):
-        await Reactions.process_cb(*callback(rig), rig.db)
+    with pytest.raises(CardRefreshError) as caught:
+        await dispatch_callback(rig)
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert caught.value.teleforge_outcome.acknowledgement.confirmed
+    assert not caught.value.teleforge_outcome.presentations
     assert [type(method) for method in rig.session.methods] == [AnswerCallbackQuery]
-    assert not Reactions.lock(rig.message).locked()
+    rig.db.reaction_scoreboard.side_effect = None
+    rig.db.reaction_scoreboard.return_value = scoreboard()
+    await dispatch_callback(rig)
 
 
 @pytest.mark.parametrize(
@@ -341,35 +380,35 @@ async def test_database_failure_is_acknowledged_and_releases_message_lock(rig):
 )
 async def test_administrator_status_cache_is_short_lived_and_scoped_to_chat_and_bot(rig, status, expected):
     rig.session.status = status
-    assert await Reactions._administrator(rig.message) is expected
-    assert await Reactions._administrator(rig.message) is expected
+    assert await rig.feature._administrator(rig.message) is expected
+    assert await rig.feature._administrator(rig.message) is expected
     assert len(rig.session.methods) == 1
     assert (rig.session.methods[0].chat_id, rig.session.methods[0].user_id) == (CHAT_ID, rig.bot.id)
     other_chat = make_message(rig.bot, chat=dict(id=-1009876543210, type="supergroup"))
-    await Reactions._administrator(other_chat)
+    await rig.feature._administrator(other_chat)
     assert len(rig.session.methods) == 2
     other_bot = Bot("987654321:" + "b" * 35, session=rig.session)
-    await Reactions._administrator(make_message(other_bot))
+    await rig.feature._administrator(make_message(other_bot))
     assert len(rig.session.methods) == 3
     rig.clock[0] = 61
     rig.session.status = ChatMemberStatus.MEMBER if expected else ChatMemberStatus.ADMINISTRATOR
-    assert await Reactions._administrator(rig.message) is (not expected)
+    assert await rig.feature._administrator(rig.message) is (not expected)
     assert len(rig.session.methods) == 4
 
 
 async def test_permission_api_failure_is_not_cached_or_reported_as_definite_missing_rights(rig):
     rig.session.admin_error = True
-    await Reactions.process(rig.message, rig.db)
+    await dispatch_message(rig)
     sent = next(method for method in rig.session.methods if isinstance(method, SendMessage))
     assert "Не удалось проверить права" in sent.text
-    assert len(Reactions.permissions) == 0
+    assert len(rig.feature.permissions) == 0
     rig.session.admin_error = False
-    assert await Reactions._administrator(rig.message) is True
+    assert await rig.feature._administrator(rig.message) is True
 
 
 async def test_missing_admin_permissions_preserves_saved_scoreboard_with_actionable_note(rig):
     rig.session.status = ChatMemberStatus.MEMBER
-    await Reactions.process(rig.message, rig.db)
+    await dispatch_message(rig)
     text = next(method for method in rig.session.methods if isinstance(method, SendMessage)).text
     assert "Магниты реакций" in text
     assert "нужны права администратора" in text and "сохранённые данные" in text

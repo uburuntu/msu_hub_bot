@@ -15,11 +15,7 @@ def lobster(monkeypatch):
     async def no_chat_action(*args):
         yield
 
-    async def downloaded(executor, media, func, *args, **kwargs):
-        return await executor.run(func, media if isinstance(media, io.BytesIO) else io.BytesIO(b"video"), *args)
-
     monkeypatch.setattr(lobster_module, "ChatActioner", no_chat_action)
-    monkeypatch.setattr(lobster_module, "run_downloaded", downloaded)
     return lobster_module
 
 

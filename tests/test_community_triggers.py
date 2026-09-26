@@ -9,7 +9,6 @@ from aiogram import BaseMiddleware, Dispatcher
 from aiogram.methods import DeleteMessage, DeleteMessages, GetChatMember, SendMessage, SendPhoto
 from aiogram.types import Update
 
-from msu_hub_bot.commands.reactions import Reactions
 from msu_hub_bot.feedback import FeedbackService
 from msu_hub_bot.games import definitions
 from msu_hub_bot.games.chess_play import service as chess_service
@@ -31,7 +30,7 @@ from msu_hub_bot.web.links import Destination, WebAppLinks
 from quiz_helpers import FeatureFixture, GameSession, PHOTO, PNG, PUZZLE
 from telegram_helpers import make_message
 from test_dispatch_contract import router
-from test_reactions_command import scoreboard
+from test_reactions_command import reaction_repository
 
 
 class CommunitySession(GameSession):
@@ -119,10 +118,9 @@ async def test_community_commands_preserve_invocation_and_replied_to_message(mon
         reminders=reminders,
         feedback=feedback,
         web_apps=links,
-        db=SimpleNamespace(reaction_scoreboard=AsyncMock(return_value=scoreboard()), recent_feedback_messages=AsyncMock(return_value=[])),
+        db=reaction_repository(),
         deletions=MessageDeletions(store, bot, worker),
     )
-    Reactions.permissions.clear()
     try:
         await asyncio.create_task(dispatcher.feed_update(bot, Update(update_id=1, message=message)))
         assert selected.key == handler
@@ -141,4 +139,3 @@ async def test_community_commands_preserve_invocation_and_replied_to_message(mon
     finally:
         await fsm.close()
         await bot.session.close()
-        Reactions.permissions.clear()

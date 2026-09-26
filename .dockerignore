@@ -1,6 +1,13 @@
 **
 !pyproject.toml
 !uv.lock
+!packages/
+!packages/teleforge/
+!packages/teleforge/pyproject.toml
+!packages/teleforge/README.md
+!packages/teleforge/LICENSE
+!packages/teleforge/src/
+!packages/teleforge/src/**
 !src/
 !src/msu_hub_bot/
 !src/msu_hub_bot/**

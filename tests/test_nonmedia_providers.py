@@ -4,7 +4,7 @@ import asyncio
 import importlib
 import io
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiogram import Bot
@@ -143,6 +143,7 @@ async def test_weather_map_snapshots_upload_and_keeps_topic(monkeypatch):
 
 async def test_geoguess_timeout_reaches_transport():
     from msu_hub_bot.games.quiz import QuizService, SEND_TIMEOUT
+    from msu_hub_bot.storage.features import FeatureStore, FeatureWorker
 
     class Session(RecordingSession):
         async def make_request(self, bot, method, timeout=None):
@@ -151,8 +152,7 @@ async def test_geoguess_timeout_reaches_transport():
 
     session = Session()
     bot = Bot("123456789:" + "a" * 35, session=session)
-    quiz = object.__new__(QuizService)
-    quiz.bot = bot
+    quiz = QuizService(bot, Mock(spec=FeatureStore), Mock(spec=FeatureWorker))
     await quiz._send(make_message(bot).reply("Synthetic"))
     assert session.timeout == SEND_TIMEOUT
     assert "request_timeout" not in session.methods[-1].model_extra

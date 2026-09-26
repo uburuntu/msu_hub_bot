@@ -53,12 +53,18 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync ruff format --check src tests tools
+      - run: uv run --no-sync ruff format --check src tests tools packages/teleforge examples
       - run: uv run --no-sync python tools/check_types.py
         env:
           TYPECHECK_BASE_REF: ${{ github.event.pull_request.base.sha }}
       - run: uv run --no-sync mypy
+      - run: uv run --no-sync mypy --config-file packages/teleforge/pyproject.toml packages/teleforge/src/teleforge packages/teleforge/examples examples
       - run: uv run --no-sync pytest -q
+      - run: uv run --no-sync pytest -q packages/teleforge/tests
+      - name: Check independent TeleForge wheel
+        run: |
+          uv build --package teleforge --wheel --out-dir .local/dist
+          uv run --isolated --no-project --with .local/dist/teleforge-*.whl python -c 'import importlib.util, teleforge; assert importlib.util.find_spec("msu_hub_bot") is None; assert importlib.util.find_spec("PIL") is None'
 
   storage:
     name: PostgreSQL storage contracts

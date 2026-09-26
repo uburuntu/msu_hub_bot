@@ -465,6 +465,30 @@ async def test_manual_finish_uses_its_own_saved_moscow_day(rig):
     assert (await current(rig, record)).value.score_day.isoformat() == "2030-01-02"
 
 
+@pytest.mark.parametrize("invalid", ["empty-photo", "long-caption"])
+async def test_local_output_rejection_releases_quiz_without_attempting_publication(rig, monkeypatch, invalid):
+    from aiogram.types import BufferedInputFile
+
+    from msu_hub_bot.commands.quiz_view import View
+
+    if invalid == "empty-photo":
+
+        async def empty_photo(self, question, *, solution=False):
+            return BufferedInputFile(b"", "empty.png")
+
+        monkeypatch.setattr(definitions.Definition, "photo", empty_photo)
+    else:
+        monkeypatch.setattr(definitions.Definition, "render", lambda *args, **kwargs: View("x" * 1025, [], 0, 1))
+    await rig.quiz.start(rig.feature, rig.message)
+    token = rig.quiz._token(rig.bot.id, rig.message.chat.id, rig.message.message_id)
+    record = await rig.quiz.round(rig.feature, rig.message.chat.id, token)
+    chat = await rig.quiz.collections[rig.feature].chats.get(rig.quiz._scope(rig.message.chat.id), "state")
+    assert record.value.phase == "abandoned"
+    assert chat.value.active is None
+    assert not any(isinstance(method, SendPhoto) for method in rig.session.methods)
+    assert "Не удалось подтвердить" not in rig.session.methods[-1].text
+
+
 async def test_photo_failure_releases_slot_and_preserves_recent_history(rig):
     provider = definitions.random_puzzle if rig.feature == "chess" else definitions.random_photo
     provider.side_effect = ExternalServiceError("synthetic provider failure")

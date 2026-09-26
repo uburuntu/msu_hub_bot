@@ -102,6 +102,13 @@ uv run pytest -q
 cp .env.example .env
 ```
 
+The [TeleForge package](packages/teleforge/) provides feature classes, typed inputs,
+managed cards and native aiogram composition. Its [authoring guide](packages/teleforge/docs/index.md)
+and [bot features](src/msu_hub_bot/features/) show reusable inputs and presentation;
+`routing.py` places their declared methods among native routes without duplicating filters.
+Run its additional checks with `uv run pytest -q packages/teleforge/tests` and
+`uv run mypy --config-file packages/teleforge/pyproject.toml packages/teleforge/src/teleforge packages/teleforge/examples examples`.
+
 Fill in `HUB_BOT_TOKEN`, then configure the Supabase API URL,
 publishable key and dedicated Auth account
 described in [database configuration](docs/deployment.md#database-configuration), then run:

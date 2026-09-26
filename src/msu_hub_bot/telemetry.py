@@ -36,7 +36,7 @@ from opentelemetry.util.types import Attributes
 
 from msu_hub_bot.providers.link_diagnostics import LinkDiagnostic, LinkReason, LinkStage
 from msu_hub_bot.providers.link_source import source_metadata
-from msu_hub_bot.telegram.errors import telegram_error_reason
+from msu_hub_bot.telegram.errors import failure_cause, telegram_error_reason
 
 logger = logging.getLogger(__name__)
 EU_ENDPOINT = "https://logfire-eu.pydantic.dev"
@@ -318,6 +318,7 @@ def safe_failure(error: BaseException) -> dict[str, str | int]:
     from msu_hub_bot.telegram.files import DownloadTooLarge
     from msu_hub_bot.storage.errors import RepositoryFailure, RepositoryUnavailable
 
+    original, error = error, failure_cause(error)
     classes: tuple[tuple[type[BaseException], str, int | None], ...] = (
         (ExecutorBusy, "worker_busy", None),
         (DownloadTooLarge, "media_too_large", None),
@@ -365,7 +366,7 @@ def safe_failure(error: BaseException) -> dict[str, str | int]:
         attributes["telegram.retry_after"] = min(86400, max(0, error.retry_after))
     if isinstance(error, aiohttp.ClientResponseError) and type(error.status) is int and 100 <= error.status <= 599:
         attributes["http.response.status_code"] = error.status
-    attributes.update(_failure_location(error))
+    attributes.update(_failure_location(original))
     return attributes
 
 
@@ -549,6 +550,7 @@ def failure_outcome(error: BaseException) -> Outcome:
     from msu_hub_bot.telegram.files import DownloadTooLarge
     from msu_hub_bot.storage.errors import RepositoryFailure, RepositoryUnavailable
 
+    error = failure_cause(error)
     if isinstance(error, SkipHandler):
         return Outcome.IGNORED
     if isinstance(error, (CancelHandler, ExecutorBusy, DownloadTooLarge, MediaDimensionsError, StickerSizeError, ReverseSizeError)):

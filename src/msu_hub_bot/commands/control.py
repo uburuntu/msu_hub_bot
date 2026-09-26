@@ -16,6 +16,7 @@ from msu_hub_bot.execution.executor import ExecutorBusy
 from msu_hub_bot.media.limits import MediaDimensionsError
 from msu_hub_bot.providers.exceptions import ExternalServiceError
 from msu_hub_bot.telegram.files import DownloadTooLarge
+from msu_hub_bot.telegram.errors import failure_cause
 from msu_hub_bot.telegram.state import UpdateStateContext, release_state_isolation
 from msu_hub_bot.commands.debug import process_json
 from msu_hub_bot.texts import cmd_start
@@ -36,7 +37,11 @@ async def process_start(message: Message) -> Message:
 async def process_cancel(message: Message, state: FSMContext, state_context: UpdateStateContext) -> Message:
     await state.clear()
     release_state_isolation(state_context)
-    return await message.reply("👌🏻", reply_markup=ReplyKeyboardRemove())
+    return await message.reply(
+        "👌🏻",
+        reply_markup=ReplyKeyboardRemove(),
+        direct_messages_topic_id=message.direct_messages_topic.topic_id if message.direct_messages_topic else None,
+    )
 
 
 async def process_echo(message: Message) -> Message:
@@ -85,10 +90,11 @@ async def process_error(event: ErrorEvent, bot: Bot) -> bool:
     error_str = redact(repr(error))
     trace = redact("".join(traceback.format_exception(type(error), error, error.__traceback__)))
     logger.error("Telegram update failed: %s\n%s", error_str, trace)
-    if isinstance(error, TelegramForbiddenError):
+    cause = failure_cause(error)
+    if isinstance(cause, TelegramForbiddenError):
         return True
-    if isinstance(error, TelegramBadRequest) and any(
-        fragment in error.message.lower() for fragment in ("message to edit not found", "message was deleted", "replied message not found")
+    if isinstance(cause, TelegramBadRequest) and any(
+        fragment in cause.message.lower() for fragment in ("message to edit not found", "message was deleted", "replied message not found")
     ):
         return True
     if error_str not in errors and settings.error_chat_id:

@@ -19,6 +19,7 @@ from aiogram.types import (
     Update,
     User,
 )
+from teleforge import Invocation
 
 from msu_hub_bot.telemetry import Boundary, Outcome, Telemetry
 from msu_hub_bot.feedback.context import DiagnosticBuffer, DiagnosticOutcome
@@ -96,6 +97,9 @@ class HandlerTelemetryMiddleware(BaseMiddleware):
                 outcome = "ignored" if result is UNHANDLED else "completed"
                 if result is UNHANDLED:
                     observation.set_outcome(Outcome.IGNORED)
+                elif isinstance(invocation := data.get("teleforge_invocation"), Invocation) and invocation.outcome.input_issue:
+                    outcome = "failed"
+                    observation.set_outcome(Outcome.REJECTED)
                 return result
             except asyncio.CancelledError:
                 outcome = "cancelled"

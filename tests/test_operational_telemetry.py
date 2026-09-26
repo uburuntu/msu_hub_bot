@@ -6,12 +6,42 @@ from types import SimpleNamespace
 
 import aiohttp
 import pytest
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods import SendPhoto, UnpinChatMessage
+from teleforge.cards import CardRefreshError
+from teleforge.delivery import DeliveryError, DeliveryProgress
+from teleforge.outcome import InvocationOutcome
 
 from msu_hub_bot.telegram.errors import telegram_error_reason
 from msu_hub_bot.telemetry import Boundary, Outcome, Telemetry, failure_outcome, record_handled_failure, safe_failure
 from telemetry_helpers import Capture, config
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("timeout", [False, True])
+def test_presentation_wrappers_preserve_typed_failure_and_delivery_facts(nested, timeout):
+    cause = (
+        TimeoutError("private")
+        if timeout
+        else TelegramForbiddenError(method=SendPhoto(chat_id=-123, photo="private-photo"), message="Forbidden: bot was blocked by the user")
+    )
+    delivery = DeliveryError(DeliveryProgress(attempted_part=0, total_parts=1, phase="failed", uncertain=timeout), cause)
+    error = delivery
+    if nested:
+        error = CardRefreshError("board", outcome=InvocationOutcome(handler_returned=True))
+        error.__cause__ = delivery
+    assert failure_outcome(error) is (Outcome.TIMEOUT if timeout else Outcome.REJECTED)
+    assert safe_failure(error)["error.reason"] == ("timeout" if timeout else "bot_blocked")
+    assert "private" not in str(safe_failure(error))
+    assert delivery.cause is cause and delivery.uncertain is timeout
+    if nested:
+        assert error.teleforge_outcome.handler_returned
+
+
+def test_unrelated_exception_chains_do_not_change_failure_classification():
+    error = RuntimeError("application defect")
+    error.__cause__ = TimeoutError()
+    assert failure_outcome(error) is Outcome.UNEXPECTED
 
 
 def values(item):

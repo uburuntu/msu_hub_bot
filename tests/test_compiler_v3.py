@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
+from teleforge.testing import RecordingBot
 
 from msu_hub_bot.telegram.state import IsolationScope, UpdateStateContext
 from msu_hub_bot.commands.prog import (
@@ -65,7 +66,7 @@ async def test_actual_dispatch_changes_only_the_approved_stdin_precedence(monkey
 
 @pytest.mark.asyncio
 async def test_consumed_stdin_releases_isolation_and_preserves_a_later_draft():
-    bot = make_bot()
+    bot = RecordingBot(bot_id=123456789)
     message = make_message(bot, text="stdin", is_topic_message=True, message_thread_id=9)
     storage = MemoryStorage()
     state = FSMContext(storage, StorageKey(bot_id=bot.id, chat_id=message.chat.id, user_id=42, thread_id=9))
@@ -100,7 +101,8 @@ async def test_consumed_stdin_releases_isolation_and_preserves_a_later_draft():
     await task
     assert await state.get_state() == "StickerStates:sticker_set_name"
     assert await state.get_data() == {"title": "new draft"}
-    assert bot.session.methods[-1].text.endswith("<pre>result</pre>")
+    assert bot.requests[-1].text.endswith("result")
+    assert bot.requests[-1].entities[-1].type == "pre"
     await storage.close()
 
 

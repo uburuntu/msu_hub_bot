@@ -11,7 +11,9 @@ COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /opt/msu_hub_bot
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PYTHON_DOWNLOADS=never
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project
+COPY packages/teleforge/pyproject.toml packages/teleforge/pyproject.toml
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-workspace
+COPY packages/teleforge/ packages/teleforge/
 COPY src/ src/
 COPY --from=web /web/dist/ src/msu_hub_bot/web/static/
 COPY LICENSE THIRD_PARTY_NOTICES.md ./

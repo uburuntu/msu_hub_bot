@@ -6,7 +6,7 @@
 - Application code belongs in `src/msu_hub_bot/`; deployment tooling in `tools/deployment/`, database history in `dbschema/`, and maintained operating contracts in `docs/`.
 - Keep feature decisions traceable. User choices override inventory recommendations; a reviewed decision does not itself mean implementation, validation or deployment is complete.
 - Keep simple things simple: prefer a small in-memory check to timers, persistence or extra services when the behavior does not need them.
-- Build reusable, configurable pieces around the bot's behavior. Preserve `MetaCommand`/`MetaInfo`; use routers, middleware and FSM where their responsibilities fit, with explicit policies instead of accidental framework defaults.
+- Build reusable, configurable pieces around the bot's behavior. TeleForge lives in `packages/teleforge/`; its interfaces may replace legacy parsing/context helpers. Preserve user behavior and stored data, not internal abstractions.
 - Respect the requested scope: planning does not authorize implementation, data migration, deployment or publication.
 - Trace aliases, callbacks, FSM steps, automatic handlers and shared callers before removing a feature. Unreviewed dependent commands require review; preserve explicitly retained novelty features.
 - Use `uv` and Ruff. Check with `uv run --no-sync ruff check .`, `uv run --no-sync ruff format --check src tests tools`, `uv run --no-sync python tools/check_types.py`, `uv run --no-sync mypy` and `uv run --no-sync pytest -q`; run checks appropriate to the change. Tests use synthetic inputs and block network.

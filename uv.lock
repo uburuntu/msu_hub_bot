@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = "==3.14.*"
 
+[manifest]
+members = [
+    "msu-hub-bot",
+    "teleforge",
+]
+
 [[package]]
 name = "aiocache"
 version = "0.12.3"
@@ -894,6 +900,7 @@ dependencies = [
     { name = "requests" },
     { name = "resvg-py" },
     { name = "tabulate" },
+    { name = "teleforge", extra = ["media"] },
     { name = "throttler" },
     { name = "transliterate" },
     { name = "ujson" },
@@ -949,6 +956,7 @@ requires-dist = [
     { name = "requests", specifier = "==2.34.2" },
     { name = "resvg-py", specifier = "==0.5.0" },
     { name = "tabulate", specifier = "==0.10.0" },
+    { name = "teleforge", extras = ["media"], editable = "packages/teleforge" },
     { name = "throttler", specifier = "==1.2.3" },
     { name = "transliterate", specifier = "==1.10.2" },
     { name = "ujson", specifier = "==6.0.0" },
@@ -1692,6 +1700,28 @@ sdist = { url = "https://files.pythonhosted.org/packages/46/58/8c37dea7bbf769b20
 wheels = [
     { url = "https://files.pythonhosted.org/packages/99/55/db07de81b5c630da5cbf5c7df646580ca26dfaefa593667fc6f2fe016d2e/tabulate-0.10.0-py3-none-any.whl", hash = "sha256:f0b0622e567335c8fabaaa659f1b33bcb6ddfe2e496071b743aa113f8774f2d3", size = 39814, upload-time = "2026-03-04T18:55:31.284Z" },
 ]
+
+[[package]]
+name = "teleforge"
+version = "0.1.0"
+source = { editable = "packages/teleforge" }
+dependencies = [
+    { name = "aiogram" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+media = [
+    { name = "pillow" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiogram", specifier = ">=3.31,<4" },
+    { name = "pillow", marker = "extra == 'media'", specifier = ">=12,<13" },
+    { name = "pydantic", specifier = ">=2.13,<3" },
+]
+provides-extras = ["media"]
 
 [[package]]
 name = "throttler"

@@ -1,11 +1,15 @@
 """Rich replies remain usable without making embedded content dispatch commands."""
 
+import io
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.types import RichBlockBlockQuotation, RichBlockParagraph, RichMessage, UserProfilePhotos
+from PIL import Image
+from aiogram.types import RichBlockBlockQuotation, RichBlockParagraph, RichMessage, Update, UserProfilePhotos
+from teleforge import App
 
-from msu_hub_bot.commands.lobster import _caption_media
+from msu_hub_bot.execution.executor import TPExecutor
+from msu_hub_bot.features import captions
 from msu_hub_bot.telegram.extraction import Extractor, SimpleExtractor
 from msu_hub_bot.telegram.filters import MetaCommand, MetaInfo, SlashCommand
 from msu_hub_bot.telegram.rich_input import rich_media, rich_text
@@ -14,6 +18,23 @@ from telegram_helpers import make_bot, make_message
 PHOTO = {"file_id": "photo", "file_unique_id": "photo-unique", "width": 100, "height": 80}
 VIDEO = {"file_id": "video", "file_unique_id": "video-unique", "width": 100, "height": 80, "duration": 3}
 DOCUMENT = {"file_id": "document", "file_unique_id": "document-unique", "mime_type": "text/plain"}
+
+
+@pytest.fixture
+async def caption_app(monkeypatch):
+    async def render(executor, media, renderer, text, style, **kwargs):
+        result = io.BytesIO(b"video") if renderer is captions.caption_video else Image.new("RGB", (20, 20))
+        return result, False
+
+    downloaded = AsyncMock(side_effect=render)
+    monkeypatch.setattr(captions, "run_downloaded", downloaded)
+    executor = TPExecutor(1)
+    app = App(data={"cpu_executor": executor}).include(captions.Captions())
+    try:
+        yield app, downloaded
+    finally:
+        await app.aclose()
+        executor.shutdown(wait=False)
 
 
 def test_visible_text_preserves_inline_lists_and_excludes_hidden_attributes():
@@ -111,7 +132,7 @@ def test_media_walk_visits_nested_containers_in_display_order():
 
 @pytest.mark.parametrize("command", ["meme", "lobster", "demotivator"])
 @pytest.mark.parametrize("kind", ["photo", "video", "animation"])
-async def test_caption_commands_choose_rich_reply_media_before_bot_profile(monkeypatch, command, kind):
+async def test_caption_commands_choose_rich_reply_media_before_bot_profile(monkeypatch, caption_app, command, kind):
     bot = make_bot()
     profile = AsyncMock(side_effect=AssertionError("Selected media must not request the bot avatar"))
     monkeypatch.setattr(bot, "get_user_profile_photos", profile)
@@ -123,24 +144,24 @@ async def test_caption_commands_choose_rich_reply_media_before_bot_profile(monke
         rich_message={"blocks": [{"type": "collage", "blocks": [{"type": kind, kind: media}]}]},
     )
     message = make_message(bot, text=f"/{command} Some text", reply_to_message=reply)
-    parsed = await MetaCommand(command)(message, bot)
+    app, downloaded = caption_app
+    await app.feed_update(bot, Update(update_id=1, message=message))
 
-    target, selected, is_video = await _caption_media(parsed["meta"])
-
-    assert target == reply
-    assert selected.file_id == kind
-    assert is_video is (kind != "photo")
+    assert downloaded.call_args.args[1].file_id == kind
+    assert downloaded.call_args.args[2] is (captions.caption_image if kind == "photo" else captions.caption_video)
+    assert bot.session.methods[-1].reply_parameters.message_id == reply.message_id
     profile.assert_not_awaited()
 
 
-async def test_explicit_origin_media_and_ordinary_photo_keep_precedence():
+async def test_explicit_origin_media_and_ordinary_photo_keep_precedence(caption_app):
     bot = make_bot()
     reply = make_message(bot, rich_message={"blocks": [{"type": "video", "video": VIDEO}]})
     message = make_message(bot, photo=[PHOTO], caption="/meme Label", reply_to_message=reply)
-    target, selected, is_video = await _caption_media(MetaInfo(message, text="Label"))
-    assert target == message
-    assert selected.file_id == "photo"
-    assert is_video is False
+    app, downloaded = caption_app
+    await app.feed_update(bot, Update(update_id=1, message=message))
+    assert downloaded.call_args.args[1].file_id == "photo"
+    assert downloaded.call_args.args[2] is captions.caption_image
+    assert bot.session.methods[-1].reply_parameters.message_id == message.message_id
 
     message = make_message(photo=[PHOTO], rich_message={"blocks": [{"type": "photo", "photo": [{**PHOTO, "file_id": "rich-photo"}]}]})
     assert (await SimpleExtractor.image(message)).file_id == "photo"

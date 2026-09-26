@@ -18,6 +18,7 @@ from aiogram.enums import ParseMode, UpdateType
 from aiogram.filters import Command
 from aiogram.types import MenuButtonWebApp, WebAppInfo
 from aiogram.utils.token import extract_bot_id
+from teleforge import InvocationMiddleware
 from ccxt.async_support import binance
 
 from msu_hub_bot.storage.base import BotRepository
@@ -187,6 +188,7 @@ class Application:
 
             dispatcher = Dispatcher(disable_fsm=True)
             dispatcher.update.outer_middleware(AdmissionMiddleware(supervisor))
+            dispatcher.update.outer_middleware(InvocationMiddleware())
             dispatcher.update.outer_middleware(StateContextMiddleware())
             dispatcher.update.outer_middleware(LoggingMiddleware())
             dispatcher.update.outer_middleware(DispatchTelemetryMiddleware(telemetry))

@@ -13,11 +13,12 @@ from uuid import uuid4
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
-from aiogram.methods import EditMessageCaption, EditMessageMedia, TelegramMethod
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Message
+from aiogram.methods import TelegramMethod
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.formatting import Text
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import LRUCache
+from teleforge.delivery import DeliveryError, DeliveryProgress, DeliveryTarget, MediaSource, ResponsePolicy, edit_response, send_response
 
 from msu_hub_bot.commands.quiz_view import View
 from msu_hub_bot.games.definitions import DEFINITIONS, Definition
@@ -227,7 +228,7 @@ class QuizService:
         finally:
             self._unlock(feature, message.chat.id, lock)
 
-        sending = False
+        publication = DeliveryProgress()
         try:
             deadline = publication_deadline if publication_deadline is not None else asyncio.get_running_loop().time() + PHOTO_TIMEOUT
             async with asyncio.timeout_at(deadline), self._providers:
@@ -242,16 +243,23 @@ class QuizService:
                 await self._commit(tx)
                 view = definitions.render(state, [])
                 markup = self.keyboard(definitions, state, view)
-                sending = True
-                sent = await self._send(
-                    message.reply_photo(
-                        photo,
-                        caption=view.caption,
-                        caption_entities=view.entities,
-                        parse_mode=None,
+                try:
+                    sent = await send_response(
+                        self.bot,
+                        message,
+                        view.caption,
+                        photo=photo,
+                        entities=view.entities,
                         reply_markup=markup,
+                        fixed=True,
+                        policy=ResponsePolicy(rich=False, timeout=SEND_TIMEOUT),
+                        allow_remote_media=True,
+                        request_timeout=SEND_TIMEOUT,
+                        progress=publication,
                     )
-                )
+                except DeliveryError as error:
+                    raise error.cause from error
+                assert isinstance(sent, Message)
                 await self._bind(feature, scope, token, sent, self.clock())
                 self._presentations[feature, message.chat.id, token] = Presentation(
                     view=view,
@@ -259,7 +267,7 @@ class QuizService:
                     last_edit=asyncio.get_running_loop().time(),
                 )
         except asyncio.CancelledError:
-            if not sending:
+            if publication.attempted_part is None:
                 await asyncio.shield(self._abandon(feature, scope, token))
             raise
         except (TelegramBadRequest, TelegramForbiddenError) as error:
@@ -268,7 +276,7 @@ class QuizService:
             return await self._send(message.reply("Ошибка, попробуйте еще раз"))
         except Exception as error:
             record_handled_failure(error)
-            if not sending:
+            if publication.attempted_part is None:
                 await self._abandon(feature, scope, token)
                 return await self._send(message.reply("Ошибка, попробуйте еще раз"))
             # The photo may exist even when Telegram's acknowledgement was lost.
@@ -556,16 +564,32 @@ class QuizService:
             )
         return builder.as_markup() if builder.export() else None
 
-    async def _edit(self, method: TelegramMethod[Message | bool], presentation: Presentation) -> bool:
+    async def _edit(
+        self,
+        state: RoundState,
+        view: View,
+        markup: InlineKeyboardMarkup | None,
+        presentation: Presentation,
+        *,
+        photo: MediaSource | None = None,
+    ) -> bool:
         try:
-            await self._send(method)
+            await edit_response(
+                self.bot,
+                DeliveryTarget(chat_id=state.chat_id, message_id=state.message_id, kind="photo"),
+                view.caption,
+                entities=view.entities,
+                photo=photo,
+                reply_markup=markup,
+                policy=ResponsePolicy(rich=False, timeout=SEND_TIMEOUT),
+                allow_remote_media=True,
+                request_timeout=SEND_TIMEOUT,
+            )
             return True
-        except TelegramBadRequest as error:
-            if error.message.removeprefix("Bad Request: ").casefold().startswith("message is not modified"):
-                return True
-            return False
-        except TelegramForbiddenError:
-            return False
+        except DeliveryError as error:
+            if isinstance(error.cause, (TelegramBadRequest, TelegramForbiddenError)):
+                return False
+            raise error.cause from error
         finally:
             presentation.last_edit = asyncio.get_running_loop().time()
 
@@ -600,15 +624,7 @@ class QuizService:
                     photo = await definitions.photo(state.question, solution=True)
                 if not await context.current():
                     return
-                delivered = await self._edit(
-                    EditMessageMedia(
-                        chat_id=state.chat_id,
-                        message_id=state.message_id,
-                        media=InputMediaPhoto(media=photo, caption=view.caption, caption_entities=view.entities, parse_mode=None),
-                        reply_markup=markup,
-                    ),
-                    presentation,
-                )
+                delivered = await self._edit(state, view, markup, presentation, photo=photo)
                 presentation.solution_shown = delivered
             except TimeoutError, TelegramAPIError:
                 photo_retry = True
@@ -620,17 +636,7 @@ class QuizService:
                 return
             if needs_photo:
                 await asyncio.sleep(max(0, presentation.last_edit + EDIT_INTERVAL - asyncio.get_running_loop().time()))
-            delivered = await self._edit(
-                EditMessageCaption(
-                    chat_id=state.chat_id,
-                    message_id=state.message_id,
-                    caption=view.caption,
-                    caption_entities=view.entities,
-                    parse_mode=None,
-                    reply_markup=markup,
-                ),
-                presentation,
-            )
+            delivered = await self._edit(state, view, markup, presentation)
         if not delivered:
             raise JobHold("Quiz message can no longer be edited")
         presentation.view, presentation.markup = view, markup

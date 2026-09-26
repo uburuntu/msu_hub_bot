@@ -371,6 +371,39 @@ async def check_membership_journal():
         await replay.close()
 
 
+async def check_teleforge():
+    from datetime import UTC, datetime
+
+    from aiogram.types import Chat, Message, Update, User
+    from teleforge import App
+    from teleforge.testing import RecordingBot
+
+    from msu_hub_bot.features.roll import Roll
+
+    bot = RecordingBot()
+    app = App(Roll())
+    try:
+        await app.feed_update(
+            bot,
+            Update(
+                update_id=1,
+                message=Message(
+                    message_id=1,
+                    date=datetime.now(UTC),
+                    chat=Chat(id=7, type="private"),
+                    from_user=User(id=7, is_bot=False, first_name="Synthetic"),
+                    text="/roll 6",
+                ),
+            ),
+        )
+        sent = bot.requests[-1]
+        assert sent.__api_method__ == "sendMessage" and len(sent.text.split()[0]) == 6
+        assert sent.entities[0].type == "code"
+    finally:
+        await app.aclose()
+        await bot.session.close()
+
+
 async def main():
     socket.socket.connect = blocked
     socket.socket.connect_ex = blocked
@@ -388,6 +421,7 @@ async def main():
     check_chess()
     check_background()
     await check_membership_journal()
+    await check_teleforge()
     from msu_hub_bot.web import server as web_server
 
     static = Path(web_server.__file__).with_name("static")

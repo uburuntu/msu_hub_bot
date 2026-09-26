@@ -1,11 +1,18 @@
+"""Rotating ASCII-art fonts with complete, bounded Telegram output."""
+
 from itertools import cycle
 
-from aiogram.types import Message
-from aiogram.utils.markdown import hpre
+from aiogram import F
+from aiogram.enums import ContentType
+from aiogram.utils.formatting import Pre
 from pyfiglet import Figlet
+from teleforge import Feature
+from teleforge.context import MessageContext
+from teleforge.inputs import TextInput
 from transliterate import translit
 
-from msu_hub_bot.telegram.filters import MetaInfo
+from msu_hub_bot.execution.executor import TPExecutor
+from msu_hub_bot.features.command import command as hub_command
 
 figlet_fonts = (
     Figlet(font="3-d"),
@@ -27,11 +34,24 @@ figlet_fonts = (
 figlets = cycle(figlet_fonts)
 
 
-async def process_figlet(_message: Message, meta: MetaInfo) -> Message:
-    target, text = meta.extract_text()
-    if not text:
-        text = "kek"
-
-    text = translit(text, "ru", reversed=True)
-    figlet = next(figlets)
-    return await target.reply(hpre(figlet.renderText(text)[:4096]))
+class FigletFeature(Feature, key="figlet"):
+    @hub_command(
+        "figlet",
+        text=TextInput(max_chars=4096),
+        filters=(F.content_type == ContentType.TEXT,),
+        flags={"handler_key": "process_figlet", "fsm_release": True},
+        rich=False,
+        soft_messages=1,
+    )
+    async def process_figlet(self, ctx: MessageContext, text: str = "kek", *, cpu_executor: TPExecutor) -> Pre | None:
+        # Even the default joke replies to the message the user selected.
+        if "text" not in ctx.input_sources and ctx.message.reply_to_message:
+            ctx.response_target = ctx.message.reply_to_message
+        rendered, timed_out = await cpu_executor.run(next(figlets).renderText, translit(text, "ru", reversed=True), timeout=10)
+        if timed_out:
+            await ctx.reply("🤷🏻‍♂️ Не успел нарисовать буквы. Попробуй текст покороче.", to=ctx.message)
+            return None
+        if not rendered.strip():
+            await ctx.reply("Этот шрифт не умеет рисовать такие символы. Попробуй буквы или цифры.", to=ctx.message)
+            return None
+        return Pre(rendered)
