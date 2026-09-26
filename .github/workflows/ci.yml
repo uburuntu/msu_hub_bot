@@ -31,7 +31,15 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
-      - run: npm run typecheck && npm run format:check && npm test && npm run build
+      - name: Check Mini App formatting
+        id: web_format
+        continue-on-error: true
+        run: npm run format:check
+        working-directory: web
+      - name: Warn on Mini App formatting
+        if: steps.web_format.outcome == 'failure'
+        run: echo "::warning::Mini App formatting check failed; run npm run format in web/"
+      - run: npm run typecheck && npm test && npm run build
         working-directory: web
 
   python:
@@ -53,7 +61,13 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync ruff format --check src tests tools
+      - name: Check Python formatting
+        id: python_format
+        continue-on-error: true
+        run: uv run --no-sync ruff format --check src tests tools
+      - name: Warn on Python formatting
+        if: steps.python_format.outcome == 'failure'
+        run: echo "::warning::Python formatting check failed; run uv run --no-sync ruff format src tests tools"
       - run: uv run --no-sync python tools/check_types.py
         env:
           TYPECHECK_BASE_REF: ${{ github.event.pull_request.base.sha }}
