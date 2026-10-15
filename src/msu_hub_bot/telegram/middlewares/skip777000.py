@@ -16,7 +16,8 @@ class Skip777000(BaseMiddleware):
     def __init__(self, *, bot_id: int | None = None, telemetry: Telemetry | None = None) -> None:
         self.bot_id = bot_id
         self.telemetry = telemetry or Telemetry()
-        self._denied: TTLCache[int, bool] = TTLCache(maxsize=1024, ttl=300, timer=monotonic)
+        # Missing pin rights rarely change; membership updates clear this early.
+        self._denied: TTLCache[int, bool] = TTLCache(maxsize=1024, ttl=86400, timer=monotonic)
         self._missing: TTLCache[tuple[int, int], bool] = TTLCache(maxsize=1024, ttl=300, timer=monotonic)
         self._retry_until = 0.0
         self._lock = asyncio.Lock()

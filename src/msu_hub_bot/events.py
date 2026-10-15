@@ -304,6 +304,14 @@ class EcosystemManager:
                         self.invalidate_directory()
                         return
                     if reason == "message_not_editable":
+                        chat = await self.get_chat(ec.chat_id)
+                        pinned = chat.pinned_message if chat is not None else None
+                        if pinned is None or pinned.message_id != ec.pinned_message_id:
+                            # Unpinned and uneditable (e.g. a forward): nothing to maintain; /pin creates a fresh one.
+                            await self.db.clear_directory_pin(ec.chat_id, ec.pinned_message_id)
+                            self.invalidate_directory()
+                            return
+                        # A current pin can become editable again when channel edit rights return.
                         if epoch == self._chat_epoch:
                             self._uneditable_pins[ec.chat_id] = ec.pinned_message_id
                         return

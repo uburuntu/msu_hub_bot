@@ -284,9 +284,12 @@ async def test_directory_cache_is_local_and_invalidated_after_mutation():
     assert await other.directory() == {}
 
 
-def ecosystem_chat(chat_id):
+def ecosystem_chat(chat_id, pinned_message_id=7):
+    chat = Chat(id=chat_id, type="supergroup", title="Synthetic directory chat")
+    pinned = Message(message_id=pinned_message_id, date=1_700_000_000, chat=chat, text="Directory") if pinned_message_id else None
     return ChatFullInfo(
         id=chat_id,
+        pinned_message=pinned,
         type="supergroup",
         title="Synthetic directory chat",
         username=f"synthetic_{abs(chat_id)}",
@@ -770,6 +773,24 @@ async def test_uneditable_pin_cooldown_preserves_id_and_recovers(ecosystem, reco
     assert [call.kwargs["chat_id"] for call in rig.bot.edit_message_text.await_args_list].count(-101) == 2
 
 
+@pytest.mark.parametrize("current_pin", [None, 8])
+async def test_uneditable_pin_that_is_no_longer_pinned_is_forgotten(ecosystem, current_pin):
+    rig = ecosystem
+    rig.bot.get_chat.side_effect = lambda chat_id: ecosystem_chat(chat_id, current_pin if chat_id == -101 else 7)
+
+    async def edit(text, chat_id, message_id):
+        if chat_id == -101:
+            raise TelegramBadRequest(EditMessageText(chat_id=chat_id, message_id=message_id, text=text), "message can't be edited")
+
+    rig.bot.edit_message_text.side_effect = edit
+    await rig.manager.update_pins()
+    rig.repository.clear_directory_pin.assert_awaited_once_with(-101, 7)
+    assert rig.entries[-101].pinned_message_id is None and rig.entries[-102].pinned_message_id == 7
+    rig.bot.send_message.assert_not_awaited()
+    await rig.manager.update_pins(forced=True)
+    assert [call.kwargs["chat_id"] for call in rig.bot.edit_message_text.await_args_list].count(-101) == 1
+
+
 @pytest.mark.parametrize("recovery", ["expiry", "membership"])
 async def test_automatic_unpin_permission_cooldown_recovers(monkeypatch, recovery):
     clock = SimpleNamespace(now=1000.0)
@@ -789,7 +810,10 @@ async def test_automatic_unpin_permission_cooldown_recovers(monkeypatch, recover
     unpin.assert_awaited_once()
     handler.assert_not_awaited()
     if recovery == "expiry":
-        clock.now += 300
+        clock.now += 86399
+        await middleware(handler, event.model_copy(update={"message_id": 4}), {})
+        unpin.assert_awaited_once()
+        clock.now += 1
     else:
         await middleware(handler, bot_rights_update(user_id=999), {})
         await middleware(handler, event, {})
