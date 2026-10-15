@@ -24,8 +24,8 @@ from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.common.metrics_encoder import encode_metrics
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.metrics import CallbackOptions, NoOpMeterProvider, Observation
-from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, MeterProvider
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, Counter, Histogram, MeterProvider
+from opentelemetry.sdk.metrics.export import AggregationTemporality, InMemoryMetricReader
 from opentelemetry.sdk.metrics.view import DropAggregation, ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor, ReadableLogRecord, ReadWriteLogRecord
@@ -379,7 +379,7 @@ class TelemetryConfig:
     traces_per_minute: int = 60
     queue_capacity: int = 256
     batch_size: int = 32
-    interval: float = 60
+    interval: float = 300
     request_timeout: float = 2
     shutdown_timeout: float = 3
 
@@ -387,7 +387,7 @@ class TelemetryConfig:
     def from_env(cls, env: Mapping[str, str]) -> TelemetryConfig:
         """The composition root explicitly selects the environment to read."""
         try:
-            interval = float(env.get("HUB_TELEMETRY_METRICS_INTERVAL_SECONDS", "60"))
+            interval = float(env.get("HUB_TELEMETRY_METRICS_INTERVAL_SECONDS", "300"))
             if not 10 <= interval <= 300:
                 raise ValueError("Metric collection interval is outside the supported range")
             return cls(
@@ -832,7 +832,12 @@ class Telemetry:
                 return [Observation(age)]
             if age > 90:
                 return []
-            return [Observation(row[name], {"feature": feature, "job.kind": kind}) for (feature, kind), row in self._job_gauges.items()]
+            # Idle feature/kind series stay silent; a fresh snapshot age means absent values are zero.
+            return [
+                Observation(row[name], {"feature": feature, "job.kind": kind})
+                for (feature, kind), row in self._job_gauges.items()
+                if row[name]
+            ]
 
         return observe
 
@@ -959,7 +964,9 @@ class Telemetry:
             if re.fullmatch(r"(?:[a-f0-9]{7,40}|v?\d+\.\d+\.\d+)", self.config.release):
                 resource_values["service.version"] = self.config.release
             resource = Resource(resource_values)
-            self._reader = InMemoryMetricReader()
+            # Delta sums and histograms export only series measured since the previous collection.
+            delta = AggregationTemporality.DELTA
+            self._reader = InMemoryMetricReader(preferred_temporality={Counter: delta, Histogram: delta})
             self._meter_provider = MeterProvider(
                 metric_readers=[self._reader],
                 resource=resource,
@@ -967,7 +974,6 @@ class Telemetry:
                 exemplar_filter=AlwaysOffExemplarFilter(),
                 views=[
                     View(instrument_name="*", aggregation=DropAggregation()),
-                    View(instrument_name="bot.operations", meter_name="msu_hub_bot.telemetry", attribute_keys=METRIC_KEYS),
                     View(
                         instrument_name="bot.operation.duration",
                         meter_name="msu_hub_bot.telemetry",
@@ -1013,7 +1019,6 @@ class Telemetry:
                 ],
             )
             meter = self._meter_provider.get_meter("msu_hub_bot.telemetry", version="1")
-            self._count = meter.create_counter("bot.operations", unit="1")
             self._duration = meter.create_histogram("bot.operation.duration", unit="s")
             self._drops = meter.create_counter("bot.telemetry.dropped_spans", unit="1")
             self._log_drops = meter.create_counter("bot.telemetry.dropped_logs", unit="1")
@@ -1155,7 +1160,6 @@ class Telemetry:
     def _measure(self, boundary: Boundary, operation: str, outcome: Outcome, duration: float, **labels: str) -> None:
         if self._meter_provider is not None and not self._closed:
             attributes = {"boundary": boundary.value, "operation": operation, "outcome": outcome.value, **labels}
-            self._count.add(1, attributes)
             self._duration.record(max(0, duration), attributes)
 
     def _record_intent_usage(self, input_tokens: int | None, output_tokens: int | None, cost: float | None) -> None:

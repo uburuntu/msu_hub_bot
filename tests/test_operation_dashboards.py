@@ -19,11 +19,6 @@ def panel_query(dashboard, panel):
 @pytest.mark.parametrize(
     ("dashboard", "panel", "metric", "attributes", "measure", "expected"),
     [
-        ("pulse", "handlers-card", "bot.operations", {"boundary": "bot.handler"}, "runs", 17),
-        ("pulse", "failures-card", "bot.operations", {"boundary": "bot.handler"}, "failures", 17),
-        ("usage", "popular-handlers", "bot.operations", {"boundary": "bot.handler"}, "invocations", 17),
-        ("usage", "handler-outcomes", "bot.operations", {"boundary": "bot.handler"}, "failed", 17),
-        ("failures", "dependency-outcomes", "bot.operations", {"boundary": "provider.request"}, "failed", 17),
         (
             "jobs",
             "outcomes",
@@ -33,17 +28,7 @@ def panel_query(dashboard, panel):
             17,
         ),
         ("pulse", "telemetry-loss", "bot.telemetry.dropped_logs", {}, "dropped", 17),
-        ("usage", "handler-activity", "bot.operations", {"boundary": "bot.handler"}, "invocations_per_minute", 10),
         ("pulse", "poll-outcomes", "bot.poll.requests", {}, "requests_per_minute", 10),
-        ("pulse", "update-outcomes", "bot.operations", {"boundary": "bot.dispatch", "operation": "dispatch"}, "updates_per_minute", 10),
-        (
-            "pulse",
-            "archive-outcomes",
-            "bot.operations",
-            {"boundary": "storage.operation", "operation": "archive.write"},
-            "archive_writes_per_minute",
-            10,
-        ),
     ],
 )
 def test_operation_counters_isolate_processes_epochs_and_delta_temporality(
@@ -81,13 +66,70 @@ def test_operation_counters_isolate_processes_epochs_and_delta_temporality(
     samples([(150, 2)], epoch=145, temporality="delta")
     samples([(160, 3)], epoch=155, temporality="delta")  # Delta start times change every sample.
     samples([(120, 1000)], epoch=110, environment="testing")
-    if panel == "update-outcomes":
-        attributes["operation"] = "intent.execute"
-        samples([(121, 0), (131, 100)], epoch=0)
     sql = panel_query(dashboard, panel).replace("CAST($__from_iso_string AS TIMESTAMPTZ)", "100")
     sql = sql.replace("CAST($__to_iso_string AS TIMESTAMPTZ)", "200")
     rows = [dict(row) for row in database.execute(sql, {"resolution": "1m"})]
     assert len(rows) == 1 and rows[0][measure] == expected
+
+
+@pytest.mark.parametrize(
+    ("dashboard", "panel", "attributes", "measure", "expected"),
+    [
+        ("pulse", "handlers-card", {"boundary": "bot.handler"}, "runs", 10),
+        ("pulse", "failures-card", {"boundary": "bot.handler"}, "failures", 10),
+        ("usage", "popular-handlers", {"boundary": "bot.handler"}, "invocations", 10),
+        ("usage", "handler-outcomes", {"boundary": "bot.handler"}, "failed", 10),
+        ("failures", "dependency-outcomes", {"boundary": "provider.request"}, "failed", 10),
+        ("usage", "handler-activity", {"boundary": "bot.handler"}, "invocations_per_minute", 2),
+        ("pulse", "update-outcomes", {"boundary": "bot.dispatch", "operation": "dispatch"}, "updates_per_minute", 2),
+        ("pulse", "archive-outcomes", {"boundary": "storage.operation", "operation": "archive.write"}, "archive_writes_per_minute", 2),
+    ],
+)
+def test_operation_panels_count_delta_histograms_across_processes_and_intervals(database, dashboard, panel, attributes, measure, expected):
+    database.execute("DELETE FROM metrics")
+    database.execute("ALTER TABLE metrics ADD COLUMN histogram_count REAL")
+    database.create_function("GREATEST", 2, max)
+    attributes = {"operation": "synthetic", "outcome": "unavailable", **attributes}
+
+    def point(recorded, count, *, metric="bot.operation.duration", temporality="delta", environment="production", **stream):
+        database.execute(
+            """INSERT INTO metrics (service_name, deployment_environment, service_version, service_instance_id, process_pid,
+                   metric_name, attributes, recorded_timestamp, start_timestamp, aggregation_temporality, histogram_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "msu-hub-bot",
+                environment,
+                stream.get("version", "a"),
+                stream.get("instance", "one"),
+                stream.get("pid", 1),
+                metric,
+                json.dumps(stream.get("attributes", attributes)),
+                recorded,
+                recorded - 300,
+                temporality,
+                count,
+            ),
+        )
+
+    point(130, 2)
+    point(150, 3)  # Delta points sum without epoch or first-reading correction.
+    point(124, 1, instance="two")
+    point(124, 2, pid=2)
+    point(124, 2, version="b")
+    point(130, 1000, temporality="cumulative")  # Pre-delta lifetime totals are not counted.
+    point(130, 1000, environment="testing")
+    point(130, 1000, metric="bot.operations")
+    point(130, 1000, attributes={**attributes, "operation": "intent.execute", "boundary": "bot.dispatch"})
+    # SQLite stands in for Logfire's interval arithmetic with integer seconds.
+    sql = panel_query(dashboard, panel)
+    for logfire, sqlite in (
+        ("EXTRACT(EPOCH FROM CAST($resolution AS INTERVAL))", "60"),
+        ("EXTRACT(EPOCH FROM (recorded_timestamp - start_timestamp))", "(recorded_timestamp - start_timestamp)"),
+    ):
+        sql = sql.replace(logfire, sqlite)
+    rows = [dict(row) for row in database.execute(sql, {"resolution": "1m"})]
+    # Five-minute delta points spread their counts over the export interval, not a one-minute bucket.
+    assert len(rows) == 1 and rows[0][measure] == pytest.approx(expected)
 
 
 def test_delivery_table_counts_logical_calls_and_only_actionable_rejections(database):

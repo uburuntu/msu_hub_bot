@@ -433,7 +433,7 @@ def test_telemetry_workflow_is_opt_in_and_token_stays_out_of_build_steps():
     assert "LOGFIRE_API_KEY" not in workflow and "OTEL_" not in workflow
     assert "HUB_TELEMETRY_ENABLED: ${{ vars.HUB_TELEMETRY_ENABLED || 'false' }}" in deployment
     assert "HUB_TELEMETRY_SAMPLE_RATE: ${{ vars.HUB_TELEMETRY_SAMPLE_RATE || '0.1' }}" in deployment
-    assert "HUB_TELEMETRY_METRICS_INTERVAL_SECONDS: ${{ vars.HUB_TELEMETRY_METRICS_INTERVAL_SECONDS || '60' }}" in deployment
+    assert "HUB_TELEMETRY_METRICS_INTERVAL_SECONDS: ${{ vars.HUB_TELEMETRY_METRICS_INTERVAL_SECONDS || '300' }}" in deployment
     assert "HUB_ENVIRONMENT: production" in deployment
     assert "HUB_RELEASE: ${{ github.sha }}" in deployment
     assert "LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}" in deployment

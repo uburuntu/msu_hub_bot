@@ -224,10 +224,10 @@ async def test_middleware_and_api_telemetry_have_distinct_owners(configured, mon
             for resource in message.resource_metrics:
                 for scope in resource.scope_metrics:
                     for metric in scope.metrics:
-                        if metric.name == "bot.operations":
-                            for point in metric.sum.data_points:
+                        if metric.name == "bot.operation.duration":
+                            for point in metric.histogram.data_points:
                                 operation = next(attr.value.string_value for attr in point.attributes if attr.key == "operation")
-                                counts[operation] += point.as_int
+                                counts[operation] += point.count
     assert counts["settings.load"] == counts["archive.write"] == counts["database.auth"] == 1
     assert counts["database.read"] == 1 + 2 * int(change_settings)
     assert counts["settings.save"] == int(change_settings)

@@ -93,7 +93,7 @@ Required reviewers are intentionally not enabled.
 | `HUB_*` application configuration from `.env.example`, except overrides below | Production environment secrets |
 | `LOGFIRE_TOKEN` (optional project write token) | Production environment secret; sent only when export is enabled |
 | `HUB_TELEMETRY_ENABLED`, `HUB_TELEMETRY_SAMPLE_RATE` | Production environment variables; defaults `false` and `0.1` |
-| `HUB_TELEMETRY_METRICS_INTERVAL_SECONDS` | Production environment variable; default `60`, accepts `10`–`300` seconds |
+| `HUB_TELEMETRY_METRICS_INTERVAL_SECONDS` | Production environment variable; default `300`, accepts `10`–`300` seconds |
 | `HUB_WEB_APP_URL` | Production environment variable; HTTPS origin, empty disables the Mini App |
 | `OPENROUTER_API_KEY` | Production environment secret; mapped to `HUB_OPENROUTER_API_KEY` only in the deployment step |
 | `HUB_JEV_ENABLED`, `HUB_JEV_CONFIDENCE` | Production environment variables; defaults `false` and `0.8` |

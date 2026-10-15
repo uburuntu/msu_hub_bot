@@ -4,9 +4,9 @@ import asyncio
 
 import pytest
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
-from opentelemetry.proto.metrics.v1.metrics_pb2 import AGGREGATION_TEMPORALITY_CUMULATIVE
+from opentelemetry.proto.metrics.v1.metrics_pb2 import AGGREGATION_TEMPORALITY_DELTA
 
-from msu_hub_bot.telemetry import Boundary, Telemetry, TelemetryConfig
+from msu_hub_bot.telemetry import Boundary, Outcome, Telemetry, TelemetryConfig
 from telemetry_helpers import Capture, config
 
 CANARY = "SYNTHETIC_PRIVATE_CADENCE_CANARY"
@@ -25,9 +25,9 @@ def metric_batches(sink):
     ]
 
 
-def test_metrics_default_to_one_minute():
-    assert TelemetryConfig().interval == 60
-    assert TelemetryConfig.from_env({}).interval == 60
+def test_metrics_default_to_five_minutes():
+    assert TelemetryConfig().interval == 300
+    assert TelemetryConfig.from_env({}).interval == 300
 
 
 @pytest.mark.parametrize("seconds", ["10", "60", "300"])
@@ -75,17 +75,17 @@ async def test_unsampled_failure_is_exported_before_metric_deadline_and_shutdown
         await telemetry.close()
 
     metrics = metric_batches(sink)[0]
-    counts = metrics["bot.operations"].sum
+    assert "bot.operations" not in metrics
     durations = metrics["bot.operation.duration"].histogram
-    assert counts.aggregation_temporality == durations.aggregation_temporality == AGGREGATION_TEMPORALITY_CUMULATIVE
-    assert sum(point.as_int for point in counts.data_points) == sum(point.count for point in durations.data_points) == 2
+    assert durations.aggregation_temporality == AGGREGATION_TEMPORALITY_DELTA
+    assert sum(point.count for point in durations.data_points) == 2
     assert {
-        attribute.value.string_value for point in counts.data_points for attribute in point.attributes if attribute.key == "outcome"
+        attribute.value.string_value for point in durations.data_points for attribute in point.attributes if attribute.key == "outcome"
     } == {
         "success",
         "unexpected",
     }
-    assert all(not attribute.key.startswith("telegram.") for point in counts.data_points for attribute in point.attributes)
+    assert all(not attribute.key.startswith("telegram.") for point in durations.data_points for attribute in point.attributes)
     assert CANARY not in sink.serialized()
 
 
@@ -107,24 +107,21 @@ async def test_periodic_metrics_do_not_require_logs_or_spans():
             pass
         await asyncio.wait_for(sink.metrics_sent.wait(), timeout=1)
         assert not sink.logs() and not sink.spans()
-        assert metric_batches(sink)[0]["bot.operations"].sum.data_points[0].as_int == 1
+        assert metric_batches(sink)[0]["bot.operation.duration"].histogram.data_points[0].count == 1
     finally:
         await telemetry.close()
 
 
-async def test_later_cumulative_export_retains_operations_after_a_dropped_batch():
-    class DroppedFirst(Capture):
-        async def send(self, signal, payload):
-            await super().send(signal, payload)
-            return len(self.payloads) != 1
-
-    sink = DroppedFirst()
+async def test_delta_export_sends_only_series_measured_since_the_previous_collection():
+    sink = Capture()
     telemetry = Telemetry(config(sample_rate=0), {"test.handler"}, transport=sink)
     await telemetry.start()
     try:
         for _ in range(2):
             with telemetry.operation(Boundary.HANDLER, "test.handler"):
                 pass
+        telemetry.record_poll(Outcome.SUCCESS)
+        await telemetry._metrics()
         await telemetry._metrics()
         with telemetry.operation(Boundary.HANDLER, "test.handler"):
             pass
@@ -132,6 +129,10 @@ async def test_later_cumulative_export_retains_operations_after_a_dropped_batch(
         await telemetry.close()
 
     batches = metric_batches(sink)
-    assert [batch["bot.operations"].sum.data_points[0].as_int for batch in batches] == [2, 3]
-    assert [batch["bot.operation.duration"].histogram.data_points[0].count for batch in batches] == [2, 3]
-    assert all(batch["bot.operations"].sum.aggregation_temporality == AGGREGATION_TEMPORALITY_CUMULATIVE for batch in batches)
+    assert [batch["bot.operation.duration"].histogram.data_points[0].count for batch in batches if "bot.operation.duration" in batch] == [
+        2,
+        1,
+    ]
+    assert ["bot.poll.requests" in batch for batch in batches] == [True, False, False]
+    assert all(batch["bot.operation.duration"].histogram.aggregation_temporality == AGGREGATION_TEMPORALITY_DELTA for batch in batches[::2])
+    assert batches[0]["bot.poll.requests"].sum.aggregation_temporality == AGGREGATION_TEMPORALITY_DELTA

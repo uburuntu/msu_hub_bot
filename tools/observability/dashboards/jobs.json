@@ -20,7 +20,7 @@
           "spec": {
             "display": {
               "name": "Queue snapshot age",
-              "description": "Seconds since the worker last read queue state, including sample age. With 60s metric collection: amber after 120s, red after 180s."
+              "description": "Seconds since the worker last read queue state, including sample age. With 300s metric collection: amber after 420s, red after 600s."
             },
             "plugin": {
               "kind": "Values",
@@ -30,8 +30,8 @@
                   "decimalPlaces": 0
                 },
                 "statusThresholds": {
-                  "warning": 120,
-                  "critical": 180
+                  "warning": 420,
+                  "critical": 600
                 }
               }
             },
@@ -55,7 +55,7 @@
           "spec": {
             "display": {
               "name": "Waiting, running and held",
-              "description": "Latest count or age per feature/kind. Pending includes leased work; overdue excludes active leases. Old samples must not be read as current."
+              "description": "Non-zero count or age per feature/kind from the newest collection. Pending includes leased work; overdue excludes active leases. An empty table with a fresh snapshot age means every queue is empty."
             },
             "plugin": {
               "kind": "Table",
@@ -68,7 +68,7 @@
                   "plugin": {
                     "kind": "LogfireNonTimeSeriesQuery",
                     "spec": {
-                      "query": "WITH latest AS (SELECT recorded_timestamp, metric_name, attributes->>'feature' AS feature, attributes->>'job.kind' AS kind, scalar_value, ROW_NUMBER() OVER (PARTITION BY metric_name, attributes->>'feature', attributes->>'job.kind' ORDER BY recorded_timestamp DESC) AS position FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name IN ('bot.feature_jobs.pending','bot.feature_jobs.held','bot.feature_jobs.leased','bot.feature_jobs.overdue','bot.feature_jobs.oldest_due')) SELECT feature,kind,metric_name AS signal,scalar_value AS value,EXTRACT(EPOCH FROM (now()-recorded_timestamp)) AS sample_age_seconds FROM latest WHERE position=1 ORDER BY feature,kind,signal"
+                      "query": "WITH collection AS (SELECT MAX(recorded_timestamp) AS at FROM metrics WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name = 'bot.feature_jobs.snapshot_age') SELECT attributes->>'feature' AS feature, attributes->>'job.kind' AS kind, metric_name AS signal, scalar_value AS value, EXTRACT(EPOCH FROM (now() - recorded_timestamp)) AS sample_age_seconds FROM metrics, collection WHERE service_name = 'msu-hub-bot' AND deployment_environment = 'production' AND metric_name IN ('bot.feature_jobs.pending','bot.feature_jobs.held','bot.feature_jobs.leased','bot.feature_jobs.overdue','bot.feature_jobs.oldest_due') AND recorded_timestamp = collection.at ORDER BY feature, kind, signal"
                     }
                   }
                 }

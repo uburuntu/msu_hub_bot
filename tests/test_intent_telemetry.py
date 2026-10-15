@@ -199,8 +199,8 @@ async def test_execution_records_separately_from_the_single_entry_handler_and_up
     finally:
         await telemetry.close()
     counts = {
-        (attributes(point.attributes)["boundary"], attributes(point.attributes)["operation"]): point.as_int
-        for point in metrics(capture)["bot.operations"].sum.data_points
+        (attributes(point.attributes)["boundary"], attributes(point.attributes)["operation"]): point.count
+        for point in metrics(capture)["bot.operation.duration"].histogram.data_points
     }
     assert counts == {("bot.handler", "intent.entry"): 1, ("bot.dispatch", "intent.execute"): 1, ("bot.dispatch", "dispatch"): 1}
     execution = next(span for span in capture.spans() if attributes(span.attributes)["operation"] == "intent.execute")

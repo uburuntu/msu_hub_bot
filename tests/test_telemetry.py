@@ -211,8 +211,11 @@ async def test_job_dimensions_are_registered_and_stale_queue_snapshots_disappear
     telemetry = Telemetry(config(), transport=sink)
     telemetry.register_feature_job("reminders", "deliver")
     await telemetry.start()
-    telemetry.feature_job_snapshot({("reminders", "deliver"): {name: 2.0 for name in JobGaugeName}})
+    telemetry.feature_job_snapshot(
+        {("reminders", "deliver"): {name: 2.0 if name is JobGaugeName.PENDING else 0.0 for name in JobGaugeName}}
+    )
     assert telemetry._job_gauge_callback(JobGaugeName.PENDING)(None)[0].value == 2
+    assert telemetry._job_gauge_callback(JobGaugeName.HELD)(None) == []
     telemetry.feature_job_transition("reminders", "deliver", "hold")
     telemetry.feature_job_transition(CANARY, "deliver", "hold")
     with telemetry.operation(Boundary.JOB, "feature.job", feature="reminders", job_kind="deliver", attempt=3):
@@ -278,7 +281,6 @@ async def test_every_signal_is_allowlisted_with_exception_baggage_and_environmen
                 for scope in resource.scope_metrics:
                     assert scope.scope.name == "msu_hub_bot.telemetry"
                     assert {metric.name for metric in scope.metrics} <= {
-                        "bot.operations",
                         "bot.operation.duration",
                         "bot.telemetry.dropped_spans",
                         "bot.telemetry.dropped_logs",
@@ -377,7 +379,7 @@ async def test_sampling_keeps_metrics_and_ignored_dispatch_does_not_create_spans
         pass
     await telemetry.close()
     assert sink.spans() == []
-    assert "bot.operations" in sink.serialized()
+    assert "bot.operation.duration" in sink.serialized()
     assert "ignored" in sink.serialized() and "success" in sink.serialized()
 
 
@@ -782,7 +784,7 @@ async def test_root_trace_budget_keeps_children_and_metrics_consistent():
     spans = sink.spans()
     assert sorted(span.name for span in spans) == ["bot.handler", "provider.request"]
     assert len({span.trace_id for span in spans}) == 1
-    assert "bot.operations" in sink.serialized()
+    assert "bot.operation.duration" in sink.serialized()
 
 
 async def test_exporter_task_does_not_inherit_application_context():
