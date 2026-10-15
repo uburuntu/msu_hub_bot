@@ -14,6 +14,7 @@ import tempfile
 import time
 
 MAX_RECEIPT_BYTES = 64 * 1024
+GRACE_SECONDS = 10 * 60
 ALERTS = {
     "backup": "Нет свежего успешного резервного копирования базы.",
     "retention": "Нет свежего успешного запуска очистки по срокам хранения.",
@@ -90,7 +91,7 @@ def message_for(issues: list[str]) -> str:
 
 
 def notify(report: dict, state_path: Path, *, container: str, now: float | None = None) -> bool:
-    """One message per change or six-hour reminder; failed sends never acknowledge."""
+    """Alert once a problem persists, then per change or six-hour reminder; failed sends never acknowledge."""
     now = time.time() if now is None else now
     state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with state_path.with_suffix(".lock").open("a") as lock:
@@ -100,32 +101,37 @@ def notify(report: dict, state_path: Path, *, container: str, now: float | None 
             state = receipt(state_path)
         except (OSError, ValueError):
             state = {}
-        issues = report["issues"]
         previous = state.get("issues", [])
+        seen = state.get("since")
+        seen = seen if isinstance(seen, dict) else {}
+        since = {name: value if isinstance(value := seen.get(name), (float, int)) else now for name in report["issues"]}
+        # Maintenance rewrites its receipt while running; such brief failures clear before the grace period ends.
+        issues = [name for name in report["issues"] if name in previous or now - since[name] >= GRACE_SECONDS]
         last_sent = state.get("sent_at", 0)
         changed = previous != issues
         due = bool(issues) and (not isinstance(last_sent, (float, int)) or now - last_sent >= 6 * 3600)
-        if not changed and not due:
-            return False
-        result = subprocess.run(
-            ["docker", "exec", "-i", container, "/opt/msu_hub_bot/.venv/bin/python", "-c", NOTIFY],
-            input=json.dumps({"text": message_for(issues)}),
-            text=True,
-            capture_output=True,
-            timeout=30,
-        )
-        if result.returncode:
-            raise RuntimeError("Operational notification failed")
-        fd, temporary = tempfile.mkstemp(prefix=".monitor-", dir=state_path.parent)
-        try:
-            with os.fdopen(fd, "w") as stream:
-                json.dump({"issues": issues, "sent_at": now}, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, state_path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
-        return True
+        if changed or due:
+            result = subprocess.run(
+                ["docker", "exec", "-i", container, "/opt/msu_hub_bot/.venv/bin/python", "-c", NOTIFY],
+                input=json.dumps({"text": message_for(issues)}),
+                text=True,
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode:
+                raise RuntimeError("Operational notification failed")
+            last_sent = now
+        if changed or due or since != seen:
+            fd, temporary = tempfile.mkstemp(prefix=".monitor-", dir=state_path.parent)
+            try:
+                with os.fdopen(fd, "w") as stream:
+                    json.dump({"issues": issues, "sent_at": last_sent, "since": since}, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, state_path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+        return changed or due
 
 
 def main() -> int:

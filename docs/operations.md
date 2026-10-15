@@ -10,7 +10,7 @@ Pending includes leased jobs; overdue excludes active leases. Held jobs require
 reconciliation. Oldest-due age measures waiting work, not execution time. Snapshot
 age includes time since the last exported measurement, so a stopped bot or exporter
 cannot leave a fresh-looking value. It distinguishes a healthy empty queue from a
-failed monitor; queue gauges stop
+failed monitor: zero-valued queue series are not exported, and all queue gauges stop
 emitting after 90 seconds without a successful read. A monitoring outage never
 blocks a job or changes its state.
 
@@ -80,8 +80,10 @@ boundary](observability.md#logs-and-failures) before adding settings or diagnost
 Pass `--evidence`, `--restore-receipt` and `--disk` from private host configuration.
 Run without `--notify` to inspect its sanitized JSON report. `--notify --state PATH`
 uses the running bot's token to notify its configured owner; no secret is copied
-into the tool or scheduler. Alerts fire when the set of problems changes and at
-most once every six hours for an unchanged problem; recovery sends one message.
+into the tool or scheduler. A problem must persist for ten minutes before it is
+reported, which absorbs receipts rewritten while maintenance is running. Alerts then
+fire when the reported set changes and at most once every six hours for an unchanged
+problem; recovery of a reported problem sends one message.
 Transport failure does not acknowledge an alert. Schedule the check every five
 minutes using the host's service manager, with a process timeout and private state.
 

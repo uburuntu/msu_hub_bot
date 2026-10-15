@@ -53,8 +53,9 @@ def test_notifications_change_repeat_recover_and_preserve_failed_send(tmp_path, 
     send = Mock(return_value=SimpleNamespace(returncode=0))
     monkeypatch.setattr(monitor.subprocess, "run", send)
     assert not monitor.notify({"issues": []}, state, container="fixture", now=100000)
-    assert monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100000)
-    assert not monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100001)
+    assert not monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100000)
+    assert monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100600)
+    assert not monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100601)
     assert monitor.notify({"issues": ["disk"]}, state, container="fixture", now=130000)
     saved = state.read_text()
     send.return_value.returncode = 1
@@ -64,3 +65,30 @@ def test_notifications_change_repeat_recover_and_preserve_failed_send(tmp_path, 
     send.return_value.returncode = 0
     assert monitor.notify({"issues": []}, state, container="fixture", now=130002)
     assert state.stat().st_mode & 0o077 == 0
+    assert send.call_count == 4
+
+
+def test_brief_failures_inside_the_grace_period_stay_silent(tmp_path, monkeypatch):
+    state = tmp_path / "state.json"
+    send = Mock(return_value=SimpleNamespace(returncode=0))
+    monkeypatch.setattr(monitor.subprocess, "run", send)
+    for now, issues in ((0, ["retention"]), (300, []), (600, ["retention"]), (900, ["retention"]), (1199, ["retention"])):
+        assert not monitor.notify({"issues": issues}, state, container="fixture", now=now)
+    send.assert_not_called()
+    assert monitor.notify({"issues": ["retention"]}, state, container="fixture", now=1200)
+    assert "срокам хранения" in json.loads(send.call_args.kwargs["input"])["text"]
+    # A new failure waits for its own grace period while the alerted one stays reported.
+    assert not monitor.notify({"issues": ["retention", "disk"]}, state, container="fixture", now=1500)
+    assert monitor.notify({"issues": ["retention", "disk"]}, state, container="fixture", now=2100)
+    assert monitor.notify({"issues": []}, state, container="fixture", now=2400)
+    assert "снова проходят" in json.loads(send.call_args.kwargs["input"])["text"]
+
+
+def test_alerts_from_the_previous_state_format_stay_acknowledged(tmp_path, monkeypatch):
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"issues": ["backup"], "sent_at": 0}))
+    send = Mock(return_value=SimpleNamespace(returncode=0))
+    monkeypatch.setattr(monitor.subprocess, "run", send)
+    assert not monitor.notify({"issues": ["backup"]}, state, container="fixture", now=3600)
+    send.assert_not_called()
+    assert json.loads(state.read_text()) == {"issues": ["backup"], "sent_at": 0, "since": {"backup": 3600}}
