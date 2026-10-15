@@ -128,7 +128,7 @@ def _encode_video(
         f"setpts=(PTS-STARTPTS)/{factor:.12f},"
         "scale=w='if(gte(dar,1),512,max(2,trunc(512*dar/2)*2))':"
         "h='if(gte(dar,1),max(2,trunc(512/dar/2)*2),512)',"
-        "setsar=1,fps=30:round=down,format=yuva420p"
+        "setsar=1,fps={fps}:round=down,format=yuva420p"
     )
     command = [
         "ffmpeg",
@@ -155,7 +155,7 @@ def _encode_video(
         "-sn",
         "-dn",
         "-vf",
-        filters,
+        filters.format(fps=30),
         "-c:v",
         "libvpx-vp9",
         "-b:v",
@@ -180,10 +180,13 @@ def _encode_video(
             raise StickerMediaError("Обработка заняла слишком много времени. Стикер не добавлен.")
         return budget
 
-    for quality in (32, 42):
+    # Single-pass VP9 bitrate caps overshoot, so retries step CRF instead. Grainy clips
+    # exceed 1 MB at CRF 42; the last resort also halves the frame rate.
+    for quality, frame_rate in ((32, 30), (50, 30), (63, 15)):
         # Retry only a valid oversized encoding. Keep the original source, alpha,
-        # dimensions and timeline; the second pass trades detail for smaller bytes.
+        # dimensions and timeline; later passes trade detail for smaller bytes.
         command[command.index("-crf") + 1] = str(quality)
+        command[command.index("-vf") + 1] = filters.format(fps=frame_rate)
         output.unlink(missing_ok=True)
         _run(command, timeout=remaining())
         info, result, length = _probe(output, timeout=remaining())

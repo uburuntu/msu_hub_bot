@@ -431,8 +431,8 @@ def test_successful_creation_clears_pending_state_even_when_preview_fails(handle
     assert handlers["trimmed_sticker_notice"] in m.reply.call_args.args[0]
 
 
-@pytest.mark.parametrize("second_size", [100, media.MAX_VIDEO_BYTES + 1])
-def test_oversized_video_gets_one_stronger_pass_within_the_shared_budget(monkeypatch, second_size):
+@pytest.mark.parametrize("fits_on", [2, 3, None])
+def test_oversized_video_gets_stronger_passes_within_the_shared_budget(monkeypatch, fits_on):
     clock = [0.0]
     monkeypatch.setattr(media.time, "monotonic", lambda: clock[0])
     probes = []
@@ -450,19 +450,22 @@ def test_oversized_video_gets_one_stronger_pass_within_the_shared_budget(monkeyp
     def encode(command, *, timeout):
         calls.append((list(command), timeout))
         clock[0] += 10
-        Path(command[-1]).write_bytes(b"x" * (media.MAX_VIDEO_BYTES + 1 if len(calls) == 1 else second_size))
+        Path(command[-1]).write_bytes(b"x" * (100 if len(calls) == fits_on else media.MAX_VIDEO_BYTES + 1))
 
     monkeypatch.setattr(media, "_run", encode)
-    if second_size <= media.MAX_VIDEO_BYTES:
-        assert media.prepare_video(b"video").payload == b"x" * second_size
+    if fits_on:
+        assert media.prepare_video(b"video").payload == b"x" * 100
     else:
         with pytest.raises(media.StickerSizeError):
             media.prepare_video(b"video")
-    assert len(calls) == 2 and [timeout for _, timeout in calls] == [60, 45]
-    assert probes == [50, 35]
+    passes = fits_on or 3
+    assert [timeout for _, timeout in calls] == [60, 45, 30][:passes]
+    assert probes == [50, 35, 20][:passes]
     commands = [command for command, _ in calls]
-    assert [command[command.index("-crf") + 1] for command in commands] == ["32", "42"]
-    assert commands[0][commands[0].index("-vf") + 1] == commands[1][commands[1].index("-vf") + 1]
+    assert [command[command.index("-crf") + 1] for command in commands] == ["32", "50", "63"][:passes]
+    filters = [command[command.index("-vf") + 1] for command in commands]
+    assert [value.replace("fps=15", "fps=30") for value in filters] == [filters[0]] * passes
+    assert ["fps=15" in value for value in filters] == [False, False, True][:passes]
     assert all(not Path(command[-1]).parent.exists() for command in commands)
 
 

@@ -51,10 +51,12 @@ Pillow decodes APNG/animated WEBP with their frame timing, alpha, blending and
 disposal. A separate APNG poster is excluded. Loop counts do not repeat the source
 cycle; Telegram loops the resulting sticker. Nonpositive or malformed frame
 durations are rejected. Resized RGBA frames feed a generated local timeline into
-VP9 encoding. A valid result above 256 KiB gets one stronger compression attempt;
-the source, dimensions, alpha, frame rate and timeline stay unchanged. Decode or
-encoder failures and timeouts are not retried. If the second result is still too
-large, the bot asks for a simpler or shorter excerpt.
+VP9 encoding. A valid result above 256 KiB is re-encoded at CRF 50, then as a
+last resort at CRF 63 and 15 fps; single-pass VP9 bitrate caps overshoot, so
+retries step quality instead. The source, dimensions, alpha and timeline stay
+unchanged, and all passes share one 60-second deadline. Decode or encoder
+failures and timeouts are not retried. If the last result is still too large,
+the bot asks for a simpler or shorter excerpt.
 
 | Input or operation | Enforced limits |
 | --- | --- |
