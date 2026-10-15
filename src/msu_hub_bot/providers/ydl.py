@@ -92,6 +92,10 @@ class YDL:
             reason, status = classify_link_error(error)
             record_link_diagnostic(LinkStage.EXTRACT, reason, http_status=status)
             return None
+        except TypeError:
+            # Some extractors (e.g. Yandex Music, Google Drive) crash on unexpected page data.
+            record_link_diagnostic(LinkStage.EXTRACT, LinkReason.INVALID_RESPONSE)
+            return None
 
     @classmethod
     def extract(

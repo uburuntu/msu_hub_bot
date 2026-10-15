@@ -1,5 +1,7 @@
 """Downloader metadata and link contracts do not require external video traffic."""
 
+import html
+import re
 from unittest.mock import MagicMock
 
 import pytest
@@ -215,6 +217,30 @@ def test_scoped_extractor_failures_preserve_fixed_causes_without_message_parsing
     assert [(item.stage, item.reason, item.http_status) for item in result.diagnostics] == [(LinkStage.EXTRACT, reason, status)]
     assert "PRIVATE" not in repr(result.diagnostics)
     assert not collect_link_diagnostics(lambda: None).diagnostics
+
+
+def test_extractor_crash_on_unexpected_page_data_is_an_invalid_response():
+    client = MagicMock()
+    client.extract_info.side_effect = TypeError("PRIVATE_BODY")
+
+    result = collect_link_diagnostics(YDL.extract_data, "https://music.example.test/PRIVATE_URL", client)
+
+    assert result.value is None
+    assert [(item.stage, item.reason) for item in result.diagnostics] == [(LinkStage.EXTRACT, LinkReason.INVALID_RESPONSE)]
+    assert "PRIVATE" not in repr(result.diagnostics)
+
+
+def test_long_titles_are_shortened_to_the_visible_caption_limit(monkeypatch):
+    video = "https://example.test/" + "v" * 2000
+    title = "Пост 😀 " * 400
+    monkeypatch.setattr(YDL, "extract", MagicMock(return_value=(title, [(video, "720p", 1280, 720)], (video, 1280, 720))))
+    text, _ = text_with_preview("https://t.me/example/1")
+    visible = re.sub(r"<[^>]+>", "", text)
+    assert len(html.unescape(visible).encode("utf-16-le")) // 2 <= 1024
+    assert visible.endswith("…\n\n— 720p") and video in text
+    short = "Short title"
+    monkeypatch.setattr(YDL, "extract", MagicMock(return_value=(short, [(video, "720p", 1280, 720)], None)))
+    assert f">{short}</a>" in text_with_preview("https://example.test/page")[0]
 
 
 def test_wrapped_extractor_http_error_retains_status_only():
