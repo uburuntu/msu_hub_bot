@@ -35,7 +35,9 @@ def test_freshness_and_real_success_are_required_without_offhost_policy(tmp_path
     assert "DO_NOT_EXPORT" not in json.dumps(result)
     result = monitor.evaluate(tmp_path, restore, tmp_path, now=now + timedelta(hours=37))
     assert result["issues"] == ["backup", "retention"]
-    result = monitor.evaluate(tmp_path, restore, tmp_path, now=now + timedelta(days=31))
+    result = monitor.evaluate(tmp_path, restore, tmp_path, now=now + timedelta(days=89))
+    assert result["issues"] == ["backup", "retention"]
+    result = monitor.evaluate(tmp_path, restore, tmp_path, now=now + timedelta(days=91))
     assert result["issues"] == ["backup", "retention", "restore"]
 
 
@@ -56,14 +58,15 @@ def test_notifications_change_repeat_recover_and_preserve_failed_send(tmp_path, 
     assert not monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100000)
     assert monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100600)
     assert not monitor.notify({"issues": ["disk"]}, state, container="fixture", now=100601)
-    assert monitor.notify({"issues": ["disk"]}, state, container="fixture", now=130000)
+    assert not monitor.notify({"issues": ["disk"]}, state, container="fixture", now=130000)
+    assert monitor.notify({"issues": ["disk"]}, state, container="fixture", now=187000)
     saved = state.read_text()
     send.return_value.returncode = 1
     with pytest.raises(RuntimeError):
-        monitor.notify({"issues": []}, state, container="fixture", now=130001)
+        monitor.notify({"issues": []}, state, container="fixture", now=187001)
     assert state.read_text() == saved
     send.return_value.returncode = 0
-    assert monitor.notify({"issues": []}, state, container="fixture", now=130002)
+    assert monitor.notify({"issues": []}, state, container="fixture", now=187002)
     assert state.stat().st_mode & 0o077 == 0
     assert send.call_count == 4
 
@@ -82,6 +85,16 @@ def test_brief_failures_inside_the_grace_period_stay_silent(tmp_path, monkeypatc
     assert monitor.notify({"issues": ["retention", "disk"]}, state, container="fixture", now=2100)
     assert monitor.notify({"issues": []}, state, container="fixture", now=2400)
     assert "снова проходят" in json.loads(send.call_args.kwargs["input"])["text"]
+
+
+def test_notification_sends_plain_text_through_the_bot_api_without_aiogram(tmp_path, monkeypatch):
+    send = Mock(return_value=SimpleNamespace(returncode=0))
+    monkeypatch.setattr(monitor.subprocess, "run", send)
+    assert not monitor.notify({"issues": ["restore"]}, tmp_path / "state.json", container="fixture", now=0)
+    assert monitor.notify({"issues": ["restore"]}, tmp_path / "state.json", container="fixture", now=monitor.GRACE_SECONDS)
+    script = send.call_args.args[0][-1]
+    assert "aiogram" not in script and "/sendMessage" in script and "parse_mode" not in script
+    compile(script, "notify", "exec")
 
 
 def test_alerts_from_the_previous_state_format_stay_acknowledged(tmp_path, monkeypatch):

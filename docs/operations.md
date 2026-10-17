@@ -74,7 +74,7 @@ boundary](observability.md#logs-and-failures) before adding settings or diagnost
 | --- | --- |
 | Encrypted backup | Successful completion within 36 hours |
 | Retention | Successful bounded run with durable entities unchanged within one hour |
-| Isolated restore check | Verified restore within 30 days |
+| Isolated restore check | Verified restore within 90 days |
 | Disk reserve | At least 40 GiB and 10% free |
 
 Pass `--evidence`, `--restore-receipt` and `--disk` from private host configuration.
@@ -82,8 +82,10 @@ Run without `--notify` to inspect its sanitized JSON report. `--notify --state P
 uses the running bot's token to notify its configured owner; no secret is copied
 into the tool or scheduler. A problem must persist for ten minutes before it is
 reported, which absorbs receipts rewritten while maintenance is running. Alerts then
-fire when the reported set changes and at most once every six hours for an unchanged
-problem; recovery of a reported problem sends one message.
+fire when the reported set changes and at most once a day for an unchanged problem;
+recovery of a reported problem sends one message. Notifications use the Bot API
+over HTTP without importing aiogram, so a slow host cannot outlast the send timeout
+after delivery and cause a duplicate.
 Transport failure does not acknowledge an alert. Schedule the check every five
 minutes using the host's service manager, with a process timeout and private state.
 

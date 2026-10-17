@@ -21,20 +21,23 @@ ALERTS = {
     "restore": "Проверка восстановления отсутствует или устарела.",
     "disk": "Свободное место ниже резерва для резервного копирования.",
 }
+# Importing aiogram takes ~10s on a busy host; a send that outlives the subprocess
+# timeout is delivered but unacknowledged, so the next check would repeat it.
 NOTIFY = """
-import asyncio,json,sys
-from aiogram import Bot
+import json,sys,urllib.request
 from msu_hub_bot.settings import Settings
-async def main():
+def main():
     config=Settings()
     if config.owner_id <= 0: raise ValueError("Owner is not configured")
-    message=json.load(sys.stdin)["text"]
-    async with Bot(config.bot_token) as bot:
-        async with asyncio.timeout(20):
-            await bot.send_message(config.owner_id,message,parse_mode=None,disable_notification=True)
-try: asyncio.run(main())
+    body={"chat_id":config.owner_id,"text":json.load(sys.stdin)["text"],"disable_notification":True}
+    request=urllib.request.Request("https://api.telegram.org/bot"+config.bot_token+"/sendMessage",json.dumps(body).encode(),{"Content-Type":"application/json"})
+    with urllib.request.urlopen(request,timeout=20) as response:
+        if json.load(response).get("ok") is not True: raise ValueError("Telegram rejected the message")
+try: main()
 except Exception: raise SystemExit("Operational notification failed") from None
 """
+RESTORE_MAX_AGE = 90 * 86400
+REMINDER_SECONDS = 24 * 3600
 
 
 def receipt(path: Path) -> dict:
@@ -68,7 +71,7 @@ def evaluate(evidence: Path, restore: Path, disk: Path, *, now: datetime | None 
             checks[name] = False
     try:
         value = receipt(restore)
-        checks["restore"] = value.get("restored_verified") is True and fresh(value, "verified_at", 30 * 86400, now)
+        checks["restore"] = value.get("restored_verified") is True and fresh(value, "verified_at", RESTORE_MAX_AGE, now)
     except (OSError, ValueError, TypeError, KeyError, OverflowError):
         checks["restore"] = False
     try:
@@ -91,7 +94,7 @@ def message_for(issues: list[str]) -> str:
 
 
 def notify(report: dict, state_path: Path, *, container: str, now: float | None = None) -> bool:
-    """Alert once a problem persists, then per change or six-hour reminder; failed sends never acknowledge."""
+    """Alert once a problem persists, then per change or daily reminder; failed sends never acknowledge."""
     now = time.time() if now is None else now
     state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with state_path.with_suffix(".lock").open("a") as lock:
@@ -109,7 +112,7 @@ def notify(report: dict, state_path: Path, *, container: str, now: float | None 
         issues = [name for name in report["issues"] if name in previous or now - since[name] >= GRACE_SECONDS]
         last_sent = state.get("sent_at", 0)
         changed = previous != issues
-        due = bool(issues) and (not isinstance(last_sent, (float, int)) or now - last_sent >= 6 * 3600)
+        due = bool(issues) and (not isinstance(last_sent, (float, int)) or now - last_sent >= REMINDER_SECONDS)
         if changed or due:
             result = subprocess.run(
                 ["docker", "exec", "-i", container, "/opt/msu_hub_bot/.venv/bin/python", "-c", NOTIFY],
