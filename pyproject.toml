@@ -35,7 +35,7 @@ dependencies = [
     "tabulate==0.10.0",
     "transliterate==1.10.2",
     "ujson==6.0.0",
-    "yt-dlp[default,deno]==2026.8.19",
+    "yt-dlp[default,deno,curl-cffi]==2026.8.19",
     "pyacrcloud==1.0.12; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "babel==2.18.0",
     "opentelemetry-sdk==1.44.0",
