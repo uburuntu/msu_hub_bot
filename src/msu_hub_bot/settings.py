@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = Field(default="", repr=False)
     jev_enabled: bool = False
     jev_confidence: float = Field(default=0.8, ge=0.5, le=1)
+    stt_model: str = Field(default="qwen/qwen3-asr-1.7b", pattern=r"^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._:-]*$")
     dumps_chat_id: int = 0
     events_chat_id: int = 0
     error_chat_id: int = 0
@@ -86,7 +87,6 @@ class Settings(BaseSettings):
     tenet_sticker_owner_id: int = 0
     vk_user_token: str = Field(default="", repr=False)
     wolfram_token: str = Field(default="", repr=False)
-    wit_tokens: list[str] = Field(default_factory=list, repr=False)
     jdoodle_tokens: list[tuple[str, str]] = Field(default_factory=list, repr=False)
     lingvanex_authorization: str = Field(default="", repr=False)
     lingvanex_image_authorization: str = Field(default="", repr=False)

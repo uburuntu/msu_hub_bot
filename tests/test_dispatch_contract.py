@@ -26,7 +26,7 @@ from msu_hub_bot.telegram.state import (
     TopicFSMContextMiddleware,
 )
 from msu_hub_bot.routing import build_router
-from msu_hub_bot.providers.wit import Wit
+from msu_hub_bot.commands.speech import Speech
 from msu_hub_bot.providers.wolfram import WolframAPI
 from msu_hub_bot.settings import Settings
 from msu_hub_bot.telemetry import Telemetry
@@ -45,7 +45,7 @@ class Selection(BaseMiddleware):
 
 
 def router():
-    return build_router(wit=Wit([]), wolfram=WolframAPI(""), config=Settings(owner_id=7, founder_ids=[8]))
+    return build_router(speech=Speech(None), wolfram=WolframAPI(""), config=Settings(owner_id=7, founder_ids=[8]))
 
 
 def routes(root, event):

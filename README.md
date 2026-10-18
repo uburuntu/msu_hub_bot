@@ -30,6 +30,17 @@ confidence is a routing signal, not a guarantee of correctness.
 The provider is optional and does not run when disabled. Each user can have one
 request in flight, with a five-second cooldown; four requests can run concurrently.
 
+## Speech recognition
+
+`/stt` in reply to a voice message, video note, audio or video returns its
+transcript; chats can also enable automatic transcripts for incoming voice
+messages and video notes in settings. Recognition uses OpenRouter's
+speech-to-text endpoint with `HUB_OPENROUTER_API_KEY`, defaulting to
+`qwen/qwen3-asr-1.7b` for its strong Russian accuracy (`HUB_STT_MODEL`).
+The language is detected for each recording, so mixed Russian and English
+chats need no configuration. Only a mono audio track of at most 20 minutes is
+sent, and only to zero-data-retention endpoints.
+
 ## Chat quizzes
 
 `/pokemon` asks you to identify a Pokémon silhouette;

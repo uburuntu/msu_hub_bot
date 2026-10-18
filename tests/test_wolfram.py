@@ -12,7 +12,6 @@ from aiogram.methods import DeleteMessage
 
 from msu_hub_bot.settings import MissingIntegration
 
-from msu_hub_bot.providers import wit
 from msu_hub_bot.providers import wolfram
 
 METHOD = DeleteMessage(chat_id=42, message_id=1)
@@ -147,7 +146,7 @@ async def test_missing_provider_does_not_send_progress():
     progress.delete.assert_not_awaited()
 
 
-@pytest.mark.parametrize("client_class", [wit.WitAPI, wolfram.WolframAPI])
+@pytest.mark.parametrize("client_class", [wolfram.WolframAPI])
 async def test_close_never_creates_an_unused_session(monkeypatch, client_class):
     factory = Mock()
     monkeypatch.setattr(aiohttp, "ClientSession", factory)
@@ -157,7 +156,7 @@ async def test_close_never_creates_an_unused_session(monkeypatch, client_class):
     factory.assert_not_called()
 
 
-@pytest.mark.parametrize("client_class", [wit.WitAPI, wolfram.WolframAPI])
+@pytest.mark.parametrize("client_class", [wolfram.WolframAPI])
 async def test_close_closes_an_existing_session(client_class):
     client = client_class("synthetic")
     session = SimpleNamespace(close=AsyncMock())

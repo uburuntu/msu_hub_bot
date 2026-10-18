@@ -6,7 +6,6 @@ from aiogram.filters import StateFilter
 from msu_hub_bot.telegram.filters import MetaCommand, SlashCommand
 from msu_hub_bot.telegram.state import UpdateStateContext
 from msu_hub_bot.settings import Settings
-from msu_hub_bot.providers.wit import Wit
 from msu_hub_bot.providers.wolfram import WolframAPI
 from msu_hub_bot.commands.control import process_start, process_cancel, process_echo, process_error, process_expired_callback
 from msu_hub_bot.commands.admin import (
@@ -91,6 +90,7 @@ from msu_hub_bot.commands.rolls import (
     process_roll,
     process_truth,
 )
+from msu_hub_bot.commands.speech import Speech
 from msu_hub_bot.commands.sed import process_sed
 from msu_hub_bot.commands.settings import process_settings
 from msu_hub_bot.commands.song import process_song
@@ -122,7 +122,7 @@ def fsm_callback_allowed(query: object, state_context: UpdateStateContext) -> bo
     return state_context.eligible
 
 
-def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
+def build_router(*, speech: Speech, wolfram: WolframAPI, config: Settings) -> Router:
     settings = config
     root = Router(name="hub")
     current: Router | None = None
@@ -522,17 +522,17 @@ def build_router(*, wit: Wit, wolfram: WolframAPI, config: Settings) -> Router:
         process_tts, MetaCommand("tts", "speech", args=1), StateFilter(None), flags={"handler_key": "process_tts", "fsm_release": True}
     )
     group("speech").message.register(
-        wit.process_stt_command,
+        speech.process_stt_command,
         SlashCommand("stt"),
         StateFilter(None),
-        flags={"handler_key": "wit.process_stt_command", "fsm_release": True},
+        flags={"handler_key": "speech.process_stt_command", "fsm_release": True},
     )
     group("speech").message.register(
-        wit.process_stt,
+        speech.process_stt,
         F.chat.id != settings.excluded_chat_id,
         StateFilter(None),
         F.content_type.in_((ContentType.VOICE, ContentType.VIDEO_NOTE)),
-        flags={"handler_key": "wit.process_stt", "fsm_release": True},
+        flags={"handler_key": "speech.process_stt", "fsm_release": True},
     )
     group("wolfram").message.register(
         wolfram.process_wolfram,

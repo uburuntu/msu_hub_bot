@@ -1,6 +1,6 @@
 # Provider adapters
 
-- Own provider protocols, response parsing and downloads; replies belong in [commands/](../commands/). [wit.py](wit.py) and [wolfram.py](wolfram.py) also register Telegram handlers, so trace their routes when changing them.
+- Own provider protocols, response parsing and downloads; replies belong in [commands/](../commands/). [wolfram.py](wolfram.py) also registers Telegram handlers, so trace its routes when changing it.
 - An imported module or reachable home page does not prove its active command works; check the actual request and response path.
 - [exceptions.py](exceptions.py) defines `ExternalServiceError` and user-readable failures; preserve caller contracts when normalizing transport and parsing errors.
 - Bound the whole operation, including polling and retries, and own session/file cleanup explicitly.

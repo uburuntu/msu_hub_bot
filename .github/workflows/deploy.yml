@@ -78,6 +78,7 @@ jobs:
           HUB_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           HUB_JEV_ENABLED: ${{ vars.HUB_JEV_ENABLED || 'false' }}
           HUB_JEV_CONFIDENCE: ${{ vars.HUB_JEV_CONFIDENCE || '0.8' }}
+          HUB_STT_MODEL: ${{ vars.HUB_STT_MODEL || 'qwen/qwen3-asr-1.7b' }}
           HUB_DUMPS_CHAT_ID: ${{ secrets.HUB_DUMPS_CHAT_ID }}
           HUB_EVENTS_CHAT_ID: ${{ secrets.HUB_EVENTS_CHAT_ID }}
           HUB_ERROR_CHAT_ID: ${{ secrets.HUB_ERROR_CHAT_ID }}
@@ -96,7 +97,6 @@ jobs:
           HUB_TENET_STICKER_OWNER_ID: ${{ secrets.HUB_TENET_STICKER_OWNER_ID }}
           HUB_VK_USER_TOKEN: ${{ secrets.HUB_VK_USER_TOKEN }}
           HUB_WOLFRAM_TOKEN: ${{ secrets.HUB_WOLFRAM_TOKEN }}
-          HUB_WIT_TOKENS: ${{ secrets.HUB_WIT_TOKENS }}
           HUB_JDOODLE_TOKENS: ${{ secrets.HUB_JDOODLE_TOKENS }}
           HUB_LINGVANEX_AUTHORIZATION: ${{ secrets.HUB_LINGVANEX_AUTHORIZATION }}
           HUB_LINGVANEX_IMAGE_AUTHORIZATION: ${{ secrets.HUB_LINGVANEX_IMAGE_AUTHORIZATION }}

@@ -97,6 +97,7 @@ Required reviewers are intentionally not enabled.
 | `HUB_WEB_APP_URL` | Production environment variable; HTTPS origin, empty disables the Mini App |
 | `OPENROUTER_API_KEY` | Production environment secret; mapped to `HUB_OPENROUTER_API_KEY` only in the deployment step |
 | `HUB_JEV_ENABLED`, `HUB_JEV_CONFIDENCE` | Production environment variables; defaults `false` and `0.8` |
+| `HUB_STT_MODEL` | Production environment variable; default `qwen/qwen3-asr-1.7b` |
 | `HUB_STORAGE_CONTRACT` | Workflow-owned data compatibility marker; do not override for rollback |
 | `HUB_ENVIRONMENT`, `HUB_RELEASE` | Set by the workflow to `production` and the public release revision |
 | `DEPLOY_SSH_KEY` | Production environment secret; dedicated private deployment key |

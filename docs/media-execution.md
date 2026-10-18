@@ -33,7 +33,7 @@ deadline and input/output limits.
 | Shared FFprobe / FFmpeg | 10 / 120 seconds; captured probe output at most 1 MiB |
 | Shared FFmpeg output | 50 MiB; oversized results are rejected |
 | OCR | 60 seconds; recognized text at most 1 MiB |
-| Speech preprocessing batch | 120 seconds total and 64 MiB of PCM; partial batches are discarded |
+| Speech preprocessing | 120 seconds; one mono 16 kHz MP3 of at most 20 minutes |
 
 Native input uses a local-protocol and media-container allowlist. Uploaded
 playlists cannot open other local files or fetch network resources. Only the
@@ -79,6 +79,6 @@ timeout recovery, native process-tree cleanup, resource ownership, malformed
 inputs and normal conversions. Pathological regex checks run under an
 independent process watchdog so a GIL regression cannot freeze the test runner.
 
-Speech recognition shares three outgoing chunk slots across all messages and configured Wit tokens. The 180-second recognition deadline includes waiting for capacity and provider throttling; the complete download/preparation/recognition pipeline has a 240-second deadline. Chunk order and the existing unrecognized-fragment markers are preserved. Failed or timed-out batches never emit a misleading partial transcript, and all child requests settle before audio buffers are released.
+Speech recognition sends one prepared clip per message to OpenRouter's transcription endpoint, sharing three request slots across all messages. Records longer than 20 minutes are skipped automatically and explained for an explicit `/stt`. Requests are restricted to zero-data-retention endpoints that do not collect data. A transcription request has a 120-second deadline; the complete download/preparation/recognition pipeline has a 240-second deadline. A failed request never emits a partial transcript.
 
 [Provider tools](provider-tools.md) describes document conversion, sourced lookups and the offline background-removal model, including build and resource limits.

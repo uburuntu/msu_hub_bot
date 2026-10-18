@@ -33,7 +33,6 @@ dependencies = [
     "requests==2.34.2",
     "resvg-py==0.5.0",
     "tabulate==0.10.0",
-    "throttler==1.2.3",
     "transliterate==1.10.2",
     "ujson==6.0.0",
     "yt-dlp[default,deno]==2026.8.19",
@@ -258,7 +257,8 @@ files = [
     "src/msu_hub_bot/execution/sed.py",
     "src/msu_hub_bot/media/sticker_media.py",
     "src/msu_hub_bot/telegram/sticker_sets.py",
-    "src/msu_hub_bot/providers/wit.py",
+    "src/msu_hub_bot/providers/speech.py",
+    "src/msu_hub_bot/commands/speech.py",
     "src/msu_hub_bot/providers/fxembed.py",
     "src/msu_hub_bot/providers/http.py",
     "src/msu_hub_bot/providers/exceptions.py",
@@ -279,7 +279,7 @@ files = [
 
 [[tool.mypy.overrides]]
 # Remove each provider/native exception when its SDK ships types; adapters remain checked.
-module = ["onnxruntime", "yt_dlp", "yt_dlp.*", "aiocache", "arxiv", "gtts", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "throttler", "transliterate", "pyfiglet", "airtable", "ccxt", "ccxt.async_support"]
+module = ["onnxruntime", "yt_dlp", "yt_dlp.*", "aiocache", "arxiv", "gtts", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "transliterate", "pyfiglet", "airtable", "ccxt", "ccxt.async_support"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

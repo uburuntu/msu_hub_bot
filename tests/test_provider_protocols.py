@@ -9,9 +9,7 @@ import aiohttp
 import pytest
 
 from msu_hub_bot.providers import other, urbandictionary
-from msu_hub_bot.providers.exceptions import BadRequestError, ExternalServiceError
-
-from msu_hub_bot.providers import wit
+from msu_hub_bot.providers.exceptions import BadRequestError
 
 
 class Response:
@@ -142,29 +140,3 @@ async def test_upload_polling_is_bounded_and_closes_session(monkeypatch):
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(other.imgur_upload(io.BytesIO(b"image")), 1)
     assert session.closed
-
-
-@pytest.mark.parametrize("payload", [{"error": "private provider detail"}, {"text": None}, [], "unexpected"])
-async def test_wit_http_200_error_is_not_silent_empty_text(payload):
-    client = wit.WitAPI("synthetic-key")
-    client.__dict__["session"] = Session([Response(payload)])
-    with pytest.raises(wit.WitAPIError) as error:
-        await client.speech(io.BytesIO(b"audio"))
-    assert "private provider detail" not in repr(error.value)
-    assert isinstance(error.value, ExternalServiceError)
-    assert "Не удалось распознать речь" in error.value.text
-
-
-async def test_wit_error_does_not_retain_response_body():
-    client = wit.WitAPI("synthetic-key")
-    client.__dict__["session"] = Session([Response(status=401, text="private provider detail")])
-    with pytest.raises(wit.WitAPIError) as error:
-        await client.speech(io.BytesIO(b"audio"))
-    assert error.value.reason == "Synthetic status"
-
-
-@pytest.mark.parametrize("response,expected", [(Response({"text": "Привет"}), "Привет"), (Response(status=400, text="no-body"), "")])
-async def test_wit_success_and_empty_audio_keep_contract(response, expected):
-    client = wit.WitAPI("synthetic-key")
-    client.__dict__["session"] = Session([response])
-    assert await client.speech(io.BytesIO(b"audio")) == expected

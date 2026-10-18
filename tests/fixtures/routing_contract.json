@@ -15803,7 +15803,7 @@
       "registration_order": 353,
       "event": "message",
       "event_order": 199,
-      "handler": "Wit.process_stt_command",
+      "handler": "Speech.process_stt_command",
       "module": "utils.wit",
       "source": {
         "file": "hub_bot/main.py",
@@ -15851,7 +15851,7 @@
       "registration_order": 354,
       "event": "message",
       "event_order": 200,
-      "handler": "Wit.process_stt",
+      "handler": "Speech.process_stt",
       "module": "utils.wit",
       "source": {
         "file": "hub_bot/main.py",

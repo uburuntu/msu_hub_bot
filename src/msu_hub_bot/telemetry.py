@@ -74,7 +74,7 @@ class Provider(StrEnum):
     TELEGRAM = "telegram"
     JEV = "jev"
     JDOODLE = "jdoodle"
-    WIT = "wit"
+    OPENROUTER = "openrouter"
     WOLFRAM = "wolfram"
     FXEMBED = "fxembed"
     YOUTUBE = "youtube"
@@ -144,7 +144,7 @@ OPERATIONS = frozenset(
         "jdoodle.execute",
         "jev.classify",
         "intent.execute",
-        "wit.recognize",
+        "speech.transcribe",
         "tyan.image",
         "wolfram.query",
         "fxembed.fetch",

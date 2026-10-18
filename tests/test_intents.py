@@ -14,7 +14,7 @@ from msu_hub_bot.commands import intents
 from msu_hub_bot.commands.intents import IntentCommands
 from msu_hub_bot.media.limits import MAX_DOWNLOAD_BYTES
 from msu_hub_bot.providers.jev import JevDecision, JevError, JevErrorReason, ReplyMetadata
-from msu_hub_bot.providers.wit import Wit
+from msu_hub_bot.commands.speech import Speech
 from msu_hub_bot.providers.wolfram import WolframAPI
 from msu_hub_bot.routing import build_router
 from msu_hub_bot.settings import MissingIntegration, Settings
@@ -339,7 +339,7 @@ async def dispatch(runtime):
         observer.middleware(SelectiveIsolationMiddleware())
         observer.middleware(preview_policy)
         observer.middleware(IntentSelection())
-    dispatcher.include_router(build_router(wit=Wit([]), wolfram=WolframAPI(""), config=Settings(jev_enabled=True)))
+    dispatcher.include_router(build_router(speech=Speech(None), wolfram=WolframAPI(""), config=Settings(jev_enabled=True)))
     try:
         yield dispatcher, fsm, viewer
     finally:

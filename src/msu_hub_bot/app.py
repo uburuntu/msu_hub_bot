@@ -59,7 +59,8 @@ from msu_hub_bot.routing import build_router
 from msu_hub_bot.providers.jdoodle import ManyJDoodle
 from msu_hub_bot.providers.jev import JevClient
 from msu_hub_bot.commands.intents import IntentCommands
-from msu_hub_bot.providers.wit import Wit
+from msu_hub_bot.commands.speech import Speech
+from msu_hub_bot.providers.speech import SpeechClient
 from msu_hub_bot.providers.wolfram import WolframAPI
 from msu_hub_bot.settings import Settings
 from msu_hub_bot.telemetry import Backend, Telemetry, TelemetryConfig
@@ -166,8 +167,11 @@ class Application:
             )
             dvach = Api2chAsync()
             stack.push_async_callback(dvach.close)
-            wit = Wit(settings.wit_tokens, executor=executor, telemetry=telemetry)
-            stack.push_async_callback(wit.close)
+            speech_client = None
+            if settings.openrouter_api_key.strip():
+                speech_client = SpeechClient(settings.openrouter_api_key, model=settings.stt_model)
+                stack.push_async_callback(speech_client.close)
+            speech = Speech(speech_client, executor, telemetry=telemetry)
             wolfram = WolframAPI(settings.wolfram_token, telemetry=telemetry)
             stack.push_async_callback(wolfram.close)
             jdoodle = ManyJDoodle(settings.jdoodle_tokens, telemetry=telemetry)
@@ -221,7 +225,7 @@ class Application:
                 events_isolation=isolation,
                 vk_api=vk_api,
                 dvach=dvach,
-                wit=wit,
+                speech=speech,
                 wolfram=wolfram,
                 jdoodle=jdoodle,
                 intents=intents,
@@ -232,7 +236,7 @@ class Application:
                 posting_main_chat_id=settings.posting_main_chat_id,
                 posting_tb_chat_id=settings.posting_tb_chat_id,
             )
-            dispatcher.include_router(build_router(wit=wit, wolfram=wolfram, config=settings))
+            dispatcher.include_router(build_router(speech=speech, wolfram=wolfram, config=settings))
             telemetry.register_handlers(
                 {
                     handler.flags["handler_key"]

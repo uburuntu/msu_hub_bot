@@ -243,10 +243,9 @@ def test_credential_fields_are_hidden_in_repr_and_diagnostics(monkeypatch, field
 
 
 def test_nested_provider_credentials_and_proxy_password_are_protected(monkeypatch):
-    values = ["client-one", "secret-one", "token-one", "proxy-password"]
+    values = ["client-one", "secret-one", "proxy-password"]
     monkeypatch.setattr(settings, "jdoodle_tokens", [(values[0], values[1])])
-    monkeypatch.setattr(settings, "wit_tokens", [values[2]])
-    monkeypatch.setattr(settings, "proxy", f"socks5://proxy-user:{values[3]}@proxy.example.invalid:1080")
+    monkeypatch.setattr(settings, "proxy", f"socks5://proxy-user:{values[2]}@proxy.example.invalid:1080")
     assert redact("\n".join(values)) == "\n".join(["[REDACTED]"] * len(values))
     assert all(value not in repr(settings) for value in values)
 
