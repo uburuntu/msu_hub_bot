@@ -1,9 +1,14 @@
 # Bounded media execution
 
 The application shares three worker slots and permits three waiting jobs.
-Further requests receive a short busy reply; automatic video previews quietly
-skip work while saturated. Queueing, input preparation, execution and one
-broken-pool recovery share the caller's deadline.
+Further requests receive a short busy reply. Queueing, input preparation,
+execution and one broken-pool recovery share the caller's deadline.
+
+Automatic link previews use their own pool of two slots and eight waiting jobs,
+so conversions cannot crowd them out. A preview may wait up to a minute for a
+slot before its provider's extraction deadline starts; previews beyond the
+queue quietly skip work. Preview jobs spend most of their time in bounded
+network subprocesses rather than CPU work.
 
 Use `TPExecutor.run_prepared` when a job needs expensive inputs: its async
 factory runs only after acquiring a worker slot. For Telegram files,

@@ -38,6 +38,8 @@ _SITE_HOSTS: dict[str, LinkSite] = {
     **{host: "tiktok" for host in ("tiktok.com", "www.tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com")},
 }
 _PROVIDERS = {"youtube": Provider.YOUTUBE, "instagram": Provider.INSTAGRAM, "tiktok": Provider.TIKTOK}
+# Previews may wait this long for a worker; providers keep their own extraction deadlines.
+_QUEUE_SECONDS = 60
 
 
 def _unavailable(attempt: Operation, diagnostics: tuple[LinkDiagnostic, ...], *, generic: bool = False) -> None:
@@ -129,7 +131,9 @@ class LinkService:
         with self.telemetry.link_preview(str(url), Provider.YTDLP) as attempt:
             attempt.link_result(LinkStage.EXTRACT, LinkReason.READY)
             try:
-                result, timed_out = await self.executor.run(collect_link_diagnostics, text_with_preview, str(url), timeout=60)
+                result, timed_out = await self.executor.run(
+                    collect_link_diagnostics, text_with_preview, str(url), timeout=60 + _QUEUE_SECONDS
+                )
             except ExecutorBusy:
                 attempt.link_result(LinkStage.EXTRACT, LinkReason.BUSY)
                 return
@@ -162,7 +166,9 @@ class LinkService:
             with self.telemetry.link_preview(str(url), _PROVIDERS[site]) as attempt:
                 attempt.link_result(LinkStage.EXTRACT, LinkReason.READY)
                 with self.telemetry.operation(Boundary.PROVIDER, "links.extract", provider=_PROVIDERS[site]) as operation:
-                    extracted, timed_out = await self.executor.run(collect_link_diagnostics, fetchers[site], str(url), timeout=85)
+                    extracted, timed_out = await self.executor.run(
+                        collect_link_diagnostics, fetchers[site], str(url), timeout=85 + _QUEUE_SECONDS
+                    )
                     if timed_out:
                         operation.set_outcome(Outcome.TIMEOUT)
                         attempt.link_result(LinkStage.EXTRACT, LinkReason.TIMEOUT)

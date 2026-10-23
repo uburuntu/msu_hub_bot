@@ -57,8 +57,8 @@ The generated service configuration bounds both preflight and the bot:
 | `/work` | 512 MiB |
 
 These ceilings leave capacity for other applications on a shared host with six
-CPUs and 16 GiB of RAM. Three concurrent media jobs must fit inside the bot's
-budget; input, decoded-media and admission limits provide the earlier user-facing
+CPUs and 16 GiB of RAM. Three concurrent media jobs and two link previews must
+fit inside the bot's budget; input, decoded-media and admission limits provide the earlier user-facing
 rejections. Container limits are the final boundary, not a substitute for those
 checks. Docker's init process forwards shutdown signals and reaps orphaned
 children. Both temporary filesystems count toward the memory ceiling and disappear

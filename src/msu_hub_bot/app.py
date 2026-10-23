@@ -145,6 +145,9 @@ class Application:
             diagnostics = DiagnosticBuffer(release=telemetry.config.release)
             executor = TPExecutor(max_workers=3, telemetry=telemetry)
             stack.push_async_callback(asyncio.to_thread, executor.shutdown, wait=True)
+            # Link previews mostly wait on network workers; media conversions must not crowd them out.
+            link_executor = TPExecutor(max_workers=2, telemetry=telemetry, max_pending=8)
+            stack.push_async_callback(asyncio.to_thread, link_executor.shutdown, wait=True)
             vk_api = VkApi(token=settings.vk_user_token)
             stack.push_async_callback(vk_api.close)
             backend = Backend(settings.storage_backend)
@@ -208,7 +211,7 @@ class Application:
             dispatcher.my_chat_member.outer_middleware(events)
             dispatcher.message.outer_middleware(CheckGets())
             dispatcher.message.outer_middleware(events)
-            dispatcher.message.outer_middleware(ViewerMiddleware(bot, vk_api, executor, telemetry=telemetry))
+            dispatcher.message.outer_middleware(ViewerMiddleware(bot, vk_api, link_executor, telemetry=telemetry))
             dispatcher.message.middleware(preview_policy)
             dispatcher.workflow_data.update(
                 telemetry=telemetry,

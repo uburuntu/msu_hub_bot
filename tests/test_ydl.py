@@ -383,7 +383,7 @@ async def test_generic_video_viewer_preserves_preference_timeout_topic_and_video
     if not enabled:
         executor.run.assert_not_awaited()
     else:
-        executor.run.assert_awaited_once_with(collect_link_diagnostics, text_with_preview, url, timeout=60)
+        executor.run.assert_awaited_once_with(collect_link_diagnostics, text_with_preview, url, timeout=120)
     if enabled and not timed_out:
         method = bot.session.methods[-1]
         assert isinstance(method, SendVideo) and isinstance(method.video, URLInputFile)

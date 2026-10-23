@@ -195,7 +195,8 @@ def _extract_instagram_info(url: str) -> dict[str, Any] | None:
     """Child-process entry: raw extraction keeps photos and single-post carousels."""
     if _post_url(url) is None:
         return None
-    options = {**ydl_options(), "ignore_no_formats_error": True}
+    # Instagram's session and GraphQL requests are occasionally slow; one attempt gets a longer read window.
+    options = {**ydl_options(), "ignore_no_formats_error": True, "socket_timeout": 15}
     with YoutubeDL(options) as client:
         info = _NativeInstagramIE(client).extract(url)
     if not isinstance(info, dict):

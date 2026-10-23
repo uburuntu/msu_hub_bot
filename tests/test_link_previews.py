@@ -125,7 +125,7 @@ async def test_new_sites_use_their_provider_and_preserve_source_topic(runtime, s
     runtime.executor.run.return_value = LinkExtraction(post(site), ()), False
     message = source(runtime, url, message_id=501, message_thread_id=77, is_topic_message=topic)
     await runtime.viewer.view(message, Settings())
-    runtime.executor.run.assert_awaited_once_with(collect_link_diagnostics, getattr(service, fetcher), url, timeout=85)
+    runtime.executor.run.assert_awaited_once_with(collect_link_diagnostics, getattr(service, fetcher), url, timeout=145)
     assert len(runtime.session.methods) == 1
     method = runtime.session.methods[0]
     assert isinstance(method, SendRichMessage) and method.chat_id == message.chat.id
@@ -166,7 +166,7 @@ async def test_disabled_auto_video_links_skips_every_new_provider(runtime, site,
 )
 async def test_unsupported_recognized_routes_never_use_generic_ydl(runtime, url, fetcher):
     await runtime.viewer.view(source(runtime, url), Settings())
-    runtime.executor.run.assert_awaited_once_with(collect_link_diagnostics, getattr(service, fetcher), url, timeout=85)
+    runtime.executor.run.assert_awaited_once_with(collect_link_diagnostics, getattr(service, fetcher), url, timeout=145)
     assert not runtime.session.methods
 
 
