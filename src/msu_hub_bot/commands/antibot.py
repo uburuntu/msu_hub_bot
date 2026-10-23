@@ -4,14 +4,16 @@ import datetime
 from contextlib import suppress
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.types import ChatMemberAdministrator, ChatMemberOwner, ChatMemberRestricted
 from aiogram.enums import ChatMemberStatus
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.filters.callback_data import CallbackData
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hbold, hlink
+from aiohttp import ClientError
+from cachetools import TTLCache
 from emoji import emoji_count
 
 from msu_hub_bot.telegram.deletions import MessageDeletions
@@ -27,6 +29,7 @@ class AntiBotCallback(CallbackData, prefix="antibot", sep=":"):
 
 class AntiBot(CallbackCommandBase):
     callback_data = AntiBotCallback
+    moderators: TTLCache[tuple[int, int], bool] = TTLCache(maxsize=512, ttl=10 * 60)
 
     @classmethod
     def keyboard(cls, chat_id: int, user_id: int) -> InlineKeyboardMarkup:
@@ -49,40 +52,60 @@ class AntiBot(CallbackCommandBase):
         return InlineKeyboardMarkup(inline_keyboard=keyboard.export())
 
     @classmethod
+    async def _can_moderate(cls, bot: Bot, chat_id: int) -> bool:
+        key = (bot.id, chat_id)
+        if (cached := cls.moderators.get(key)) is not None:
+            return cached
+        try:
+            member = await bot.get_chat_member(chat_id, bot.id)
+        except TelegramAPIError:
+            member = None
+        result = isinstance(member, ChatMemberAdministrator) and member.can_restrict_members and member.can_delete_messages
+        cls.moderators[key] = result
+        return result
+
+    @classmethod
     async def process(cls, message: Message, bot: Bot, deletions: MessageDeletions) -> Message | bool | None:
+        # Best effort: warnings are useful only where the bot can act on them, and
+        # a failed check must not disturb the chat or the error log.
+        if not await cls._can_moderate(bot, message.chat.id):
+            return True
         for user in message.new_chat_members or []:
-            member = await bot.get_chat_member(message.chat.id, user.id)
-            if isinstance(member, (ChatMemberOwner, ChatMemberAdministrator)):
-                # Skip owner
-                continue
+            with suppress(TelegramAPIError, ClientError, TimeoutError):
+                await cls._check(message, user, bot, deletions)
+        return True
 
-            reasons = set()
+    @classmethod
+    async def _check(cls, message: Message, user: User, bot: Bot, deletions: MessageDeletions) -> None:
+        member = await bot.get_chat_member(message.chat.id, user.id)
+        if isinstance(member, (ChatMemberOwner, ChatMemberAdministrator)):
+            return
 
-            if "iherb" in user.full_name.lower():
-                reasons.add("реклама в профиле")
+        reasons = set()
 
-            if user.id > settings.antibot_user_id:
-                if emoji_count(user.full_name) >= 3:
-                    reasons.add("много эмодзи в имени")
+        if "iherb" in user.full_name.lower():
+            reasons.add("реклама в профиле")
 
-            if emoji_count(user.full_name) >= 4:
+        if user.id > settings.antibot_user_id:
+            if emoji_count(user.full_name) >= 3:
                 reasons.add("много эмодзи в имени")
 
-            # Long responses
-            if not reasons:
-                if await CombotAntiSpam.banned(user.id):
-                    link = hlink("CAS", f"https://cas.chat/query?u={user.id}")
-                    reasons.add(f"бан в системе {link}")
+        if emoji_count(user.full_name) >= 4:
+            reasons.add("много эмодзи в имени")
 
-            if reasons:
-                reason = ("причины: " if len(reasons) > 1 else "причина: ") + ", ".join(reasons)
-                reply = await message.reply(
-                    f"⚠️ Подозреваю, что {user.mention_html()} — {hbold('бот')}, {reason}",
-                    reply_markup=cls.keyboard(message.chat.id, user.id),
-                )
-                await deletions.mark_message_to_delete(reply, after=24 * 60 * 60)
+        # Long responses
+        if not reasons:
+            if await CombotAntiSpam.banned(user.id):
+                link = hlink("CAS", f"https://cas.chat/query?u={user.id}")
+                reasons.add(f"бан в системе {link}")
 
-        return True
+        if reasons:
+            reason = ("причины: " if len(reasons) > 1 else "причина: ") + ", ".join(reasons)
+            reply = await message.reply(
+                f"⚠️ Подозреваю, что {user.mention_html()} — {hbold('бот')}, {reason}",
+                reply_markup=cls.keyboard(message.chat.id, user.id),
+            )
+            await deletions.mark_message_to_delete(reply, after=24 * 60 * 60)
 
     @classmethod
     async def process_left(cls, message: Message, bot: Bot) -> None:

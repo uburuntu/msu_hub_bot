@@ -75,3 +75,35 @@ async def test_provider_error_redacts_configured_secret(monkeypatch):
     assert "synthetic-private-password" not in session.methods[-1].text
     assert "[REDACTED]" in session.methods[-1].text
     await bot.session.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Bad Request: not enough rights to send text messages to the chat",
+        "Bad Request: message to be replied not found",
+        "Forbidden: bot was kicked from the supergroup chat",
+    ],
+)
+async def test_expected_telegram_errors_stay_out_of_error_chat(monkeypatch, description):
+    monkeypatch.setattr(settings, "error_chat_id", -100500)
+    control.errors.clear()
+    bot = make_bot()
+    update = Update(update_id=1, message=make_message(bot=bot))
+    error = TelegramBadRequest(SendMessage(chat_id=1, text="test"), description)
+    assert await control.process_error(ErrorEvent(update=update, exception=error), bot) is True
+    assert bot.session.methods == []
+    await bot.session.close()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_telegram_errors_reach_error_chat(monkeypatch):
+    monkeypatch.setattr(settings, "error_chat_id", -100500)
+    control.errors.clear()
+    bot = make_bot()
+    update = Update(update_id=1, message=make_message(bot=bot))
+    error = TelegramBadRequest(SendMessage(chat_id=1, text="test"), "Bad Request: message is too long")
+    await control.process_error(ErrorEvent(update=update, exception=error), bot)
+    assert [method.chat_id for method in bot.session.methods] == [-100500]
+    await bot.session.close()

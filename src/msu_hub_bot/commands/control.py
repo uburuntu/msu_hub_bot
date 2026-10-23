@@ -5,7 +5,7 @@ import traceback
 from contextlib import suppress
 
 from aiogram import Bot, html
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, ErrorEvent, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove, Update
 from aiogram.utils.markdown import hbold, hpre
@@ -15,6 +15,7 @@ from cachetools import TTLCache
 from msu_hub_bot.execution.executor import ExecutorBusy
 from msu_hub_bot.media.limits import MediaDimensionsError
 from msu_hub_bot.providers.exceptions import ExternalServiceError
+from msu_hub_bot.telegram.errors import EXPECTED_REASONS, telegram_error_reason
 from msu_hub_bot.telegram.files import DownloadTooLarge
 from msu_hub_bot.telegram.state import UpdateStateContext, release_state_isolation
 from msu_hub_bot.commands.debug import process_json
@@ -82,14 +83,14 @@ async def process_error(event: ErrorEvent, bot: Bot) -> bool:
         await reply_error(update, text)
         return True
 
+    if isinstance(error, TelegramAPIError) and (reason := telegram_error_reason(error)) in EXPECTED_REASONS:
+        logger.info("Telegram update skipped: %s", reason)
+        return True
+
     error_str = redact(repr(error))
     trace = redact("".join(traceback.format_exception(type(error), error, error.__traceback__)))
     logger.error("Telegram update failed: %s\n%s", error_str, trace)
     if isinstance(error, TelegramForbiddenError):
-        return True
-    if isinstance(error, TelegramBadRequest) and any(
-        fragment in error.message.lower() for fragment in ("message to edit not found", "message was deleted", "replied message not found")
-    ):
         return True
     if error_str not in errors and settings.error_chat_id:
         text = hbold("Exception") + ": " + hpre(error_str[:1000]) + "\n" + hpre(trace[-2000:])

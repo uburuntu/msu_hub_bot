@@ -2,7 +2,7 @@ import re
 from contextlib import suppress
 
 from aiogram import html
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError
 import transliterate
 from aiogram.types import (
     Message,
@@ -27,12 +27,16 @@ async def process_me(message: Message, meta: MetaInfo) -> Message | bool | None:
     if not text:
         return True
 
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    # Best effort: keep the original unless the replacement was actually posted.
+    author = username_link(message.from_user) if message.from_user else await chat_link(message.chat)
+    try:
+        sent = await message.answer(f"{author} {html.quote(text)}")
+    except TelegramAPIError:
+        return True
 
-    return await message.answer(
-        f"{username_link(message.from_user) if message.from_user else await chat_link(message.chat)} {html.quote(text)}"
-    )
+    with suppress(TelegramAPIError):
+        await message.delete()
+    return sent
 
 
 async def process_copy(message: Message) -> MessageId:

@@ -9,6 +9,7 @@ _REASONS = {
     "message to edit not found": "message_not_found",
     "message to delete not found": "message_not_found",
     "message to unpin not found": "message_not_found",
+    "message to be replied not found": "reply_not_found",
     "message can't be edited": "message_not_editable",
     "message can't be deleted": "message_not_deletable",
     "bot was blocked by the user": "bot_blocked",
@@ -32,6 +33,24 @@ _REASONS = {
     "photo_invalid_dimensions": "photo_dimensions_invalid",
     "image_process_failed": "image_processing_failed",
 }
+
+# Outcomes caused by chat state or user actions rather than by the bot itself.
+EXPECTED_REASONS = frozenset(
+    {
+        "chat_not_found",
+        "chat_deleted",
+        "message_not_found",
+        "message_not_editable",
+        "message_not_deletable",
+        "message_not_modified",
+        "reply_not_found",
+        "bot_blocked",
+        "bot_removed",
+        "user_deactivated",
+        "not_enough_rights",
+        "query_expired",
+    }
+)
 
 
 def telegram_error_reason(error: TelegramAPIError) -> str | None:

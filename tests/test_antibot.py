@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import SendMessage
 from aiogram.types import (
     ChatMemberAdministrator,
     ChatMemberBanned,
@@ -106,3 +108,39 @@ async def test_bot_permissions_still_required():
     query, data, bot, deletions = callback(member("creator"), bot_permissions=False)
     await AntiBot.process_cb(query, data, bot, deletions)
     bot.ban_chat_member.assert_not_awaited()
+
+
+def joined(bot, reply=None):
+    newcomer = User(id=20, is_bot=False, first_name="iHerb deals")
+    message = Mock(
+        spec=Message,
+        chat=SimpleNamespace(id=-100),
+        new_chat_members=[newcomer],
+        reply=reply or AsyncMock(),
+    )
+    return message, SimpleNamespace(mark_message_to_delete=AsyncMock())
+
+
+@pytest.fixture
+def no_moderators():
+    AntiBot.moderators.clear()
+    yield
+    AntiBot.moderators.clear()
+
+
+async def test_join_check_is_skipped_without_moderation_rights(no_moderators):
+    bot = SimpleNamespace(id=123, get_chat_member=AsyncMock(return_value=member("member")))
+    message, deletions = joined(bot)
+    assert await AntiBot.process(message, bot, deletions) is True
+    assert await AntiBot.process(message, bot, deletions) is True
+    assert bot.get_chat_member.await_count == 1
+    message.reply.assert_not_awaited()
+
+
+async def test_join_warning_is_best_effort(no_moderators):
+    error = TelegramBadRequest(SendMessage(chat_id=1, text="test"), "Bad Request: message to be replied not found")
+    bot = SimpleNamespace(id=123, get_chat_member=AsyncMock(side_effect=[member("administrator", True, True), member("member")]))
+    message, deletions = joined(bot, reply=AsyncMock(side_effect=error))
+    assert await AntiBot.process(message, bot, deletions) is True
+    message.reply.assert_awaited_once()
+    deletions.mark_message_to_delete.assert_not_awaited()
