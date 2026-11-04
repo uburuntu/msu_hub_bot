@@ -165,7 +165,7 @@ def test_chat_profile_omits_pinned_message_and_clears_absent_names():
     assert "PINNED_BODY_CANARY" not in repr(observation.model_dump())
     assert observation.model_dump(exclude_unset=True)["username"] is None
     assert observation.model_dump(exclude_unset=True)["title"] == "Synthetic"
-    assert "username" not in observation.profile
+    assert observation.profile["username"] is None
     assert observation.profile["accent_color_id"] == 1
 
 
@@ -176,6 +176,7 @@ def test_absent_usernames_clear_stale_values_but_language_stays_sparse():
     assert chat["username"] is None and chat["first_name"] is None
     assert sender["username"] is None and sender["last_name"] is None
     assert "language_code" not in sender
+    assert next(item for item in row.users if item.user_id == 10).profile["username"] is None
 
 
 def test_channel_origin_keeps_provenance_without_creating_a_message_body():

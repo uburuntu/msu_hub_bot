@@ -134,26 +134,25 @@ def reference_payload(value: dict[str, Any], *, message_body: bool = False) -> d
 
 
 def chat_observation(chat: Chat | ChatFullInfo, observed_at: datetime | None = None) -> ChatObservation:
-    profile = _payload(chat, profile=True)
+    # The stored profile merges by key, so a cleared field needs an explicit null there too.
+    profile = dict.fromkeys(_CLEARED_CHAT_FIELDS) | _payload(chat, profile=True)
     return ChatObservation.model_validate(
         {
             "chat_id": chat.id,
             "observed_at": observed_at or datetime.now(UTC),
             "profile": profile,
-            **dict.fromkeys(_CLEARED_CHAT_FIELDS),
             **{key: profile[key] for key in _CHAT_FIELDS if key in profile},
         }
     )
 
 
 def _user_observation(user: User, observed_at: datetime) -> UserObservation:
-    profile = _payload(user, profile=True)
+    profile = dict.fromkeys(_CLEARED_USER_FIELDS) | _payload(user, profile=True)
     return UserObservation.model_validate(
         {
             "user_id": user.id,
             "observed_at": observed_at,
             "profile": profile,
-            **dict.fromkeys(_CLEARED_USER_FIELDS),
             **{key: profile[key] for key in _USER_FIELDS if key in profile},
         }
     )
