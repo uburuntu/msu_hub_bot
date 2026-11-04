@@ -144,7 +144,7 @@ def test_import_reference_transform_preserves_numeric_lexical_values_without_mut
     assert envelope["message"]["reply_to_message"]["text"] == "nested-body"
 
 
-def test_chat_profile_omits_pinned_message_and_absent_optional_properties():
+def test_chat_profile_omits_pinned_message_and_clears_absent_names():
     chat = ChatFullInfo(
         id=-1001,
         type="supergroup",
@@ -163,9 +163,19 @@ def test_chat_profile_omits_pinned_message_and_absent_optional_properties():
     observation = chat_observation(chat, NOW)
     assert "pinned_message" not in observation.profile
     assert "PINNED_BODY_CANARY" not in repr(observation.model_dump())
-    assert "username" not in observation.model_fields_set
-    assert "username" not in observation.model_dump(exclude_unset=True)
+    assert observation.model_dump(exclude_unset=True)["username"] is None
+    assert observation.model_dump(exclude_unset=True)["title"] == "Synthetic"
+    assert "username" not in observation.profile
     assert observation.profile["accent_color_id"] == 1
+
+
+def test_absent_usernames_clear_stale_values_but_language_stays_sparse():
+    row = archive_observation(Update(update_id=11, message=message()), True, received_at=NOW)
+    chat = next(item for item in row.chats if item.chat_id == -1001).model_dump(exclude_unset=True)
+    sender = next(item for item in row.users if item.user_id == 10).model_dump(exclude_unset=True)
+    assert chat["username"] is None and chat["first_name"] is None
+    assert sender["username"] is None and sender["last_name"] is None
+    assert "language_code" not in sender
 
 
 def test_channel_origin_keeps_provenance_without_creating_a_message_body():

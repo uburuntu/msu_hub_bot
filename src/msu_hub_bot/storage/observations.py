@@ -44,6 +44,10 @@ from msu_hub_bot.storage.models import (
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 _CHAT_FIELDS = ("type", "title", "username", "first_name", "last_name")
 _USER_FIELDS = ("is_bot", "first_name", "last_name", "username", "language_code")
+# Telegram omits these from a Chat/User only when they are unset, so absence clears a
+# stale value. language_code is context-dependent and stays a sparse sighting.
+_CLEARED_CHAT_FIELDS = ("title", "username", "first_name", "last_name")
+_CLEARED_USER_FIELDS = ("last_name", "username")
 _MESSAGE_REFERENCES = ("message_id", "date", "edit_date", "message_thread_id", "business_connection_id")
 
 
@@ -136,6 +140,7 @@ def chat_observation(chat: Chat | ChatFullInfo, observed_at: datetime | None = N
             "chat_id": chat.id,
             "observed_at": observed_at or datetime.now(UTC),
             "profile": profile,
+            **dict.fromkeys(_CLEARED_CHAT_FIELDS),
             **{key: profile[key] for key in _CHAT_FIELDS if key in profile},
         }
     )
@@ -148,6 +153,7 @@ def _user_observation(user: User, observed_at: datetime) -> UserObservation:
             "user_id": user.id,
             "observed_at": observed_at,
             "profile": profile,
+            **dict.fromkeys(_CLEARED_USER_FIELDS),
             **{key: profile[key] for key in _USER_FIELDS if key in profile},
         }
     )

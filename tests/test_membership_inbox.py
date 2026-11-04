@@ -117,6 +117,10 @@ async def test_redelivery_deduplicates_receipt_time_and_strips_caller_profiles(t
 @pytest.mark.parametrize("explicit_clear", [False, True])
 async def test_sparse_identity_fields_survive_persist_reopen_and_rpc_replay(tmp_path, explicit_clear):
     original = batch()
+    # Extraction asserts absent names as cleared; build sparse sightings to test presence storage.
+    user, chat = original.users[0], original.chats[0]
+    original.users[0] = type(user).model_validate(user.model_dump(exclude_unset=True, exclude={"username", "last_name"}))
+    original.chats[0] = type(chat).model_validate(chat.model_dump(exclude_unset=True, exclude={"username", "first_name", "last_name"}))
     if explicit_clear:
         original.users[0].username = None
         original.chats[0].username = None
