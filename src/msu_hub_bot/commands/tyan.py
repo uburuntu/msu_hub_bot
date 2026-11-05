@@ -1,4 +1,3 @@
-import random
 from html import escape
 
 from aiogram.exceptions import TelegramBadRequest
@@ -58,7 +57,6 @@ class Tyan(CallbackCommandBase):
             "poke",
             "dance",
             "cringe",
-            "neuro",
         )
         categories_nswf = ("waifu", "neko", "trap", "blowjob")
 
@@ -109,11 +107,6 @@ class Tyan(CallbackCommandBase):
         if not settings.with_nsfw and type_ == "nsfw":
             return await query.answer(text="🚫", cache_time=cls.cache_time_10s)
 
-        if type_ == "sfw" and category == "neuro":
-            await query.answer(cache_time=1)
-            url = cls.request_neuro_tyan()
-            return await message.reply_photo(url, caption=f"{hbold('Нейротянка')} для {query.from_user.mention_html()}")
-
         if not category_available(type_, category):
             return await query.answer("Эта категория сейчас недоступна. Выбери другую.", show_alert=True)
 
@@ -154,8 +147,3 @@ class Tyan(CallbackCommandBase):
     @classmethod
     async def request_tyan(cls, type_: str, category: str, *, telemetry: Telemetry | None = None) -> TyanImage:
         return await cls.images.image(type_, category, telemetry=telemetry)
-
-    @classmethod
-    def request_neuro_tyan(cls) -> str:
-        number = "".join(random.choices("0123456789", k=5))
-        return f"https://thisanimedoesnotexist.ai/results/psi-1.0/seed{number}.png"
