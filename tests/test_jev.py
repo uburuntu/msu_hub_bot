@@ -329,23 +329,26 @@ async def test_sticker_emoji_request_sends_only_the_artwork_with_image_opt_in(tr
     session, _ = transport
     session.responses = [Response(emoji_payload({"cat": 0.7, "smiling": 0.3}))]
     client = jev.JevClient("synthetic-key")
-    probabilities = await client.sticker_emojis(JPEG)
+    probabilities = await client.sticker_emojis([JPEG])
     assert probabilities["cat"] == 0.7 and set(probabilities) == set(jev.STICKER_EMOJI)
     url, request = session.requests[0]
     assert url == jev.ENDPOINT and request["headers"]["TypeSafe-Danger-Zone-Images"] == "true"
     body = request["json"]
     assert set(body) == {"model", "state", "assets", "questions"}
     assert body["assets"] == {"<art>": {"type": "image", "format": "jpeg", "data_base64": "/9j/c3ludGhldGlj"}}
-    assert "<art>" in body["state"] and "<art>" in body["questions"]["emoji"]["instructions"]
+    assert body["state"] == "Sticker artwork: <art>"
     assert set(body["questions"]["emoji"]["criteria"]) == set(jev.STICKER_EMOJI)
     await client.close()
 
 
-@pytest.mark.parametrize("image", [b"\x89PNG\r\n\x1a\n", b"", JPEG + b"x" * jev.MAX_IMAGE_BYTES, "not bytes"])
-async def test_sticker_emoji_rejects_non_jpeg_or_oversized_input_without_transport(transport, image):
+@pytest.mark.parametrize(
+    "images",
+    [[b"\x89PNG\r\n\x1a\n"], [b""], [JPEG + b"x" * jev.MAX_IMAGE_BYTES], ["not bytes"], [], [JPEG] * 4, JPEG],
+)
+async def test_sticker_emoji_rejects_non_jpeg_oversized_or_too_many_inputs_without_transport(transport, images):
     session, _ = transport
     with pytest.raises(jev.JevError) as error:
-        await jev.JevClient("synthetic-key").sticker_emojis(image)
+        await jev.JevClient("synthetic-key").sticker_emojis(images)
     assert error.value.reason is jev.JevErrorReason.INVALID_REQUEST and not session.requests
 
 
@@ -364,8 +367,19 @@ async def test_sticker_emoji_rejects_malformed_distributions(transport, mutate):
     mutate(payload)
     session.responses = [Response(payload)]
     with pytest.raises(jev.JevError) as error:
-        await jev.JevClient("synthetic-key").sticker_emojis(JPEG)
+        await jev.JevClient("synthetic-key").sticker_emojis([JPEG])
     assert error.value.reason is jev.JevErrorReason.INVALID_RESPONSE
+
+
+async def test_animation_frames_are_sent_as_ordered_assets(transport):
+    session, _ = transport
+    session.responses = [Response(emoji_payload({"muscle": 0.9, "handshake": 0.1}))]
+    client = jev.JevClient("synthetic-key")
+    await client.sticker_emojis([JPEG, JPEG + b"2", JPEG + b"3"])
+    body = session.requests[0][1]["json"]
+    assert list(body["assets"]) == ["<frame1>", "<frame2>", "<frame3>"]
+    assert body["state"] == "Sticker animation frames in order: <frame1> <frame2> <frame3>"
+    await client.close()
 
 
 def test_sticker_emoji_vocabulary_maps_unique_tags_to_unique_emoji():

@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import Bot
@@ -54,13 +55,14 @@ async def choose_emojis(
     bot: Bot,
     cpu_executor: TPExecutor,
     sticker_emoji: StickerEmojiPicker | None,
+    clip: Callable[[], Awaitable[bytes]] | None = None,
 ) -> tuple[str, ...]:
     """Explicit emoji, then the source sticker's own, then Jev, then replied-text emoji or ✨."""
     if metadata.emojis_explicit:
         return metadata.emojis
     if isinstance(source, Sticker) and source.emoji:
         return (source.emoji,)
-    if sticker_emoji is not None and (picked := await sticker_emoji.pick(source, bot, cpu_executor)):
+    if sticker_emoji is not None and (picked := await sticker_emoji.pick(source, bot, cpu_executor, clip)):
         return picked
     return metadata.emojis
 
@@ -137,7 +139,19 @@ class Stickers:
                 return await message.reply(f"Ответьте {command} на картинку, GIF, видео, стикер или кастомный эмодзи.")
             if (source.file_size or 0) > MAX_INPUT_BYTES:
                 raise StickerMediaError("Файл больше 20 МБ. Стикер не добавлен.")
-            emojis = await choose_emojis(metadata, source, bot, cpu_executor, sticker_emoji)
+            downloaded: list[bytes] = []
+
+            async def load() -> bytes:
+                # One download serves both emoji frames and conversion.
+                if not downloaded:
+                    file = await download(source, bot, max_bytes=MAX_INPUT_BYTES)
+                    if file is None:
+                        raise StickerMediaError("Не удалось скачать файл. Стикер не добавлен.")
+                    with file:
+                        downloaded.append(file.getvalue())
+                return downloaded[0]
+
+            emojis = await choose_emojis(metadata, source, bot, cpu_executor, sticker_emoji, load if kind == "video" else None)
             client = StickerSetClient(bot)
             trimmed = False
             if isinstance(source, Sticker) and reusable_sticker(source):
@@ -159,11 +173,7 @@ class Stickers:
                     )
 
                 async def prepare_input() -> tuple[bytes, str]:
-                    file = await download(source, bot, max_bytes=MAX_INPUT_BYTES)
-                    if file is None:
-                        raise StickerMediaError("Не удалось скачать файл. Стикер не добавлен.")
-                    with file:
-                        return file.getvalue(), kind or "static"
+                    return await load(), kind or "static"
 
                 prepared, timeouted = await cpu_executor.run_prepared(prepare_input, prepare_custom_emoji if is_custom else prepare_media)
                 if timeouted:

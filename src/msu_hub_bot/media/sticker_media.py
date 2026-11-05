@@ -405,3 +405,65 @@ def emoji_preview(data: bytes) -> bytes:
         if isinstance(exc, StickerMediaError):
             raise
         raise StickerMediaError("Не удалось прочитать превью.") from exc
+
+
+EMOJI_FRAME_POSITIONS = (0.1, 0.5, 0.85)
+EMOJI_FRAME_TIMEOUT = 5
+
+
+def emoji_frames(data: bytes) -> tuple[bytes, ...]:
+    """Start, middle and late JPEG stills of the excerpt a sticker would use.
+
+    Reaction clips often reach their point late, so one opening thumbnail is not
+    representative. Timestamps use the same first-seven-seconds excerpt.
+    """
+    if len(data) > MAX_INPUT_BYTES:
+        raise StickerMediaError("Файл больше 20 МБ.")
+    with TemporaryDirectory(prefix="hub-sticker-frames-") as directory:
+        source = Path(directory) / "source"
+        source.write_bytes(data)
+        _, video, duration = _probe(source, timeout=EMOJI_FRAME_TIMEOUT)
+        if not math.isfinite(duration) or duration <= 0:
+            raise StickerMediaError("Не удалось определить длительность анимации.")
+        # Preserve alpha when decoding VP9 so transparency flattens onto white.
+        decoder = ["-c:v", "libvpx-vp9"] if video.get("codec_name") == "vp9" else []
+        frames = []
+        for index, position in enumerate(EMOJI_FRAME_POSITIONS):
+            output = Path(directory) / f"frame-{index}.png"
+            try:
+                _run(
+                    [
+                        "ffmpeg",
+                        "-nostdin",
+                        "-v",
+                        "error",
+                        "-y",
+                        "-protocol_whitelist",
+                        "file,pipe",
+                        "-format_whitelist",
+                        LOCAL_MEDIA_FORMATS,
+                        "-threads",
+                        "1",
+                        "-ss",
+                        f"{min(duration, MAX_SOURCE_SECONDS) * position:.3f}",
+                        *decoder,
+                        "-i",
+                        str(source),
+                        "-map",
+                        "0:v:0",
+                        "-frames:v",
+                        "1",
+                        "-vf",
+                        "scale=w='min(512,iw)':h=-2,format=rgba",
+                        str(output),
+                    ],
+                    timeout=EMOJI_FRAME_TIMEOUT,
+                )
+            except StickerMediaError:
+                # A seek past the last frame or a slow decode only loses this still.
+                continue
+            if output.is_file() and output.stat().st_size:
+                frames.append(emoji_preview(output.read_bytes()))
+        if not frames:
+            raise StickerMediaError("Не удалось извлечь кадры.")
+        return tuple(frames)

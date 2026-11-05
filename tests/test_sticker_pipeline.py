@@ -1,6 +1,8 @@
 """Personal and chat packs share artwork selection, emoji choice and preview delivery."""
 
 import io
+import shutil
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -16,7 +18,7 @@ from PIL import Image
 from msu_hub_bot.commands import sticker, sticker_emoji
 from msu_hub_bot.commands.sticker_emoji import StickerEmojiPicker, preview_source, select_emojis
 from msu_hub_bot.commands.sticker_input import parse_metadata
-from msu_hub_bot.media.sticker_media import PreparedMedia, emoji_preview
+from msu_hub_bot.media.sticker_media import PreparedMedia, emoji_frames, emoji_preview
 from msu_hub_bot.providers.jev import JevError, JevErrorReason
 from msu_hub_bot.telegram import sticker_sets
 from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadedSticker
@@ -173,7 +175,21 @@ async def test_picker_sends_a_jpeg_of_the_thumbnail_and_maps_tags(monkeypatch):
 
     assert await picker(client).pick(animation, None, executor()) == ("🐱", "🐶")
     assert download.await_args.args[0].file_id == "thumb"
-    assert client.sticker_emojis.await_args.args[0].startswith(b"\xff\xd8\xff")
+    (image,) = client.sticker_emojis.await_args.args[0]
+    assert image.startswith(b"\xff\xd8\xff")
+
+
+async def test_picker_sends_three_clip_frames_from_the_shared_download(monkeypatch):
+    client = SimpleNamespace(sticker_emojis=AsyncMock(return_value={"muscle": 0.71, "handshake": 0.28}))
+    monkeypatch.setattr(sticker_emoji, "download", AsyncMock())
+    monkeypatch.setattr(sticker_emoji, "emoji_frames", Mock(return_value=(b"\xff\xd8\xff1", b"\xff\xd8\xff2", b"\xff\xd8\xff3")))
+    clip = AsyncMock(return_value=b"mp4")
+    animation = make_message(animation=ANIMATION).animation
+
+    assert await picker(client).pick(animation, None, executor(), clip) == ("💪", "🤝")
+    sticker_emoji.emoji_frames.assert_called_once_with(b"mp4")
+    sticker_emoji.download.assert_not_awaited()
+    assert len(client.sticker_emojis.await_args.args[0]) == 3
 
 
 @pytest.mark.parametrize(
@@ -300,3 +316,28 @@ async def test_without_our_own_addition_new_entries_are_never_guessed():
         get_file=AsyncMock(),
     )
     assert await StickerSetClient(bot).resolve("pack", UploadedSticker("source-file", "video", ("🐸",), "source")) is None
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is required")
+@pytest.mark.parametrize("seconds", [0.2, 3, 12])
+def test_emoji_frames_sample_start_middle_and_late_stills(tmp_path, seconds):
+    clip = tmp_path / "clip.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=size=320x180:rate=25:duration={seconds}",
+            "-pix_fmt",
+            "yuv420p",
+            str(clip),
+        ],
+        check=True,
+    )
+    frames = emoji_frames(clip.read_bytes())
+    assert 1 <= len(frames) <= 3 and (seconds < 1 or len(frames) == 3)
+    assert all(Image.open(io.BytesIO(frame)).format == "JPEG" for frame in frames)
+    assert max(Image.open(io.BytesIO(frames[0])).size) == 512
