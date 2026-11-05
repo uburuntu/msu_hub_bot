@@ -80,11 +80,9 @@ class Settings(BaseSettings):
     echo_chat_id: int = 0
     excluded_chat_id: int = 0
     dvach_chat_ids: list[int] = Field(default_factory=lambda: [0] * 5, min_length=5, max_length=5)
-    antibot_user_id: int = 0
     posting_tb_chat_id: int = 0
     posting_main_chat_id: int = 0
     vk_default_chat_id: int = 0
-    tenet_sticker_owner_id: int = 0
     vk_user_token: str = Field(default="", repr=False)
     wolfram_token: str = Field(default="", repr=False)
     jdoodle_tokens: list[tuple[str, str]] = Field(default_factory=list, repr=False)

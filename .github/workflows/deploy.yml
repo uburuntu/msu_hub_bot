@@ -90,11 +90,9 @@ jobs:
           HUB_ECHO_CHAT_ID: ${{ secrets.HUB_ECHO_CHAT_ID }}
           HUB_EXCLUDED_CHAT_ID: ${{ secrets.HUB_EXCLUDED_CHAT_ID }}
           HUB_DVACH_CHAT_IDS: ${{ secrets.HUB_DVACH_CHAT_IDS }}
-          HUB_ANTIBOT_USER_ID: ${{ secrets.HUB_ANTIBOT_USER_ID }}
           HUB_POSTING_TB_CHAT_ID: ${{ secrets.HUB_POSTING_TB_CHAT_ID }}
           HUB_POSTING_MAIN_CHAT_ID: ${{ secrets.HUB_POSTING_MAIN_CHAT_ID }}
           HUB_VK_DEFAULT_CHAT_ID: ${{ secrets.HUB_VK_DEFAULT_CHAT_ID }}
-          HUB_TENET_STICKER_OWNER_ID: ${{ secrets.HUB_TENET_STICKER_OWNER_ID }}
           HUB_VK_USER_TOKEN: ${{ secrets.HUB_VK_USER_TOKEN }}
           HUB_WOLFRAM_TOKEN: ${{ secrets.HUB_WOLFRAM_TOKEN }}
           HUB_JDOODLE_TOKENS: ${{ secrets.HUB_JDOODLE_TOKENS }}

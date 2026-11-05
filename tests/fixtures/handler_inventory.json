@@ -917,10 +917,11 @@
     "handler": "process_sticker",
     "aliases": [
       "s",
-      "sticker"
+      "sticker",
+      "sa"
     ],
     "routing": {
-      "key": "message:process_sticker:s:sticker",
+      "key": "message:process_sticker:s:sticker:sa",
       "event": "message",
       "event_order": 16,
       "registration_order": 20,
@@ -941,7 +942,8 @@
           "type": "MetaCommand",
           "commands": [
             "s",
-            "sticker"
+            "sticker",
+            "sa"
           ],
           "prefixes": "/",
           "ignore_case": true,
@@ -952,13 +954,14 @@
       ],
       "runtime_aliases": [
         "s",
-        "sticker"
+        "sticker",
+        "sa"
       ]
     },
     "registration": {
       "handler": "process_sticker",
       "filters": [
-        "MetaCommand('s', 'sticker')"
+        "MetaCommand('s', 'sticker', 'sa')"
       ],
       "options": {
         "content_types": "ContentType.ANY"
@@ -970,10 +973,11 @@
     "handler": "process_sticker_chat",
     "aliases": [
       "sc",
-      "sticker_chat"
+      "sticker_chat",
+      "sac"
     ],
     "routing": {
-      "key": "message:process_sticker_chat:sc:sticker_chat",
+      "key": "message:process_sticker_chat:sc:sticker_chat:sac",
       "event": "message",
       "event_order": 17,
       "registration_order": 21,
@@ -994,107 +998,7 @@
           "type": "MetaCommand",
           "commands": [
             "sc",
-            "sticker_chat"
-          ],
-          "prefixes": "/",
-          "ignore_case": true,
-          "ignore_mention": false,
-          "ignore_caption": false,
-          "args": null
-        }
-      ],
-      "runtime_aliases": [
-        "sc",
-        "sticker_chat"
-      ]
-    },
-    "registration": {
-      "handler": "process_sticker_chat",
-      "filters": [
-        "MetaCommand('sc', 'sticker_chat')"
-      ],
-      "options": {
-        "content_types": "ContentType.ANY"
-      }
-    }
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_animated_sticker",
-    "aliases": [
-      "sa"
-    ],
-    "routing": {
-      "key": "message:process_animated_sticker:sa",
-      "event": "message",
-      "event_order": 18,
-      "registration_order": 22,
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "any"
-          ]
-        },
-        {
-          "type": "MetaCommand",
-          "commands": [
-            "sa"
-          ],
-          "prefixes": "/",
-          "ignore_case": true,
-          "ignore_mention": false,
-          "ignore_caption": false,
-          "args": null
-        }
-      ],
-      "runtime_aliases": [
-        "sa"
-      ]
-    },
-    "registration": {
-      "handler": "process_animated_sticker",
-      "filters": [
-        "MetaCommand('sa')"
-      ],
-      "options": {
-        "content_types": "ContentType.ANY"
-      }
-    }
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "process_animated_sticker_chat",
-    "aliases": [
-      "sac"
-    ],
-    "routing": {
-      "key": "message:process_animated_sticker_chat:sac",
-      "event": "message",
-      "event_order": 19,
-      "registration_order": 23,
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "any"
-          ]
-        },
-        {
-          "type": "MetaCommand",
-          "commands": [
+            "sticker_chat",
             "sac"
           ],
           "prefixes": "/",
@@ -1105,13 +1009,15 @@
         }
       ],
       "runtime_aliases": [
+        "sc",
+        "sticker_chat",
         "sac"
       ]
     },
     "registration": {
-      "handler": "process_animated_sticker_chat",
+      "handler": "process_sticker_chat",
       "filters": [
-        "MetaCommand('sac')"
+        "MetaCommand('sc', 'sticker_chat', 'sac')"
       ],
       "options": {
         "content_types": "ContentType.ANY"
@@ -1128,7 +1034,7 @@
     "routing": {
       "key": "message:process_sticker_delete:sd:sticker_delete",
       "event": "message",
-      "event_order": 20,
+      "event_order": 18,
       "registration_order": 24,
       "filters": [
         {
@@ -1180,7 +1086,7 @@
     "routing": {
       "key": "message:process_error_stickers:error_stickers",
       "event": "message",
-      "event_order": 21,
+      "event_order": 19,
       "registration_order": 25,
       "filters": [
         {
@@ -1228,7 +1134,7 @@
     "routing": {
       "key": "message:Stickers.sticker_set_name",
       "event": "message",
-      "event_order": 22,
+      "event_order": 20,
       "registration_order": 26,
       "filters": [
         {
@@ -1267,7 +1173,7 @@
     "routing": {
       "key": "message:process_punto:punto:згтещ:пунто:geynj",
       "event": "message",
-      "event_order": 23,
+      "event_order": 21,
       "registration_order": 27,
       "filters": [
         {
@@ -1325,7 +1231,7 @@
     "routing": {
       "key": "message:process_transliterate:trans:translit:transliterate",
       "event": "message",
-      "event_order": 24,
+      "event_order": 22,
       "registration_order": 28,
       "filters": [
         {
@@ -1379,7 +1285,7 @@
     "routing": {
       "key": "message:process_id:id",
       "event": "message",
-      "event_order": 25,
+      "event_order": 23,
       "registration_order": 29,
       "filters": [
         {
@@ -1430,7 +1336,7 @@
     "routing": {
       "key": "message:process_md:md:markdown",
       "event": "message",
-      "event_order": 26,
+      "event_order": 24,
       "registration_order": 30,
       "filters": [
         {
@@ -1482,7 +1388,7 @@
     "routing": {
       "key": "message:process_html:html",
       "event": "message",
-      "event_order": 27,
+      "event_order": 25,
       "registration_order": 31,
       "filters": [
         {
@@ -1533,7 +1439,7 @@
     "routing": {
       "key": "message:process_file_id:file_id:fi",
       "event": "message",
-      "event_order": 28,
+      "event_order": 26,
       "registration_order": 32,
       "filters": [
         {
@@ -1586,7 +1492,7 @@
     "routing": {
       "key": "message:process_location:loc:location",
       "event": "message",
-      "event_order": 29,
+      "event_order": 27,
       "registration_order": 33,
       "filters": [
         {
@@ -1640,7 +1546,7 @@
     "routing": {
       "key": "message:Latex.process:t:tex:latex",
       "event": "message",
-      "event_order": 30,
+      "event_order": 28,
       "registration_order": 34,
       "filters": [
         {
@@ -1752,7 +1658,7 @@
     "routing": {
       "key": "message:process_song:song:shazam:music",
       "event": "message",
-      "event_order": 31,
+      "event_order": 29,
       "registration_order": 36,
       "filters": [
         {
@@ -1807,7 +1713,7 @@
     "routing": {
       "key": "message:process_imgur:i:imgur",
       "event": "message",
-      "event_order": 32,
+      "event_order": 30,
       "registration_order": 37,
       "filters": [
         {
@@ -1859,7 +1765,7 @@
     "routing": {
       "key": "message:process_animate:animate",
       "event": "message",
-      "event_order": 33,
+      "event_order": 31,
       "registration_order": 38,
       "filters": [
         {
@@ -1910,7 +1816,7 @@
     "routing": {
       "key": "message:process_matrix:matrix",
       "event": "message",
-      "event_order": 34,
+      "event_order": 32,
       "registration_order": 39,
       "filters": [
         {
@@ -1997,7 +1903,7 @@
     "routing": {
       "key": "message:ProgCompiler.process_stdin_run",
       "event": "message",
-      "event_order": 181,
+      "event_order": 179,
       "registration_order": 333,
       "filters": [
         {
@@ -2034,7 +1940,7 @@
     "routing": {
       "key": "message:process_code:prog:pr",
       "event": "message",
-      "event_order": 182,
+      "event_order": 180,
       "registration_order": 334,
       "filters": [
         {
@@ -2089,7 +1995,7 @@
     "routing": {
       "key": "message:process_lobster:lobster:l:л:лобстер",
       "event": "message",
-      "event_order": 183,
+      "event_order": 181,
       "registration_order": 335,
       "filters": [
         {
@@ -2149,7 +2055,7 @@
     "routing": {
       "key": "message:process_demotivator:demotivator:de:д:де",
       "event": "message",
-      "event_order": 184,
+      "event_order": 182,
       "registration_order": 336,
       "filters": [
         {
@@ -2209,7 +2115,7 @@
     "routing": {
       "key": "message:process_atmta:atmta:атмта:атм:atm",
       "event": "message",
-      "event_order": 185,
+      "event_order": 183,
       "registration_order": 337,
       "filters": [
         {
@@ -2269,7 +2175,7 @@
     "routing": {
       "key": "message:process_atmta_v:atmtav:атмтав:атмв:atmv",
       "event": "message",
-      "event_order": 186,
+      "event_order": 184,
       "registration_order": 338,
       "filters": [
         {
@@ -2326,7 +2232,7 @@
     "routing": {
       "key": "message:process_which_anime:anime",
       "event": "message",
-      "event_order": 187,
+      "event_order": 185,
       "registration_order": 339,
       "filters": [
         {
@@ -2378,7 +2284,7 @@
     "routing": {
       "key": "message:Tyan.process:tyan:tyans",
       "event": "message",
-      "event_order": 188,
+      "event_order": 186,
       "registration_order": 340,
       "filters": [
         {
@@ -2470,7 +2376,7 @@
     "routing": {
       "key": "message:process_topdf:pdf:topdf:to_pdf",
       "event": "message",
-      "event_order": 189,
+      "event_order": 187,
       "registration_order": 342,
       "filters": [
         {
@@ -2526,7 +2432,7 @@
     "routing": {
       "key": "message:process_bg:removebg:bg",
       "event": "message",
-      "event_order": 190,
+      "event_order": 188,
       "registration_order": 343,
       "filters": [
         {
@@ -2580,7 +2486,7 @@
     "routing": {
       "key": "message:process_porfirevich:gpt2:гпт2",
       "event": "message",
-      "event_order": 191,
+      "event_order": 189,
       "registration_order": 344,
       "filters": [
         {
@@ -2636,7 +2542,7 @@
     "routing": {
       "key": "message:process_duckduckgo:ddg:wiki:вики:duckduckgo",
       "event": "message",
-      "event_order": 192,
+      "event_order": 190,
       "registration_order": 345,
       "filters": [
         {
@@ -2695,7 +2601,7 @@
     "routing": {
       "key": "message:process_ud:ud:urban:slang",
       "event": "message",
-      "event_order": 193,
+      "event_order": 191,
       "registration_order": 346,
       "filters": [
         {
@@ -2743,110 +2649,6 @@
   },
   {
     "type": "register_message_handler",
-    "handler": "AntiBot.process",
-    "aliases": [],
-    "routing": {
-      "key": "message:AntiBot.process",
-      "event": "message",
-      "event_order": 194,
-      "registration_order": 347,
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "new_chat_members"
-          ]
-        }
-      ],
-      "runtime_aliases": []
-    },
-    "registration": {
-      "handler": "AntiBot.process",
-      "filters": [],
-      "options": {
-        "content_types": "ContentType.NEW_CHAT_MEMBERS"
-      }
-    }
-  },
-  {
-    "type": "register_message_handler",
-    "handler": "AntiBot.process_left",
-    "aliases": [],
-    "routing": {
-      "key": "message:AntiBot.process_left",
-      "event": "message",
-      "event_order": 195,
-      "registration_order": 348,
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "left_chat_member"
-          ]
-        }
-      ],
-      "runtime_aliases": []
-    },
-    "registration": {
-      "handler": "AntiBot.process_left",
-      "filters": [],
-      "options": {
-        "content_types": "ContentType.LEFT_CHAT_MEMBER"
-      }
-    }
-  },
-  {
-    "type": "register_callback_query_handler",
-    "handler": "AntiBot.process_cb",
-    "aliases": [],
-    "routing": {
-      "key": "callback_query:AntiBot.process_cb",
-      "event": "callback_query",
-      "event_order": 5,
-      "registration_order": 349,
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "CallbackDataFilter",
-          "prefix": "antibot",
-          "separator": ":",
-          "fields": [
-            "action",
-            "chat_id",
-            "user_id"
-          ],
-          "constraints": {}
-        }
-      ],
-      "runtime_aliases": []
-    },
-    "registration": {
-      "handler": "AntiBot.process_cb",
-      "filters": [
-        "AntiBot.callback_data.filter()"
-      ],
-      "options": {}
-    }
-  },
-  {
-    "type": "register_message_handler",
     "handler": "process_reverse",
     "aliases": [
       "tenet"
@@ -2854,7 +2656,7 @@
     "routing": {
       "key": "message:process_reverse:tenet",
       "event": "message",
-      "event_order": 196,
+      "event_order": 192,
       "registration_order": 350,
       "filters": [
         {
@@ -2904,7 +2706,7 @@
     "routing": {
       "key": "message:process_image_to_text:text:itt",
       "event": "message",
-      "event_order": 197,
+      "event_order": 193,
       "registration_order": 351,
       "filters": [
         {
@@ -2958,7 +2760,7 @@
     "routing": {
       "key": "message:process_tts:tts:speech",
       "event": "message",
-      "event_order": 198,
+      "event_order": 194,
       "registration_order": 352,
       "filters": [
         {
@@ -3011,7 +2813,7 @@
     "routing": {
       "key": "message:Wit.process_stt_command:stt",
       "event": "message",
-      "event_order": 199,
+      "event_order": 195,
       "registration_order": 353,
       "filters": [
         {
@@ -3058,7 +2860,7 @@
     "routing": {
       "key": "message:Wit.process_stt",
       "event": "message",
-      "event_order": 200,
+      "event_order": 196,
       "registration_order": 354,
       "filters": [
         {
@@ -3107,7 +2909,7 @@
     "routing": {
       "key": "message:WolframAPI.process_wolfram:wf:wolfram",
       "event": "message",
-      "event_order": 201,
+      "event_order": 197,
       "registration_order": 355,
       "filters": [
         {
@@ -3156,7 +2958,7 @@
     "routing": {
       "key": "message:process_sed",
       "event": "message",
-      "event_order": 202,
+      "event_order": 198,
       "registration_order": 356,
       "filters": [
         {
@@ -3206,7 +3008,7 @@
     "routing": {
       "key": "message:Dvach.process:2ch:dvach",
       "event": "message",
-      "event_order": 203,
+      "event_order": 199,
       "registration_order": 357,
       "filters": [
         {
@@ -3276,7 +3078,7 @@
     "routing": {
       "key": "message:Dvach.process_link",
       "event": "message",
-      "event_order": 204,
+      "event_order": 200,
       "registration_order": 358,
       "filters": [
         {
@@ -3335,7 +3137,7 @@
     "routing": {
       "key": "callback_query:Dvach.process_cb",
       "event": "callback_query",
-      "event_order": 6,
+      "event_order": 5,
       "registration_order": 359,
       "filters": [
         {
@@ -3374,7 +3176,7 @@
     "routing": {
       "key": "message:process_sudo:sudo",
       "event": "message",
-      "event_order": 205,
+      "event_order": 201,
       "registration_order": 360,
       "filters": [
         {
@@ -3430,7 +3232,7 @@
     "routing": {
       "key": "message:process_revoke:revoke",
       "event": "message",
-      "event_order": 206,
+      "event_order": 202,
       "registration_order": 361,
       "filters": [
         {
@@ -3486,7 +3288,7 @@
     "routing": {
       "key": "message:process_ban:ban",
       "event": "message",
-      "event_order": 207,
+      "event_order": 203,
       "registration_order": 362,
       "filters": [
         {
@@ -3543,7 +3345,7 @@
     "routing": {
       "key": "message:process_restrict:restrict:ro",
       "event": "message",
-      "event_order": 208,
+      "event_order": 204,
       "registration_order": 363,
       "filters": [
         {
@@ -3601,7 +3403,7 @@
     "routing": {
       "key": "message:process_unban:unban",
       "event": "message",
-      "event_order": 209,
+      "event_order": 205,
       "registration_order": 364,
       "filters": [
         {
@@ -3657,7 +3459,7 @@
     "routing": {
       "key": "message:process_forwards:forwards",
       "event": "message",
-      "event_order": 210,
+      "event_order": 206,
       "registration_order": 365,
       "filters": [
         {
@@ -3712,7 +3514,7 @@
     "routing": {
       "key": "message:process_create_infra_chat:create_infra_chat",
       "event": "message",
-      "event_order": 211,
+      "event_order": 207,
       "registration_order": 366,
       "filters": [
         {
@@ -3767,7 +3569,7 @@
     "routing": {
       "key": "message:process_delete_infra_chat:delete_infra_chat",
       "event": "message",
-      "event_order": 212,
+      "event_order": 208,
       "registration_order": 367,
       "filters": [
         {
@@ -3822,7 +3624,7 @@
     "routing": {
       "key": "message:process_pin:pin",
       "event": "message",
-      "event_order": 213,
+      "event_order": 209,
       "registration_order": 368,
       "filters": [
         {
@@ -3877,7 +3679,7 @@
     "routing": {
       "key": "message:process_pin_all:pin_all",
       "event": "message",
-      "event_order": 214,
+      "event_order": 210,
       "registration_order": 369,
       "filters": [
         {
@@ -3932,7 +3734,7 @@
     "routing": {
       "key": "message:process_update_pins:update_pins",
       "event": "message",
-      "event_order": 215,
+      "event_order": 211,
       "registration_order": 370,
       "filters": [
         {
@@ -3987,7 +3789,7 @@
     "routing": {
       "key": "message:process_post_all:post_all",
       "event": "message",
-      "event_order": 216,
+      "event_order": 212,
       "registration_order": 371,
       "filters": [
         {
@@ -4042,7 +3844,7 @@
     "routing": {
       "key": "message:process_post_forward_all:post_forward_all",
       "event": "message",
-      "event_order": 217,
+      "event_order": 213,
       "registration_order": 372,
       "filters": [
         {
@@ -4097,7 +3899,7 @@
     "routing": {
       "key": "message:MakePost.process:make_post",
       "event": "message",
-      "event_order": 218,
+      "event_order": 214,
       "registration_order": 373,
       "filters": [
         {
@@ -4151,7 +3953,7 @@
     "routing": {
       "key": "message:MakePost.process_destination",
       "event": "message",
-      "event_order": 219,
+      "event_order": 215,
       "registration_order": 374,
       "filters": [
         {
@@ -4194,7 +3996,7 @@
     "routing": {
       "key": "message:MakePost.process_waiting",
       "event": "message",
-      "event_order": 220,
+      "event_order": 216,
       "registration_order": 375,
       "filters": [
         {
@@ -4239,7 +4041,7 @@
     "routing": {
       "key": "message:process_status:status",
       "event": "message",
-      "event_order": 221,
+      "event_order": 217,
       "registration_order": 376,
       "filters": [
         {
@@ -4295,7 +4097,7 @@
     "routing": {
       "key": "message:Stats.process:stats:meta",
       "event": "message",
-      "event_order": 222,
+      "event_order": 218,
       "registration_order": 377,
       "filters": [
         {
@@ -4345,7 +4147,7 @@
     "routing": {
       "key": "callback_query:Stats.process_cb",
       "event": "callback_query",
-      "event_order": 7,
+      "event_order": 6,
       "registration_order": 378,
       "filters": [
         {
@@ -4384,7 +4186,7 @@
     "routing": {
       "key": "message:MinecraftStatus.process:mc:minecraft",
       "event": "message",
-      "event_order": 223,
+      "event_order": 219,
       "registration_order": 379,
       "filters": [
         {
@@ -4434,7 +4236,7 @@
     "routing": {
       "key": "callback_query:MinecraftStatus.process_cb",
       "event": "callback_query",
-      "event_order": 8,
+      "event_order": 7,
       "registration_order": 380,
       "filters": [
         {
@@ -4473,7 +4275,7 @@
     "routing": {
       "key": "message:Camera.process:camera:cam",
       "event": "message",
-      "event_order": 224,
+      "event_order": 220,
       "registration_order": 381,
       "filters": [
         {
@@ -4523,7 +4325,7 @@
     "routing": {
       "key": "callback_query:Camera.process_cb",
       "event": "callback_query",
-      "event_order": 9,
+      "event_order": 8,
       "registration_order": 382,
       "filters": [
         {
@@ -4563,7 +4365,7 @@
     "routing": {
       "key": "message:Debate.process:debate:resolution",
       "event": "message",
-      "event_order": 225,
+      "event_order": 221,
       "registration_order": 383,
       "filters": [
         {
@@ -4613,7 +4415,7 @@
     "routing": {
       "key": "callback_query:Debate.process_cb",
       "event": "callback_query",
-      "event_order": 10,
+      "event_order": 9,
       "registration_order": 384,
       "filters": [
         {
@@ -4652,7 +4454,7 @@
     "routing": {
       "key": "message:Crypto.process:crypto:btc:eth:xrp:bnb:doge",
       "event": "message",
-      "event_order": 226,
+      "event_order": 222,
       "registration_order": 385,
       "filters": [
         {
@@ -4710,7 +4512,7 @@
     "routing": {
       "key": "callback_query:Crypto.process_cb",
       "event": "callback_query",
-      "event_order": 11,
+      "event_order": 10,
       "registration_order": 386,
       "filters": [
         {
@@ -4748,7 +4550,7 @@
     "routing": {
       "key": "message:process_vk_wall:vk_wall",
       "event": "message",
-      "event_order": 227,
+      "event_order": 223,
       "registration_order": 387,
       "filters": [
         {
@@ -4803,7 +4605,7 @@
     "routing": {
       "key": "message:process_vk_post:vk_post",
       "event": "message",
-      "event_order": 228,
+      "event_order": 224,
       "registration_order": 388,
       "filters": [
         {
@@ -4858,7 +4660,7 @@
     "routing": {
       "key": "message:process_list_vk_wall:list_vk_wall",
       "event": "message",
-      "event_order": 229,
+      "event_order": 225,
       "registration_order": 389,
       "filters": [
         {
@@ -4915,7 +4717,7 @@
     "routing": {
       "key": "message:process_votes:vote:votes:выбираем",
       "event": "message",
-      "event_order": 230,
+      "event_order": 226,
       "registration_order": 390,
       "filters": [
         {
@@ -4971,7 +4773,7 @@
     "routing": {
       "key": "message:Like.process:like:likes:лайки",
       "event": "message",
-      "event_order": 231,
+      "event_order": 227,
       "registration_order": 391,
       "filters": [
         {
@@ -5023,7 +4825,7 @@
     "routing": {
       "key": "callback_query:Like.process_cb",
       "event": "callback_query",
-      "event_order": 12,
+      "event_order": 11,
       "registration_order": 392,
       "filters": [
         {
@@ -5064,7 +4866,7 @@
     "routing": {
       "key": "message:Rate.process:rate:rates:рейт:зацените",
       "event": "message",
-      "event_order": 232,
+      "event_order": 228,
       "registration_order": 393,
       "filters": [
         {
@@ -5118,7 +4920,7 @@
     "routing": {
       "key": "callback_query:Rate.process_cb",
       "event": "callback_query",
-      "event_order": 13,
+      "event_order": 12,
       "registration_order": 394,
       "filters": [
         {
@@ -5157,7 +4959,7 @@
     "routing": {
       "key": "message:process_roll:roll:ролл",
       "event": "message",
-      "event_order": 233,
+      "event_order": 229,
       "registration_order": 395,
       "filters": [
         {
@@ -5211,7 +5013,7 @@
     "routing": {
       "key": "message:Rolls.process:rolls:роллим:рулетка",
       "event": "message",
-      "event_order": 234,
+      "event_order": 230,
       "registration_order": 396,
       "filters": [
         {
@@ -5263,7 +5065,7 @@
     "routing": {
       "key": "callback_query:Rolls.process_cb",
       "event": "callback_query",
-      "event_order": 14,
+      "event_order": 13,
       "registration_order": 397,
       "filters": [
         {
@@ -5304,7 +5106,7 @@
     "routing": {
       "key": "message:process_random:random:rand:рандом",
       "event": "message",
-      "event_order": 235,
+      "event_order": 231,
       "registration_order": 398,
       "filters": [
         {
@@ -5360,7 +5162,7 @@
     "routing": {
       "key": "message:Randoms.process:randoms:рандомим:числа",
       "event": "message",
-      "event_order": 236,
+      "event_order": 232,
       "registration_order": 399,
       "filters": [
         {
@@ -5412,7 +5214,7 @@
     "routing": {
       "key": "callback_query:Randoms.process_cb",
       "event": "callback_query",
-      "event_order": 15,
+      "event_order": 14,
       "registration_order": 400,
       "filters": [
         {
@@ -5454,7 +5256,7 @@
     "routing": {
       "key": "message:Raffle.process:raffle:розыгрыш:конкурс",
       "event": "message",
-      "event_order": 237,
+      "event_order": 233,
       "registration_order": 401,
       "filters": [
         {
@@ -5506,7 +5308,7 @@
     "routing": {
       "key": "callback_query:Raffle.process_cb",
       "event": "callback_query",
-      "event_order": 16,
+      "event_order": 15,
       "registration_order": 402,
       "filters": [
         {
@@ -5547,7 +5349,7 @@
     "routing": {
       "key": "message:process_truth:truth:истина:истину:истины",
       "event": "message",
-      "event_order": 238,
+      "event_order": 234,
       "registration_order": 403,
       "filters": [
         {
@@ -5603,7 +5405,7 @@
     "routing": {
       "key": "message:process_or:or",
       "event": "message",
-      "event_order": 239,
+      "event_order": 235,
       "registration_order": 404,
       "filters": [
         {
@@ -5653,7 +5455,7 @@
     "routing": {
       "key": "message:process_mash:mash",
       "event": "message",
-      "event_order": 240,
+      "event_order": 236,
       "registration_order": 405,
       "filters": [
         {
@@ -5703,7 +5505,7 @@
     "routing": {
       "key": "message:process_d6:d6",
       "event": "message",
-      "event_order": 241,
+      "event_order": 237,
       "registration_order": 406,
       "filters": [
         {
@@ -5753,7 +5555,7 @@
     "routing": {
       "key": "message:process_dice:dice",
       "event": "message",
-      "event_order": 242,
+      "event_order": 238,
       "registration_order": 407,
       "filters": [
         {
@@ -5801,7 +5603,7 @@
     "routing": {
       "key": "message:process_others_dice",
       "event": "message",
-      "event_order": 243,
+      "event_order": 239,
       "registration_order": 408,
       "filters": [
         {
@@ -5836,7 +5638,7 @@
     "routing": {
       "key": "message:process_zalgo:zalgo",
       "event": "message",
-      "event_order": 244,
+      "event_order": 240,
       "registration_order": 409,
       "filters": [
         {
@@ -5884,7 +5686,7 @@
     "routing": {
       "key": "message:process_figlet:figlet",
       "event": "message",
-      "event_order": 245,
+      "event_order": 241,
       "registration_order": 410,
       "filters": [
         {
@@ -5933,7 +5735,7 @@
     "routing": {
       "key": "message:process_excuse:excuse:e",
       "event": "message",
-      "event_order": 246,
+      "event_order": 242,
       "registration_order": 411,
       "filters": [
         {
@@ -5984,7 +5786,7 @@
     "routing": {
       "key": "message:process_gender:gender:g",
       "event": "message",
-      "event_order": 247,
+      "event_order": 243,
       "registration_order": 412,
       "filters": [
         {
@@ -6034,7 +5836,7 @@
     "routing": {
       "key": "message:Geoguess.process:geoguess",
       "event": "message",
-      "event_order": 248,
+      "event_order": 244,
       "registration_order": 413,
       "filters": [
         {
@@ -6082,7 +5884,7 @@
     "routing": {
       "key": "message:Geoguess.top:geoguess_top",
       "event": "message",
-      "event_order": 249,
+      "event_order": 245,
       "registration_order": 414,
       "filters": [
         {
@@ -6128,7 +5930,7 @@
     "routing": {
       "key": "callback_query:Geoguess.process_cb",
       "event": "callback_query",
-      "event_order": 17,
+      "event_order": 16,
       "registration_order": 415,
       "filters": [
         {
@@ -6167,7 +5969,7 @@
     "routing": {
       "key": "message:process_me:me",
       "event": "message",
-      "event_order": 250,
+      "event_order": 246,
       "registration_order": 416,
       "filters": [
         {
@@ -6217,7 +6019,7 @@
     "routing": {
       "key": "message:process_copy:copy:see:uncover",
       "event": "message",
-      "event_order": 251,
+      "event_order": 247,
       "registration_order": 417,
       "filters": [
         {
@@ -6269,7 +6071,7 @@
     "routing": {
       "key": "message:process_arxiv:arxiv",
       "event": "message",
-      "event_order": 252,
+      "event_order": 248,
       "registration_order": 418,
       "filters": [
         {
@@ -6317,7 +6119,7 @@
     "routing": {
       "key": "message:process_translate:translate:tr",
       "event": "message",
-      "event_order": 253,
+      "event_order": 249,
       "registration_order": 419,
       "filters": [
         {
@@ -6367,7 +6169,7 @@
     "routing": {
       "key": "message:process_en:en",
       "event": "message",
-      "event_order": 254,
+      "event_order": 250,
       "registration_order": 420,
       "filters": [
         {
@@ -6415,7 +6217,7 @@
     "routing": {
       "key": "message:process_ru:ru",
       "event": "message",
-      "event_order": 255,
+      "event_order": 251,
       "registration_order": 421,
       "filters": [
         {
@@ -6463,7 +6265,7 @@
     "routing": {
       "key": "message:process_langs:langs",
       "event": "message",
-      "event_order": 256,
+      "event_order": 252,
       "registration_order": 422,
       "filters": [
         {
@@ -6512,7 +6314,7 @@
     "routing": {
       "key": "message:process_sanya:sanya:саня",
       "event": "message",
-      "event_order": 257,
+      "event_order": 253,
       "registration_order": 423,
       "filters": [
         {
@@ -6563,7 +6365,7 @@
     "routing": {
       "key": "message:process_dyubs:dyubs:дюбс",
       "event": "message",
-      "event_order": 258,
+      "event_order": 254,
       "registration_order": 424,
       "filters": [
         {
@@ -6614,7 +6416,7 @@
     "routing": {
       "key": "message:process_popov:popov:попов",
       "event": "message",
-      "event_order": 259,
+      "event_order": 255,
       "registration_order": 425,
       "filters": [
         {
@@ -6785,7 +6587,7 @@
     "routing": {
       "key": "message:process_echo",
       "event": "message",
-      "event_order": 260,
+      "event_order": 256,
       "registration_order": 430,
       "filters": [
         {
@@ -6826,7 +6628,7 @@
     "routing": {
       "key": "callback_query:process_expired_callback",
       "event": "callback_query",
-      "event_order": 18,
+      "event_order": 17,
       "registration_order": 431,
       "filters": [
         {

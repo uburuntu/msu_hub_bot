@@ -2,8 +2,8 @@
   "schema_version": 1,
   "description": "Expanded message, callback and automatic routing contract. Numeric access identities are represented by configuration field names. Captured matches describe the original route order; approved_target records the two intentional stdin hashtag changes.",
   "counts": {
-    "message": 261,
-    "callback_query": 19,
+    "message": 257,
+    "callback_query": 18,
     "edited_message": 148,
     "channel_post": 3,
     "errors": 1
@@ -919,107 +919,7 @@
       },
       "aliases": [
         "s",
-        "sticker"
-      ],
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "any"
-          ]
-        },
-        {
-          "type": "MetaCommand",
-          "commands": [
-            "s",
-            "sticker"
-          ],
-          "prefixes": "/",
-          "ignore_case": true,
-          "ignore_mention": false,
-          "ignore_caption": false,
-          "args": null
-        }
-      ],
-      "registration": {
-        "handler": "process_sticker",
-        "filters": [
-          "MetaCommand('s', 'sticker')"
-        ],
-        "options": {
-          "content_types": "ContentType.ANY"
-        }
-      },
-      "key": "message:process_sticker:s:sticker"
-    },
-    {
-      "registration_order": 21,
-      "event": "message",
-      "event_order": 17,
-      "handler": "process_sticker_chat",
-      "module": "commands.sticker",
-      "source": {
-        "file": "hub_bot/main.py",
-        "line": 188
-      },
-      "aliases": [
-        "sc",
-        "sticker_chat"
-      ],
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "any"
-          ]
-        },
-        {
-          "type": "MetaCommand",
-          "commands": [
-            "sc",
-            "sticker_chat"
-          ],
-          "prefixes": "/",
-          "ignore_case": true,
-          "ignore_mention": false,
-          "ignore_caption": false,
-          "args": null
-        }
-      ],
-      "registration": {
-        "handler": "process_sticker_chat",
-        "filters": [
-          "MetaCommand('sc', 'sticker_chat')"
-        ],
-        "options": {
-          "content_types": "ContentType.ANY"
-        }
-      },
-      "key": "message:process_sticker_chat:sc:sticker_chat"
-    },
-    {
-      "registration_order": 22,
-      "event": "message",
-      "event_order": 18,
-      "handler": "process_animated_sticker",
-      "module": "commands.sticker",
-      "source": {
-        "file": "hub_bot/main.py",
-        "line": 189
-      },
-      "aliases": [
+        "sticker",
         "sa"
       ],
       "filters": [
@@ -1038,6 +938,8 @@
         {
           "type": "MetaCommand",
           "commands": [
+            "s",
+            "sticker",
             "sa"
           ],
           "prefixes": "/",
@@ -1048,27 +950,29 @@
         }
       ],
       "registration": {
-        "handler": "process_animated_sticker",
+        "handler": "process_sticker",
         "filters": [
-          "MetaCommand('sa')"
+          "MetaCommand('s', 'sticker', 'sa')"
         ],
         "options": {
           "content_types": "ContentType.ANY"
         }
       },
-      "key": "message:process_animated_sticker:sa"
+      "key": "message:process_sticker:s:sticker:sa"
     },
     {
-      "registration_order": 23,
+      "registration_order": 21,
       "event": "message",
-      "event_order": 19,
-      "handler": "process_animated_sticker_chat",
+      "event_order": 17,
+      "handler": "process_sticker_chat",
       "module": "commands.sticker",
       "source": {
         "file": "hub_bot/main.py",
-        "line": 190
+        "line": 188
       },
       "aliases": [
+        "sc",
+        "sticker_chat",
         "sac"
       ],
       "filters": [
@@ -1087,6 +991,8 @@
         {
           "type": "MetaCommand",
           "commands": [
+            "sc",
+            "sticker_chat",
             "sac"
           ],
           "prefixes": "/",
@@ -1097,20 +1003,20 @@
         }
       ],
       "registration": {
-        "handler": "process_animated_sticker_chat",
+        "handler": "process_sticker_chat",
         "filters": [
-          "MetaCommand('sac')"
+          "MetaCommand('sc', 'sticker_chat', 'sac')"
         ],
         "options": {
           "content_types": "ContentType.ANY"
         }
       },
-      "key": "message:process_animated_sticker_chat:sac"
+      "key": "message:process_sticker_chat:sc:sticker_chat:sac"
     },
     {
       "registration_order": 24,
       "event": "message",
-      "event_order": 20,
+      "event_order": 18,
       "handler": "process_sticker_delete",
       "module": "commands.sticker",
       "source": {
@@ -1161,7 +1067,7 @@
     {
       "registration_order": 25,
       "event": "message",
-      "event_order": 21,
+      "event_order": 19,
       "handler": "process_error_stickers",
       "module": "commands.errors",
       "source": {
@@ -1210,7 +1116,7 @@
     {
       "registration_order": 26,
       "event": "message",
-      "event_order": 22,
+      "event_order": 20,
       "handler": "Stickers.sticker_set_name",
       "module": "commands.sticker",
       "source": {
@@ -1245,7 +1151,7 @@
     {
       "registration_order": 27,
       "event": "message",
-      "event_order": 23,
+      "event_order": 21,
       "handler": "process_punto",
       "module": "commands.other",
       "source": {
@@ -1300,7 +1206,7 @@
     {
       "registration_order": 28,
       "event": "message",
-      "event_order": 24,
+      "event_order": 22,
       "handler": "process_transliterate",
       "module": "commands.other",
       "source": {
@@ -1353,7 +1259,7 @@
     {
       "registration_order": 29,
       "event": "message",
-      "event_order": 25,
+      "event_order": 23,
       "handler": "process_id",
       "module": "commands.other",
       "source": {
@@ -1402,7 +1308,7 @@
     {
       "registration_order": 30,
       "event": "message",
-      "event_order": 26,
+      "event_order": 24,
       "handler": "process_md",
       "module": "commands.other",
       "source": {
@@ -1453,7 +1359,7 @@
     {
       "registration_order": 31,
       "event": "message",
-      "event_order": 27,
+      "event_order": 25,
       "handler": "process_html",
       "module": "commands.other",
       "source": {
@@ -1502,7 +1408,7 @@
     {
       "registration_order": 32,
       "event": "message",
-      "event_order": 28,
+      "event_order": 26,
       "handler": "process_file_id",
       "module": "commands.other",
       "source": {
@@ -1553,7 +1459,7 @@
     {
       "registration_order": 33,
       "event": "message",
-      "event_order": 29,
+      "event_order": 27,
       "handler": "process_location",
       "module": "commands.location",
       "source": {
@@ -1604,7 +1510,7 @@
     {
       "registration_order": 34,
       "event": "message",
-      "event_order": 30,
+      "event_order": 28,
       "handler": "Latex.process",
       "module": "commands.latex",
       "source": {
@@ -1710,7 +1616,7 @@
     {
       "registration_order": 36,
       "event": "message",
-      "event_order": 31,
+      "event_order": 29,
       "handler": "process_song",
       "module": "commands.song",
       "source": {
@@ -1763,7 +1669,7 @@
     {
       "registration_order": 37,
       "event": "message",
-      "event_order": 32,
+      "event_order": 30,
       "handler": "process_imgur",
       "module": "commands.externals",
       "source": {
@@ -1814,7 +1720,7 @@
     {
       "registration_order": 38,
       "event": "message",
-      "event_order": 33,
+      "event_order": 31,
       "handler": "process_animate",
       "module": "commands.animate",
       "source": {
@@ -1864,7 +1770,7 @@
     {
       "registration_order": 39,
       "event": "message",
-      "event_order": 34,
+      "event_order": 32,
       "handler": "process_matrix",
       "module": "commands.animate",
       "source": {
@@ -1914,7 +1820,7 @@
     {
       "registration_order": 40,
       "event": "message",
-      "event_order": 35,
+      "event_order": 33,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2000,7 +1906,7 @@
     {
       "registration_order": 42,
       "event": "message",
-      "event_order": 36,
+      "event_order": 34,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2086,7 +1992,7 @@
     {
       "registration_order": 44,
       "event": "message",
-      "event_order": 37,
+      "event_order": 35,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2172,7 +2078,7 @@
     {
       "registration_order": 46,
       "event": "message",
-      "event_order": 38,
+      "event_order": 36,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2258,7 +2164,7 @@
     {
       "registration_order": 48,
       "event": "message",
-      "event_order": 39,
+      "event_order": 37,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2344,7 +2250,7 @@
     {
       "registration_order": 50,
       "event": "message",
-      "event_order": 40,
+      "event_order": 38,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2430,7 +2336,7 @@
     {
       "registration_order": 52,
       "event": "message",
-      "event_order": 41,
+      "event_order": 39,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2516,7 +2422,7 @@
     {
       "registration_order": 54,
       "event": "message",
-      "event_order": 42,
+      "event_order": 40,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2602,7 +2508,7 @@
     {
       "registration_order": 56,
       "event": "message",
-      "event_order": 43,
+      "event_order": 41,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2688,7 +2594,7 @@
     {
       "registration_order": 58,
       "event": "message",
-      "event_order": 44,
+      "event_order": 42,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2774,7 +2680,7 @@
     {
       "registration_order": 60,
       "event": "message",
-      "event_order": 45,
+      "event_order": 43,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2860,7 +2766,7 @@
     {
       "registration_order": 62,
       "event": "message",
-      "event_order": 46,
+      "event_order": 44,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -2946,7 +2852,7 @@
     {
       "registration_order": 64,
       "event": "message",
-      "event_order": 47,
+      "event_order": 45,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3032,7 +2938,7 @@
     {
       "registration_order": 66,
       "event": "message",
-      "event_order": 48,
+      "event_order": 46,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3118,7 +3024,7 @@
     {
       "registration_order": 68,
       "event": "message",
-      "event_order": 49,
+      "event_order": 47,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3204,7 +3110,7 @@
     {
       "registration_order": 70,
       "event": "message",
-      "event_order": 50,
+      "event_order": 48,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3290,7 +3196,7 @@
     {
       "registration_order": 72,
       "event": "message",
-      "event_order": 51,
+      "event_order": 49,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3376,7 +3282,7 @@
     {
       "registration_order": 74,
       "event": "message",
-      "event_order": 52,
+      "event_order": 50,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3462,7 +3368,7 @@
     {
       "registration_order": 76,
       "event": "message",
-      "event_order": 53,
+      "event_order": 51,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3548,7 +3454,7 @@
     {
       "registration_order": 78,
       "event": "message",
-      "event_order": 54,
+      "event_order": 52,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3634,7 +3540,7 @@
     {
       "registration_order": 80,
       "event": "message",
-      "event_order": 55,
+      "event_order": 53,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3720,7 +3626,7 @@
     {
       "registration_order": 82,
       "event": "message",
-      "event_order": 56,
+      "event_order": 54,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3806,7 +3712,7 @@
     {
       "registration_order": 84,
       "event": "message",
-      "event_order": 57,
+      "event_order": 55,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3892,7 +3798,7 @@
     {
       "registration_order": 86,
       "event": "message",
-      "event_order": 58,
+      "event_order": 56,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -3978,7 +3884,7 @@
     {
       "registration_order": 88,
       "event": "message",
-      "event_order": 59,
+      "event_order": 57,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4064,7 +3970,7 @@
     {
       "registration_order": 90,
       "event": "message",
-      "event_order": 60,
+      "event_order": 58,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4150,7 +4056,7 @@
     {
       "registration_order": 92,
       "event": "message",
-      "event_order": 61,
+      "event_order": 59,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4236,7 +4142,7 @@
     {
       "registration_order": 94,
       "event": "message",
-      "event_order": 62,
+      "event_order": 60,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4322,7 +4228,7 @@
     {
       "registration_order": 96,
       "event": "message",
-      "event_order": 63,
+      "event_order": 61,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4408,7 +4314,7 @@
     {
       "registration_order": 98,
       "event": "message",
-      "event_order": 64,
+      "event_order": 62,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4494,7 +4400,7 @@
     {
       "registration_order": 100,
       "event": "message",
-      "event_order": 65,
+      "event_order": 63,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4580,7 +4486,7 @@
     {
       "registration_order": 102,
       "event": "message",
-      "event_order": 66,
+      "event_order": 64,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4666,7 +4572,7 @@
     {
       "registration_order": 104,
       "event": "message",
-      "event_order": 67,
+      "event_order": 65,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4752,7 +4658,7 @@
     {
       "registration_order": 106,
       "event": "message",
-      "event_order": 68,
+      "event_order": 66,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4838,7 +4744,7 @@
     {
       "registration_order": 108,
       "event": "message",
-      "event_order": 69,
+      "event_order": 67,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -4924,7 +4830,7 @@
     {
       "registration_order": 110,
       "event": "message",
-      "event_order": 70,
+      "event_order": 68,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5010,7 +4916,7 @@
     {
       "registration_order": 112,
       "event": "message",
-      "event_order": 71,
+      "event_order": 69,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5096,7 +5002,7 @@
     {
       "registration_order": 114,
       "event": "message",
-      "event_order": 72,
+      "event_order": 70,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5182,7 +5088,7 @@
     {
       "registration_order": 116,
       "event": "message",
-      "event_order": 73,
+      "event_order": 71,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5268,7 +5174,7 @@
     {
       "registration_order": 118,
       "event": "message",
-      "event_order": 74,
+      "event_order": 72,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5354,7 +5260,7 @@
     {
       "registration_order": 120,
       "event": "message",
-      "event_order": 75,
+      "event_order": 73,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5440,7 +5346,7 @@
     {
       "registration_order": 122,
       "event": "message",
-      "event_order": 76,
+      "event_order": 74,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5526,7 +5432,7 @@
     {
       "registration_order": 124,
       "event": "message",
-      "event_order": 77,
+      "event_order": 75,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5612,7 +5518,7 @@
     {
       "registration_order": 126,
       "event": "message",
-      "event_order": 78,
+      "event_order": 76,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5698,7 +5604,7 @@
     {
       "registration_order": 128,
       "event": "message",
-      "event_order": 79,
+      "event_order": 77,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5784,7 +5690,7 @@
     {
       "registration_order": 130,
       "event": "message",
-      "event_order": 80,
+      "event_order": 78,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5870,7 +5776,7 @@
     {
       "registration_order": 132,
       "event": "message",
-      "event_order": 81,
+      "event_order": 79,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -5956,7 +5862,7 @@
     {
       "registration_order": 134,
       "event": "message",
-      "event_order": 82,
+      "event_order": 80,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6042,7 +5948,7 @@
     {
       "registration_order": 136,
       "event": "message",
-      "event_order": 83,
+      "event_order": 81,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6128,7 +6034,7 @@
     {
       "registration_order": 138,
       "event": "message",
-      "event_order": 84,
+      "event_order": 82,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6214,7 +6120,7 @@
     {
       "registration_order": 140,
       "event": "message",
-      "event_order": 85,
+      "event_order": 83,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6300,7 +6206,7 @@
     {
       "registration_order": 142,
       "event": "message",
-      "event_order": 86,
+      "event_order": 84,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6386,7 +6292,7 @@
     {
       "registration_order": 144,
       "event": "message",
-      "event_order": 87,
+      "event_order": 85,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6472,7 +6378,7 @@
     {
       "registration_order": 146,
       "event": "message",
-      "event_order": 88,
+      "event_order": 86,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6558,7 +6464,7 @@
     {
       "registration_order": 148,
       "event": "message",
-      "event_order": 89,
+      "event_order": 87,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6644,7 +6550,7 @@
     {
       "registration_order": 150,
       "event": "message",
-      "event_order": 90,
+      "event_order": 88,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6730,7 +6636,7 @@
     {
       "registration_order": 152,
       "event": "message",
-      "event_order": 91,
+      "event_order": 89,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6816,7 +6722,7 @@
     {
       "registration_order": 154,
       "event": "message",
-      "event_order": 92,
+      "event_order": 90,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6902,7 +6808,7 @@
     {
       "registration_order": 156,
       "event": "message",
-      "event_order": 93,
+      "event_order": 91,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -6988,7 +6894,7 @@
     {
       "registration_order": 158,
       "event": "message",
-      "event_order": 94,
+      "event_order": 92,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7074,7 +6980,7 @@
     {
       "registration_order": 160,
       "event": "message",
-      "event_order": 95,
+      "event_order": 93,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7160,7 +7066,7 @@
     {
       "registration_order": 162,
       "event": "message",
-      "event_order": 96,
+      "event_order": 94,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7246,7 +7152,7 @@
     {
       "registration_order": 164,
       "event": "message",
-      "event_order": 97,
+      "event_order": 95,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7332,7 +7238,7 @@
     {
       "registration_order": 166,
       "event": "message",
-      "event_order": 98,
+      "event_order": 96,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7418,7 +7324,7 @@
     {
       "registration_order": 168,
       "event": "message",
-      "event_order": 99,
+      "event_order": 97,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7504,7 +7410,7 @@
     {
       "registration_order": 170,
       "event": "message",
-      "event_order": 100,
+      "event_order": 98,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7590,7 +7496,7 @@
     {
       "registration_order": 172,
       "event": "message",
-      "event_order": 101,
+      "event_order": 99,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7676,7 +7582,7 @@
     {
       "registration_order": 174,
       "event": "message",
-      "event_order": 102,
+      "event_order": 100,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7762,7 +7668,7 @@
     {
       "registration_order": 176,
       "event": "message",
-      "event_order": 103,
+      "event_order": 101,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7848,7 +7754,7 @@
     {
       "registration_order": 178,
       "event": "message",
-      "event_order": 104,
+      "event_order": 102,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -7934,7 +7840,7 @@
     {
       "registration_order": 180,
       "event": "message",
-      "event_order": 105,
+      "event_order": 103,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -8020,7 +7926,7 @@
     {
       "registration_order": 182,
       "event": "message",
-      "event_order": 106,
+      "event_order": 104,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -8110,7 +8016,7 @@
     {
       "registration_order": 184,
       "event": "message",
-      "event_order": 107,
+      "event_order": 105,
       "handler": "ProgCompiler.process_builder.<locals>.process",
       "module": "commands.prog",
       "source": {
@@ -8200,7 +8106,7 @@
     {
       "registration_order": 186,
       "event": "message",
-      "event_order": 108,
+      "event_order": 106,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8290,7 +8196,7 @@
     {
       "registration_order": 188,
       "event": "message",
-      "event_order": 109,
+      "event_order": 107,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8380,7 +8286,7 @@
     {
       "registration_order": 190,
       "event": "message",
-      "event_order": 110,
+      "event_order": 108,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8470,7 +8376,7 @@
     {
       "registration_order": 192,
       "event": "message",
-      "event_order": 111,
+      "event_order": 109,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8560,7 +8466,7 @@
     {
       "registration_order": 194,
       "event": "message",
-      "event_order": 112,
+      "event_order": 110,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8650,7 +8556,7 @@
     {
       "registration_order": 196,
       "event": "message",
-      "event_order": 113,
+      "event_order": 111,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8740,7 +8646,7 @@
     {
       "registration_order": 198,
       "event": "message",
-      "event_order": 114,
+      "event_order": 112,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8830,7 +8736,7 @@
     {
       "registration_order": 200,
       "event": "message",
-      "event_order": 115,
+      "event_order": 113,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -8920,7 +8826,7 @@
     {
       "registration_order": 202,
       "event": "message",
-      "event_order": 116,
+      "event_order": 114,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9010,7 +8916,7 @@
     {
       "registration_order": 204,
       "event": "message",
-      "event_order": 117,
+      "event_order": 115,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9100,7 +9006,7 @@
     {
       "registration_order": 206,
       "event": "message",
-      "event_order": 118,
+      "event_order": 116,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9190,7 +9096,7 @@
     {
       "registration_order": 208,
       "event": "message",
-      "event_order": 119,
+      "event_order": 117,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9280,7 +9186,7 @@
     {
       "registration_order": 210,
       "event": "message",
-      "event_order": 120,
+      "event_order": 118,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9370,7 +9276,7 @@
     {
       "registration_order": 212,
       "event": "message",
-      "event_order": 121,
+      "event_order": 119,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9460,7 +9366,7 @@
     {
       "registration_order": 214,
       "event": "message",
-      "event_order": 122,
+      "event_order": 120,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9550,7 +9456,7 @@
     {
       "registration_order": 216,
       "event": "message",
-      "event_order": 123,
+      "event_order": 121,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9640,7 +9546,7 @@
     {
       "registration_order": 218,
       "event": "message",
-      "event_order": 124,
+      "event_order": 122,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9730,7 +9636,7 @@
     {
       "registration_order": 220,
       "event": "message",
-      "event_order": 125,
+      "event_order": 123,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9820,7 +9726,7 @@
     {
       "registration_order": 222,
       "event": "message",
-      "event_order": 126,
+      "event_order": 124,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -9910,7 +9816,7 @@
     {
       "registration_order": 224,
       "event": "message",
-      "event_order": 127,
+      "event_order": 125,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10000,7 +9906,7 @@
     {
       "registration_order": 226,
       "event": "message",
-      "event_order": 128,
+      "event_order": 126,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10090,7 +9996,7 @@
     {
       "registration_order": 228,
       "event": "message",
-      "event_order": 129,
+      "event_order": 127,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10180,7 +10086,7 @@
     {
       "registration_order": 230,
       "event": "message",
-      "event_order": 130,
+      "event_order": 128,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10270,7 +10176,7 @@
     {
       "registration_order": 232,
       "event": "message",
-      "event_order": 131,
+      "event_order": 129,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10360,7 +10266,7 @@
     {
       "registration_order": 234,
       "event": "message",
-      "event_order": 132,
+      "event_order": 130,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10450,7 +10356,7 @@
     {
       "registration_order": 236,
       "event": "message",
-      "event_order": 133,
+      "event_order": 131,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10540,7 +10446,7 @@
     {
       "registration_order": 238,
       "event": "message",
-      "event_order": 134,
+      "event_order": 132,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10630,7 +10536,7 @@
     {
       "registration_order": 240,
       "event": "message",
-      "event_order": 135,
+      "event_order": 133,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10720,7 +10626,7 @@
     {
       "registration_order": 242,
       "event": "message",
-      "event_order": 136,
+      "event_order": 134,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10810,7 +10716,7 @@
     {
       "registration_order": 244,
       "event": "message",
-      "event_order": 137,
+      "event_order": 135,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10900,7 +10806,7 @@
     {
       "registration_order": 246,
       "event": "message",
-      "event_order": 138,
+      "event_order": 136,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -10990,7 +10896,7 @@
     {
       "registration_order": 248,
       "event": "message",
-      "event_order": 139,
+      "event_order": 137,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11080,7 +10986,7 @@
     {
       "registration_order": 250,
       "event": "message",
-      "event_order": 140,
+      "event_order": 138,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11170,7 +11076,7 @@
     {
       "registration_order": 252,
       "event": "message",
-      "event_order": 141,
+      "event_order": 139,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11260,7 +11166,7 @@
     {
       "registration_order": 254,
       "event": "message",
-      "event_order": 142,
+      "event_order": 140,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11350,7 +11256,7 @@
     {
       "registration_order": 256,
       "event": "message",
-      "event_order": 143,
+      "event_order": 141,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11440,7 +11346,7 @@
     {
       "registration_order": 258,
       "event": "message",
-      "event_order": 144,
+      "event_order": 142,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11530,7 +11436,7 @@
     {
       "registration_order": 260,
       "event": "message",
-      "event_order": 145,
+      "event_order": 143,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11620,7 +11526,7 @@
     {
       "registration_order": 262,
       "event": "message",
-      "event_order": 146,
+      "event_order": 144,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11710,7 +11616,7 @@
     {
       "registration_order": 264,
       "event": "message",
-      "event_order": 147,
+      "event_order": 145,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11800,7 +11706,7 @@
     {
       "registration_order": 266,
       "event": "message",
-      "event_order": 148,
+      "event_order": 146,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11890,7 +11796,7 @@
     {
       "registration_order": 268,
       "event": "message",
-      "event_order": 149,
+      "event_order": 147,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -11980,7 +11886,7 @@
     {
       "registration_order": 270,
       "event": "message",
-      "event_order": 150,
+      "event_order": 148,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12070,7 +11976,7 @@
     {
       "registration_order": 272,
       "event": "message",
-      "event_order": 151,
+      "event_order": 149,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12160,7 +12066,7 @@
     {
       "registration_order": 274,
       "event": "message",
-      "event_order": 152,
+      "event_order": 150,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12250,7 +12156,7 @@
     {
       "registration_order": 276,
       "event": "message",
-      "event_order": 153,
+      "event_order": 151,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12340,7 +12246,7 @@
     {
       "registration_order": 278,
       "event": "message",
-      "event_order": 154,
+      "event_order": 152,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12430,7 +12336,7 @@
     {
       "registration_order": 280,
       "event": "message",
-      "event_order": 155,
+      "event_order": 153,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12520,7 +12426,7 @@
     {
       "registration_order": 282,
       "event": "message",
-      "event_order": 156,
+      "event_order": 154,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12610,7 +12516,7 @@
     {
       "registration_order": 284,
       "event": "message",
-      "event_order": 157,
+      "event_order": 155,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12700,7 +12606,7 @@
     {
       "registration_order": 286,
       "event": "message",
-      "event_order": 158,
+      "event_order": 156,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12790,7 +12696,7 @@
     {
       "registration_order": 288,
       "event": "message",
-      "event_order": 159,
+      "event_order": 157,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12880,7 +12786,7 @@
     {
       "registration_order": 290,
       "event": "message",
-      "event_order": 160,
+      "event_order": 158,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -12970,7 +12876,7 @@
     {
       "registration_order": 292,
       "event": "message",
-      "event_order": 161,
+      "event_order": 159,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13060,7 +12966,7 @@
     {
       "registration_order": 294,
       "event": "message",
-      "event_order": 162,
+      "event_order": 160,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13150,7 +13056,7 @@
     {
       "registration_order": 296,
       "event": "message",
-      "event_order": 163,
+      "event_order": 161,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13240,7 +13146,7 @@
     {
       "registration_order": 298,
       "event": "message",
-      "event_order": 164,
+      "event_order": 162,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13330,7 +13236,7 @@
     {
       "registration_order": 300,
       "event": "message",
-      "event_order": 165,
+      "event_order": 163,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13420,7 +13326,7 @@
     {
       "registration_order": 302,
       "event": "message",
-      "event_order": 166,
+      "event_order": 164,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13510,7 +13416,7 @@
     {
       "registration_order": 304,
       "event": "message",
-      "event_order": 167,
+      "event_order": 165,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13600,7 +13506,7 @@
     {
       "registration_order": 306,
       "event": "message",
-      "event_order": 168,
+      "event_order": 166,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13690,7 +13596,7 @@
     {
       "registration_order": 308,
       "event": "message",
-      "event_order": 169,
+      "event_order": 167,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13780,7 +13686,7 @@
     {
       "registration_order": 310,
       "event": "message",
-      "event_order": 170,
+      "event_order": 168,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13870,7 +13776,7 @@
     {
       "registration_order": 312,
       "event": "message",
-      "event_order": 171,
+      "event_order": 169,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -13960,7 +13866,7 @@
     {
       "registration_order": 314,
       "event": "message",
-      "event_order": 172,
+      "event_order": 170,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14050,7 +13956,7 @@
     {
       "registration_order": 316,
       "event": "message",
-      "event_order": 173,
+      "event_order": 171,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14140,7 +14046,7 @@
     {
       "registration_order": 318,
       "event": "message",
-      "event_order": 174,
+      "event_order": 172,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14230,7 +14136,7 @@
     {
       "registration_order": 320,
       "event": "message",
-      "event_order": 175,
+      "event_order": 173,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14320,7 +14226,7 @@
     {
       "registration_order": 322,
       "event": "message",
-      "event_order": 176,
+      "event_order": 174,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14410,7 +14316,7 @@
     {
       "registration_order": 324,
       "event": "message",
-      "event_order": 177,
+      "event_order": 175,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14500,7 +14406,7 @@
     {
       "registration_order": 326,
       "event": "message",
-      "event_order": 178,
+      "event_order": 176,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14590,7 +14496,7 @@
     {
       "registration_order": 328,
       "event": "message",
-      "event_order": 179,
+      "event_order": 177,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14688,7 +14594,7 @@
     {
       "registration_order": 330,
       "event": "message",
-      "event_order": 180,
+      "event_order": 178,
       "handler": "ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin",
       "module": "commands.prog",
       "source": {
@@ -14825,7 +14731,7 @@
     {
       "registration_order": 333,
       "event": "message",
-      "event_order": 181,
+      "event_order": 179,
       "handler": "ProgCompiler.process_stdin_run",
       "module": "commands.prog",
       "source": {
@@ -14860,7 +14766,7 @@
     {
       "registration_order": 334,
       "event": "message",
-      "event_order": 182,
+      "event_order": 180,
       "handler": "process_code",
       "module": "commands.prog",
       "source": {
@@ -14911,7 +14817,7 @@
     {
       "registration_order": 335,
       "event": "message",
-      "event_order": 183,
+      "event_order": 181,
       "handler": "process_lobster",
       "module": "commands.lobster",
       "source": {
@@ -14967,7 +14873,7 @@
     {
       "registration_order": 336,
       "event": "message",
-      "event_order": 184,
+      "event_order": 182,
       "handler": "process_demotivator",
       "module": "commands.lobster",
       "source": {
@@ -15023,7 +14929,7 @@
     {
       "registration_order": 337,
       "event": "message",
-      "event_order": 185,
+      "event_order": 183,
       "handler": "process_atmta",
       "module": "commands.lobster",
       "source": {
@@ -15079,7 +14985,7 @@
     {
       "registration_order": 338,
       "event": "message",
-      "event_order": 186,
+      "event_order": 184,
       "handler": "process_atmta_v",
       "module": "commands.lobster",
       "source": {
@@ -15135,7 +15041,7 @@
     {
       "registration_order": 339,
       "event": "message",
-      "event_order": 187,
+      "event_order": 185,
       "handler": "process_which_anime",
       "module": "commands.externals",
       "source": {
@@ -15185,7 +15091,7 @@
     {
       "registration_order": 340,
       "event": "message",
-      "event_order": 188,
+      "event_order": 186,
       "handler": "Tyan.process",
       "module": "commands.tyan",
       "source": {
@@ -15275,7 +15181,7 @@
     {
       "registration_order": 342,
       "event": "message",
-      "event_order": 189,
+      "event_order": 187,
       "handler": "process_topdf",
       "module": "commands.externals",
       "source": {
@@ -15329,7 +15235,7 @@
     {
       "registration_order": 343,
       "event": "message",
-      "event_order": 190,
+      "event_order": 188,
       "handler": "process_bg",
       "module": "commands.externals",
       "source": {
@@ -15381,7 +15287,7 @@
     {
       "registration_order": 344,
       "event": "message",
-      "event_order": 191,
+      "event_order": 189,
       "handler": "process_porfirevich",
       "module": "commands.externals",
       "source": {
@@ -15433,7 +15339,7 @@
     {
       "registration_order": 345,
       "event": "message",
-      "event_order": 192,
+      "event_order": 190,
       "handler": "process_duckduckgo",
       "module": "commands.externals",
       "source": {
@@ -15489,7 +15395,7 @@
     {
       "registration_order": 346,
       "event": "message",
-      "event_order": 193,
+      "event_order": 191,
       "handler": "process_ud",
       "module": "commands.externals",
       "source": {
@@ -15541,116 +15447,9 @@
       "key": "message:process_ud:ud:urban:slang"
     },
     {
-      "registration_order": 347,
-      "event": "message",
-      "event_order": 194,
-      "handler": "AntiBot.process",
-      "module": "commands.antibot",
-      "source": {
-        "file": "hub_bot/main.py",
-        "line": 228
-      },
-      "aliases": [],
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "new_chat_members"
-          ]
-        }
-      ],
-      "registration": {
-        "handler": "AntiBot.process",
-        "filters": [],
-        "options": {
-          "content_types": "ContentType.NEW_CHAT_MEMBERS"
-        }
-      },
-      "key": "message:AntiBot.process"
-    },
-    {
-      "registration_order": 348,
-      "event": "message",
-      "event_order": 195,
-      "handler": "AntiBot.process_left",
-      "module": "commands.antibot",
-      "source": {
-        "file": "hub_bot/main.py",
-        "line": 229
-      },
-      "aliases": [],
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "ContentTypeFilter",
-          "content_types": [
-            "left_chat_member"
-          ]
-        }
-      ],
-      "registration": {
-        "handler": "AntiBot.process_left",
-        "filters": [],
-        "options": {
-          "content_types": "ContentType.LEFT_CHAT_MEMBER"
-        }
-      },
-      "key": "message:AntiBot.process_left"
-    },
-    {
-      "registration_order": 349,
-      "event": "callback_query",
-      "event_order": 5,
-      "handler": "AntiBot.process_cb",
-      "module": "commands.antibot",
-      "source": {
-        "file": "hub_bot/main.py",
-        "line": 230
-      },
-      "aliases": [],
-      "filters": [
-        {
-          "type": "StateFilter",
-          "states": [
-            null
-          ]
-        },
-        {
-          "type": "CallbackDataFilter",
-          "prefix": "antibot",
-          "separator": ":",
-          "fields": [
-            "action",
-            "chat_id",
-            "user_id"
-          ],
-          "constraints": {}
-        }
-      ],
-      "registration": {
-        "handler": "AntiBot.process_cb",
-        "filters": [
-          "AntiBot.callback_data.filter()"
-        ],
-        "options": {}
-      },
-      "key": "callback_query:AntiBot.process_cb"
-    },
-    {
       "registration_order": 350,
       "event": "message",
-      "event_order": 196,
+      "event_order": 192,
       "handler": "process_reverse",
       "module": "commands.tenet",
       "source": {
@@ -15698,7 +15497,7 @@
     {
       "registration_order": 351,
       "event": "message",
-      "event_order": 197,
+      "event_order": 193,
       "handler": "process_image_to_text",
       "module": "commands.tesseract",
       "source": {
@@ -15750,7 +15549,7 @@
     {
       "registration_order": 352,
       "event": "message",
-      "event_order": 198,
+      "event_order": 194,
       "handler": "process_tts",
       "module": "commands.tts",
       "source": {
@@ -15802,7 +15601,7 @@
     {
       "registration_order": 353,
       "event": "message",
-      "event_order": 199,
+      "event_order": 195,
       "handler": "Speech.process_stt_command",
       "module": "utils.wit",
       "source": {
@@ -15850,7 +15649,7 @@
     {
       "registration_order": 354,
       "event": "message",
-      "event_order": 200,
+      "event_order": 196,
       "handler": "Speech.process_stt",
       "module": "utils.wit",
       "source": {
@@ -15897,7 +15696,7 @@
     {
       "registration_order": 355,
       "event": "message",
-      "event_order": 201,
+      "event_order": 197,
       "handler": "WolframAPI.process_wolfram",
       "module": "utils.wolfram",
       "source": {
@@ -15947,7 +15746,7 @@
     {
       "registration_order": 356,
       "event": "message",
-      "event_order": 202,
+      "event_order": 198,
       "handler": "process_sed",
       "module": "commands.sed",
       "source": {
@@ -15995,7 +15794,7 @@
     {
       "registration_order": 357,
       "event": "message",
-      "event_order": 203,
+      "event_order": 199,
       "handler": "Dvach.process",
       "module": "commands.dvach",
       "source": {
@@ -16066,7 +15865,7 @@
     {
       "registration_order": 358,
       "event": "message",
-      "event_order": 204,
+      "event_order": 200,
       "handler": "Dvach.process_link",
       "module": "commands.dvach",
       "source": {
@@ -16126,7 +15925,7 @@
     {
       "registration_order": 359,
       "event": "callback_query",
-      "event_order": 6,
+      "event_order": 5,
       "handler": "Dvach.process_cb",
       "module": "commands.dvach",
       "source": {
@@ -16164,7 +15963,7 @@
     {
       "registration_order": 360,
       "event": "message",
-      "event_order": 205,
+      "event_order": 201,
       "handler": "process_sudo",
       "module": "commands.admin",
       "source": {
@@ -16219,7 +16018,7 @@
     {
       "registration_order": 361,
       "event": "message",
-      "event_order": 206,
+      "event_order": 202,
       "handler": "process_revoke",
       "module": "commands.admin",
       "source": {
@@ -16274,7 +16073,7 @@
     {
       "registration_order": 362,
       "event": "message",
-      "event_order": 207,
+      "event_order": 203,
       "handler": "process_ban",
       "module": "commands.admin",
       "source": {
@@ -16329,7 +16128,7 @@
     {
       "registration_order": 363,
       "event": "message",
-      "event_order": 208,
+      "event_order": 204,
       "handler": "process_restrict",
       "module": "commands.admin",
       "source": {
@@ -16386,7 +16185,7 @@
     {
       "registration_order": 364,
       "event": "message",
-      "event_order": 209,
+      "event_order": 205,
       "handler": "process_unban",
       "module": "commands.admin",
       "source": {
@@ -16441,7 +16240,7 @@
     {
       "registration_order": 365,
       "event": "message",
-      "event_order": 210,
+      "event_order": 206,
       "handler": "process_forwards",
       "module": "commands.admin",
       "source": {
@@ -16495,7 +16294,7 @@
     {
       "registration_order": 366,
       "event": "message",
-      "event_order": 211,
+      "event_order": 207,
       "handler": "process_create_infra_chat",
       "module": "commands.infra",
       "source": {
@@ -16549,7 +16348,7 @@
     {
       "registration_order": 367,
       "event": "message",
-      "event_order": 212,
+      "event_order": 208,
       "handler": "process_delete_infra_chat",
       "module": "commands.infra",
       "source": {
@@ -16603,7 +16402,7 @@
     {
       "registration_order": 368,
       "event": "message",
-      "event_order": 213,
+      "event_order": 209,
       "handler": "process_pin",
       "module": "commands.infra",
       "source": {
@@ -16657,7 +16456,7 @@
     {
       "registration_order": 369,
       "event": "message",
-      "event_order": 214,
+      "event_order": 210,
       "handler": "process_pin_all",
       "module": "commands.infra",
       "source": {
@@ -16711,7 +16510,7 @@
     {
       "registration_order": 370,
       "event": "message",
-      "event_order": 215,
+      "event_order": 211,
       "handler": "process_update_pins",
       "module": "commands.infra",
       "source": {
@@ -16765,7 +16564,7 @@
     {
       "registration_order": 371,
       "event": "message",
-      "event_order": 216,
+      "event_order": 212,
       "handler": "process_post_all",
       "module": "commands.posting",
       "source": {
@@ -16819,7 +16618,7 @@
     {
       "registration_order": 372,
       "event": "message",
-      "event_order": 217,
+      "event_order": 213,
       "handler": "process_post_forward_all",
       "module": "commands.posting",
       "source": {
@@ -16873,7 +16672,7 @@
     {
       "registration_order": 373,
       "event": "message",
-      "event_order": 218,
+      "event_order": 214,
       "handler": "MakePost.process",
       "module": "commands.posting",
       "source": {
@@ -16928,7 +16727,7 @@
     {
       "registration_order": 374,
       "event": "message",
-      "event_order": 219,
+      "event_order": 215,
       "handler": "MakePost.process_destination",
       "module": "commands.posting",
       "source": {
@@ -16972,7 +16771,7 @@
     {
       "registration_order": 375,
       "event": "message",
-      "event_order": 220,
+      "event_order": 216,
       "handler": "MakePost.process_waiting",
       "module": "commands.posting",
       "source": {
@@ -17016,7 +16815,7 @@
     {
       "registration_order": 376,
       "event": "message",
-      "event_order": 221,
+      "event_order": 217,
       "handler": "process_status",
       "module": "commands.infra",
       "source": {
@@ -17070,7 +16869,7 @@
     {
       "registration_order": 377,
       "event": "message",
-      "event_order": 222,
+      "event_order": 218,
       "handler": "Stats.process",
       "module": "commands.stats",
       "source": {
@@ -17121,7 +16920,7 @@
     {
       "registration_order": 378,
       "event": "callback_query",
-      "event_order": 7,
+      "event_order": 6,
       "handler": "Stats.process_cb",
       "module": "commands.stats",
       "source": {
@@ -17158,7 +16957,7 @@
     {
       "registration_order": 379,
       "event": "message",
-      "event_order": 223,
+      "event_order": 219,
       "handler": "MinecraftStatus.process",
       "module": "commands.minecraft",
       "source": {
@@ -17209,7 +17008,7 @@
     {
       "registration_order": 380,
       "event": "callback_query",
-      "event_order": 8,
+      "event_order": 7,
       "handler": "MinecraftStatus.process_cb",
       "module": "commands.minecraft",
       "source": {
@@ -17246,7 +17045,7 @@
     {
       "registration_order": 381,
       "event": "message",
-      "event_order": 224,
+      "event_order": 220,
       "handler": "Camera.process",
       "module": "commands.camera",
       "source": {
@@ -17297,7 +17096,7 @@
     {
       "registration_order": 382,
       "event": "callback_query",
-      "event_order": 9,
+      "event_order": 8,
       "handler": "Camera.process_cb",
       "module": "commands.camera",
       "source": {
@@ -17335,7 +17134,7 @@
     {
       "registration_order": 383,
       "event": "message",
-      "event_order": 225,
+      "event_order": 221,
       "handler": "Debate.process",
       "module": "commands.debate",
       "source": {
@@ -17386,7 +17185,7 @@
     {
       "registration_order": 384,
       "event": "callback_query",
-      "event_order": 10,
+      "event_order": 9,
       "handler": "Debate.process_cb",
       "module": "commands.debate",
       "source": {
@@ -17424,7 +17223,7 @@
     {
       "registration_order": 385,
       "event": "message",
-      "event_order": 226,
+      "event_order": 222,
       "handler": "Crypto.process",
       "module": "commands.crypto",
       "source": {
@@ -17483,7 +17282,7 @@
     {
       "registration_order": 386,
       "event": "callback_query",
-      "event_order": 11,
+      "event_order": 10,
       "handler": "Crypto.process_cb",
       "module": "commands.crypto",
       "source": {
@@ -17520,7 +17319,7 @@
     {
       "registration_order": 387,
       "event": "message",
-      "event_order": 227,
+      "event_order": 223,
       "handler": "process_vk_wall",
       "module": "commands.vk",
       "source": {
@@ -17574,7 +17373,7 @@
     {
       "registration_order": 388,
       "event": "message",
-      "event_order": 228,
+      "event_order": 224,
       "handler": "process_vk_post",
       "module": "commands.vk",
       "source": {
@@ -17628,7 +17427,7 @@
     {
       "registration_order": 389,
       "event": "message",
-      "event_order": 229,
+      "event_order": 225,
       "handler": "process_list_vk_wall",
       "module": "commands.vk",
       "source": {
@@ -17682,7 +17481,7 @@
     {
       "registration_order": 390,
       "event": "message",
-      "event_order": 230,
+      "event_order": 226,
       "handler": "process_votes",
       "module": "commands.votes",
       "source": {
@@ -17735,7 +17534,7 @@
     {
       "registration_order": 391,
       "event": "message",
-      "event_order": 231,
+      "event_order": 227,
       "handler": "Like.process",
       "module": "commands.likes",
       "source": {
@@ -17788,7 +17587,7 @@
     {
       "registration_order": 392,
       "event": "callback_query",
-      "event_order": 12,
+      "event_order": 11,
       "handler": "Like.process_cb",
       "module": "commands.likes",
       "source": {
@@ -17825,7 +17624,7 @@
     {
       "registration_order": 393,
       "event": "message",
-      "event_order": 232,
+      "event_order": 228,
       "handler": "Rate.process",
       "module": "commands.rate",
       "source": {
@@ -17880,7 +17679,7 @@
     {
       "registration_order": 394,
       "event": "callback_query",
-      "event_order": 13,
+      "event_order": 12,
       "handler": "Rate.process_cb",
       "module": "commands.rate",
       "source": {
@@ -17917,7 +17716,7 @@
     {
       "registration_order": 395,
       "event": "message",
-      "event_order": 233,
+      "event_order": 229,
       "handler": "process_roll",
       "module": "commands.rolls",
       "source": {
@@ -17968,7 +17767,7 @@
     {
       "registration_order": 396,
       "event": "message",
-      "event_order": 234,
+      "event_order": 230,
       "handler": "Rolls.process",
       "module": "commands.rolls",
       "source": {
@@ -18021,7 +17820,7 @@
     {
       "registration_order": 397,
       "event": "callback_query",
-      "event_order": 14,
+      "event_order": 13,
       "handler": "Rolls.process_cb",
       "module": "commands.rolls",
       "source": {
@@ -18059,7 +17858,7 @@
     {
       "registration_order": 398,
       "event": "message",
-      "event_order": 235,
+      "event_order": 231,
       "handler": "process_random",
       "module": "commands.rolls",
       "source": {
@@ -18112,7 +17911,7 @@
     {
       "registration_order": 399,
       "event": "message",
-      "event_order": 236,
+      "event_order": 232,
       "handler": "Randoms.process",
       "module": "commands.rolls",
       "source": {
@@ -18165,7 +17964,7 @@
     {
       "registration_order": 400,
       "event": "callback_query",
-      "event_order": 15,
+      "event_order": 14,
       "handler": "Randoms.process_cb",
       "module": "commands.rolls",
       "source": {
@@ -18204,7 +18003,7 @@
     {
       "registration_order": 401,
       "event": "message",
-      "event_order": 237,
+      "event_order": 233,
       "handler": "Raffle.process",
       "module": "commands.raffle",
       "source": {
@@ -18257,7 +18056,7 @@
     {
       "registration_order": 402,
       "event": "callback_query",
-      "event_order": 16,
+      "event_order": 15,
       "handler": "Raffle.process_cb",
       "module": "commands.raffle",
       "source": {
@@ -18294,7 +18093,7 @@
     {
       "registration_order": 403,
       "event": "message",
-      "event_order": 238,
+      "event_order": 234,
       "handler": "process_truth",
       "module": "commands.rolls",
       "source": {
@@ -18349,7 +18148,7 @@
     {
       "registration_order": 404,
       "event": "message",
-      "event_order": 239,
+      "event_order": 235,
       "handler": "process_or",
       "module": "commands.rolls",
       "source": {
@@ -18398,7 +18197,7 @@
     {
       "registration_order": 405,
       "event": "message",
-      "event_order": 240,
+      "event_order": 236,
       "handler": "process_mash",
       "module": "commands.rolls",
       "source": {
@@ -18447,7 +18246,7 @@
     {
       "registration_order": 406,
       "event": "message",
-      "event_order": 241,
+      "event_order": 237,
       "handler": "process_d6",
       "module": "commands.rolls",
       "source": {
@@ -18496,7 +18295,7 @@
     {
       "registration_order": 407,
       "event": "message",
-      "event_order": 242,
+      "event_order": 238,
       "handler": "process_dice",
       "module": "commands.rolls",
       "source": {
@@ -18545,7 +18344,7 @@
     {
       "registration_order": 408,
       "event": "message",
-      "event_order": 243,
+      "event_order": 239,
       "handler": "process_others_dice",
       "module": "commands.rolls",
       "source": {
@@ -18579,7 +18378,7 @@
     {
       "registration_order": 409,
       "event": "message",
-      "event_order": 244,
+      "event_order": 240,
       "handler": "process_zalgo",
       "module": "commands.zalgo",
       "source": {
@@ -18626,7 +18425,7 @@
     {
       "registration_order": 410,
       "event": "message",
-      "event_order": 245,
+      "event_order": 241,
       "handler": "process_figlet",
       "module": "commands.figlet",
       "source": {
@@ -18673,7 +18472,7 @@
     {
       "registration_order": 411,
       "event": "message",
-      "event_order": 246,
+      "event_order": 242,
       "handler": "process_excuse",
       "module": "commands.excuses",
       "source": {
@@ -18722,7 +18521,7 @@
     {
       "registration_order": 412,
       "event": "message",
-      "event_order": 247,
+      "event_order": 243,
       "handler": "process_gender",
       "module": "commands.genders",
       "source": {
@@ -18771,7 +18570,7 @@
     {
       "registration_order": 413,
       "event": "message",
-      "event_order": 248,
+      "event_order": 244,
       "handler": "Geoguess.process",
       "module": "commands.geoguess",
       "source": {
@@ -18818,7 +18617,7 @@
     {
       "registration_order": 414,
       "event": "message",
-      "event_order": 249,
+      "event_order": 245,
       "handler": "Geoguess.top",
       "module": "commands.geoguess",
       "source": {
@@ -18865,7 +18664,7 @@
     {
       "registration_order": 415,
       "event": "callback_query",
-      "event_order": 17,
+      "event_order": 16,
       "handler": "Geoguess.process_cb",
       "module": "commands.geoguess",
       "source": {
@@ -18903,7 +18702,7 @@
     {
       "registration_order": 416,
       "event": "message",
-      "event_order": 250,
+      "event_order": 246,
       "handler": "process_me",
       "module": "commands.other",
       "source": {
@@ -18950,7 +18749,7 @@
     {
       "registration_order": 417,
       "event": "message",
-      "event_order": 251,
+      "event_order": 247,
       "handler": "process_copy",
       "module": "commands.other",
       "source": {
@@ -19001,7 +18800,7 @@
     {
       "registration_order": 418,
       "event": "message",
-      "event_order": 252,
+      "event_order": 248,
       "handler": "process_arxiv",
       "module": "commands.arxiv",
       "source": {
@@ -19047,7 +18846,7 @@
     {
       "registration_order": 419,
       "event": "message",
-      "event_order": 253,
+      "event_order": 249,
       "handler": "process_translate",
       "module": "commands.lingvanex",
       "source": {
@@ -19096,7 +18895,7 @@
     {
       "registration_order": 420,
       "event": "message",
-      "event_order": 254,
+      "event_order": 250,
       "handler": "process_en",
       "module": "commands.lingvanex",
       "source": {
@@ -19143,7 +18942,7 @@
     {
       "registration_order": 421,
       "event": "message",
-      "event_order": 255,
+      "event_order": 251,
       "handler": "process_ru",
       "module": "commands.lingvanex",
       "source": {
@@ -19190,7 +18989,7 @@
     {
       "registration_order": 422,
       "event": "message",
-      "event_order": 256,
+      "event_order": 252,
       "handler": "process_langs",
       "module": "commands.lingvanex",
       "source": {
@@ -19237,7 +19036,7 @@
     {
       "registration_order": 423,
       "event": "message",
-      "event_order": 257,
+      "event_order": 253,
       "handler": "process_sanya",
       "module": "commands.personal",
       "source": {
@@ -19286,7 +19085,7 @@
     {
       "registration_order": 424,
       "event": "message",
-      "event_order": 258,
+      "event_order": 254,
       "handler": "process_dyubs",
       "module": "commands.personal",
       "source": {
@@ -19335,7 +19134,7 @@
     {
       "registration_order": 425,
       "event": "message",
-      "event_order": 259,
+      "event_order": 255,
       "handler": "process_popov",
       "module": "commands.personal",
       "source": {
@@ -19516,7 +19315,7 @@
     {
       "registration_order": 430,
       "event": "message",
-      "event_order": 260,
+      "event_order": 256,
       "handler": "process_echo",
       "module": "main",
       "source": {
@@ -19558,7 +19357,7 @@
     {
       "registration_order": 431,
       "event": "callback_query",
-      "event_order": 18,
+      "event_order": 17,
       "handler": "process_expired_callback",
       "module": "main",
       "source": {
@@ -19614,10 +19413,11 @@
         "handler": "process_sticker",
         "aliases": [
           "s",
-          "sticker"
+          "sticker",
+          "sa"
         ],
         "event_order": 16,
-        "route_key": "message:process_sticker:s:sticker"
+        "route_key": "message:process_sticker:s:sticker:sa"
       },
       "meta": {
         "text": "#py",
@@ -19633,10 +19433,11 @@
         "handler": "process_sticker",
         "aliases": [
           "s",
-          "sticker"
+          "sticker",
+          "sa"
         ],
         "event_order": 16,
-        "route_key": "message:process_sticker:s:sticker"
+        "route_key": "message:process_sticker:s:sticker:sa"
       },
       "meta": {
         "text": "#py",
@@ -19654,7 +19455,7 @@
           "py",
           "python"
         ],
-        "event_order": 106,
+        "event_order": 104,
         "route_key": "message:ProgCompiler.process_builder.<locals>.process:python3:py:python"
       },
       "meta": {
@@ -19673,7 +19474,7 @@
           "py",
           "python"
         ],
-        "event_order": 106,
+        "event_order": 104,
         "route_key": "message:ProgCompiler.process_builder.<locals>.process:python3:py:python"
       },
       "meta": {
@@ -19690,10 +19491,11 @@
         "handler": "process_sticker",
         "aliases": [
           "s",
-          "sticker"
+          "sticker",
+          "sa"
         ],
         "event_order": 16,
-        "route_key": "message:process_sticker:s:sticker"
+        "route_key": "message:process_sticker:s:sticker:sa"
       },
       "meta": {
         "text": "/py print(1)",
@@ -19711,7 +19513,7 @@
           "py",
           "python"
         ],
-        "event_order": 106,
+        "event_order": 104,
         "route_key": "message:ProgCompiler.process_builder.<locals>.process:python3:py:python"
       },
       "meta": {
@@ -19730,7 +19532,7 @@
           "py",
           "python"
         ],
-        "event_order": 106,
+        "event_order": 104,
         "route_key": "message:ProgCompiler.process_builder.<locals>.process:python3:py:python"
       },
       "meta": {
@@ -19761,7 +19563,7 @@
           "py",
           "python"
         ],
-        "event_order": 106,
+        "event_order": 104,
         "route_key": "message:ProgCompiler.process_builder.<locals>.process:python3:py:python"
       },
       "meta": {
@@ -19794,7 +19596,7 @@
           "python_stdin",
           "pythons"
         ],
-        "event_order": 179,
+        "event_order": 177,
         "route_key": "message:ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin:python3:py_stdin:pys:python_stdin:pythons"
       },
       "meta": {
@@ -19817,7 +19619,7 @@
           "python_stdin",
           "pythons"
         ],
-        "event_order": 179,
+        "event_order": 177,
         "route_key": "message:ProgCompiler.process_stdin_builder.<locals>.process_code_submit_with_stdin:python3:py_stdin:pys:python_stdin:pythons"
       },
       "meta": {
@@ -19863,10 +19665,11 @@
         "handler": "process_sticker",
         "aliases": [
           "s",
-          "sticker"
+          "sticker",
+          "sa"
         ],
         "event_order": 16,
-        "route_key": "message:process_sticker:s:sticker"
+        "route_key": "message:process_sticker:s:sticker:sa"
       },
       "meta": {
         "text": "title",
@@ -19910,7 +19713,7 @@
         "aliases": [
           "ban"
         ],
-        "event_order": 207,
+        "event_order": 203,
         "route_key": "message:process_ban:ban"
       },
       "id": "route-18"
@@ -19926,7 +19729,7 @@
       "matched": {
         "handler": "ProgCompiler.process_stdin_run",
         "aliases": [],
-        "event_order": 181,
+        "event_order": 179,
         "route_key": "message:ProgCompiler.process_stdin_run"
       },
       "id": "route-20"
@@ -19950,7 +19753,7 @@
       "matched": {
         "handler": "Stickers.sticker_set_name",
         "aliases": [],
-        "event_order": 22,
+        "event_order": 20,
         "route_key": "message:Stickers.sticker_set_name"
       },
       "id": "route-22"
@@ -19962,7 +19765,7 @@
       "matched": {
         "handler": "MakePost.process_destination",
         "aliases": [],
-        "event_order": 219,
+        "event_order": 215,
         "route_key": "message:MakePost.process_destination"
       },
       "id": "route-23"

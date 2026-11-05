@@ -17,7 +17,6 @@ from telegram_helpers import RecordingSession, make_message
 @pytest.mark.parametrize(
     "family,wire,fields",
     [
-        ("antibot.AntiBot", "antibot:ban:-100:7", {"action": "ban", "chat_id": -100, "user_id": 7}),
         ("crypto.Crypto", "crypto:BTC", {"ticker": "BTC"}),
         ("dvach.Dvach", "thread_b_update", {"board": "b", "url": "update"}),
         ("geoguess.Geoguess", "geoguess:token:finish", {"round": "token", "choice": "finish"}),
@@ -40,7 +39,6 @@ def test_callback_wires_remain_compatible(family, wire, fields):
 @pytest.mark.parametrize(
     "family,fields,services",
     [
-        ("antibot.AntiBot", {"action": "ban", "chat_id": -100, "user_id": 7}, {"bot": None, "deletions": None}),
         ("crypto.Crypto", {"ticker": "BTC"}, {"crypto_exchange": None}),
         ("dvach.Dvach", {"board": "b", "url": "update"}, {"dvach": None, "bot": None}),
         ("geoguess.Geoguess", {"round": "token", "choice": "finish"}, {"quiz": None}),

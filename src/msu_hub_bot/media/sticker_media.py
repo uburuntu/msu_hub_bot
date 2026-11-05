@@ -385,3 +385,23 @@ def prepare_media(data: bytes, kind: str) -> PreparedMedia:
         if isinstance(exc, StickerMediaError):
             raise
         raise StickerMediaError("Не удалось прочитать картинку.") from exc
+
+
+def emoji_preview(data: bytes) -> bytes:
+    """A 512-pixel JPEG still for emoji suggestions; transparency becomes white."""
+    try:
+        with closing(Image.open(io.BytesIO(data))) as source:
+            _check_dimensions(source.size)
+            with (
+                closing(ImageOps.exif_transpose(source)) as oriented,
+                closing(oriented.convert("RGBA")) as rgba,
+                closing(Image.new("RGBA", rgba.size, "white")) as background,
+            ):
+                background.alpha_composite(rgba)
+                with closing(_resize(background)) as resized, closing(resized.convert("RGB")) as image, io.BytesIO() as output:
+                    image.save(output, format="JPEG", quality=85)
+                    return output.getvalue()
+    except (OSError, ValueError, EOFError, SyntaxError, Image.DecompressionBombError) as exc:
+        if isinstance(exc, StickerMediaError):
+            raise
+        raise StickerMediaError("Не удалось прочитать превью.") from exc

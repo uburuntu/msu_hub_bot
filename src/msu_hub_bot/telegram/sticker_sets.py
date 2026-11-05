@@ -81,6 +81,8 @@ class UploadedSticker:
 class StickerSetClient:
     def __init__(self, bot: Bot) -> None:
         self.bot = bot
+        # Pack identities immediately before this client's own addition or creation.
+        self._before_addition: dict[str, frozenset[str]] = {}
 
     async def upload(
         self,
@@ -127,7 +129,8 @@ class StickerSetClient:
             return False
         return True
 
-    async def _add(self, name: str, user_id: int, sticker: UploadedSticker) -> None:
+    async def _add(self, name: str, user_id: int, sticker: UploadedSticker, current: Sequence[Sticker]) -> None:
+        self._before_addition[name] = frozenset(item.file_unique_id for item in current)
         await self.bot.add_sticker_to_set(user_id=user_id, name=name, sticker=sticker.input_sticker())
 
     @classmethod
@@ -152,6 +155,7 @@ class StickerSetClient:
             if title is None:
                 return False
             try:
+                self._before_addition[name] = frozenset()
                 await self.bot.create_new_sticker_set(
                     user_id=user_id,
                     name=name,
@@ -167,11 +171,12 @@ class StickerSetClient:
                     if not sticker_error(retry_error, "STICKERSET_INVALID"):
                         raise
                     raise creation_error
+                self._before_addition.pop(name, None)
                 if not self._contains_reference(pack.stickers, sticker):
-                    await self._add(name, user_id, sticker)
+                    await self._add(name, user_id, sticker, pack.stickers)
         else:
             if not self._contains_reference(pack.stickers, sticker):
-                await self._add(name, user_id, sticker)
+                await self._add(name, user_id, sticker, pack.stickers)
         return True
 
     @staticmethod
@@ -182,9 +187,11 @@ class StickerSetClient:
     async def resolve(self, name: str, uploaded: UploadedSticker) -> str | None:
         """Return a verified pack sticker ID, or None; never fall back to the upload.
 
-        file_unique_id handles reordering and duplicates. If Telegram assigns a
-        new identity, an exact byte comparison can still identify the media.
-        Missing/ambiguous results fall back to a pack link at the caller.
+        file_unique_id handles reordering and duplicates. Telegram re-encodes
+        cross-pack copies with a new identity and bytes, so exactly one new
+        same-format entry since this client's own addition identifies them next.
+        An exact byte comparison covers the rest. Missing/ambiguous results fall
+        back to a pack link at the caller.
         """
         checked: set[str] = set()
         fingerprinted = False
@@ -202,6 +209,10 @@ class StickerSetClient:
                     for sticker in candidates:
                         if sticker.file_id == uploaded.file_id or unique_id and sticker.file_unique_id == unique_id:
                             return sticker.file_id
+                    if (before := self._before_addition.get(name)) is not None:
+                        added = [sticker for sticker in candidates if sticker.file_unique_id not in before]
+                        if len(added) == 1:
+                            return added[0].file_id
                     if digest is None and not fingerprinted:
                         # Cross-pack copies can get a new identity. Read the source
                         # only after the zero-download identity path has failed.

@@ -18,7 +18,6 @@ from msu_hub_bot.commands.admin import (
     process_unban,
 )
 from msu_hub_bot.commands.animate import process_animate, process_matrix
-from msu_hub_bot.commands.antibot import AntiBot
 from msu_hub_bot.commands.arxiv import process_arxiv
 from msu_hub_bot.commands.pokemon import Pokemon
 from msu_hub_bot.commands.art import Art
@@ -102,8 +101,6 @@ from msu_hub_bot.commands.app import is_app_start, process_app, process_app_star
 from msu_hub_bot.commands.sticker import (
     process_sticker,
     process_sticker_chat,
-    process_animated_sticker_chat,
-    process_animated_sticker,
     Stickers,
     StickerStates,
     process_sticker_delete,
@@ -330,25 +327,16 @@ def build_router(*, speech: Speech, wolfram: WolframAPI, config: Settings) -> Ro
         flags={"handler_key": "WeatherMap.process_cb", "fsm_release": True},
     )
     group("sticker").message.register(
-        process_sticker, MetaCommand("s", "sticker"), StateFilter(None), flags={"handler_key": "process_sticker", "fsm_release": False}
+        process_sticker,
+        MetaCommand("s", "sticker", "sa"),
+        StateFilter(None),
+        flags={"handler_key": "process_sticker", "fsm_release": False},
     )
     group("sticker").message.register(
         process_sticker_chat,
-        MetaCommand("sc", "sticker_chat"),
+        MetaCommand("sc", "sticker_chat", "sac"),
         StateFilter(None),
         flags={"handler_key": "process_sticker_chat", "fsm_release": False},
-    )
-    group("sticker").message.register(
-        process_animated_sticker,
-        MetaCommand("sa"),
-        StateFilter(None),
-        flags={"handler_key": "process_animated_sticker", "fsm_release": False},
-    )
-    group("sticker").message.register(
-        process_animated_sticker_chat,
-        MetaCommand("sac"),
-        StateFilter(None),
-        flags={"handler_key": "process_animated_sticker_chat", "fsm_release": False},
     )
     group("sticker").message.register(
         process_sticker_delete,
@@ -490,24 +478,6 @@ def build_router(*, speech: Speech, wolfram: WolframAPI, config: Settings) -> Ro
     )
     group("externals").message.register(
         process_ud, MetaCommand("ud", "urban", "slang"), StateFilter(None), flags={"handler_key": "process_ud", "fsm_release": True}
-    )
-    group("antibot").message.register(
-        AntiBot.process,
-        StateFilter(None),
-        F.content_type == ContentType.NEW_CHAT_MEMBERS,
-        flags={"handler_key": "AntiBot.process", "fsm_release": True},
-    )
-    group("antibot").message.register(
-        AntiBot.process_left,
-        StateFilter(None),
-        F.content_type == ContentType.LEFT_CHAT_MEMBER,
-        flags={"handler_key": "AntiBot.process_left", "fsm_release": True},
-    )
-    group("antibot").callback_query.register(
-        AntiBot.process_cb,
-        AntiBot.callback_data.filter(),
-        StateFilter(None),
-        flags={"handler_key": "AntiBot.process_cb", "fsm_release": True},
     )
     group("tenet").message.register(
         process_reverse, SlashCommand("tenet"), StateFilter(None), flags={"handler_key": "process_reverse", "fsm_release": True}

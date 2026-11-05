@@ -1,9 +1,16 @@
-# Delivering saved chat stickers
+# Delivering saved stickers
 
-`/sc` adds artwork to the chat's regular sticker pack. Chat administrators can use
-images, GIF/video clips, existing regular stickers, or a custom emoji from a
-message or caption. Pack replacement, reordering, title editing and thumbnails
-remain in Telegram's apps.
+`/s` adds artwork to the invoker's personal regular pack; `/sc` adds it to the
+chat's pack and is limited to chat administrators. Both accept images, GIF/video
+clips, existing regular stickers, or a custom emoji from a message or caption,
+and share the same selection, conversion, metadata and preview behavior. Pack
+replacement, reordering, title editing and thumbnails remain in Telegram's apps.
+
+`/sa` and `/sac` are retained aliases of `/s` and `/sc`. Telegram packs accept
+mixed formats, so animated stickers join the regular pack; the older separate
+`…a` animated packs remain readable and `/sd` still deletes from them.
+Without attached or replied-to artwork, the invoker's profile photo remains the
+fallback.
 
 ## Input and search metadata
 
@@ -11,12 +18,32 @@ remain in Telegram's apps.
 Emoji and keywords are deduplicated, preserving order; keyword comparison ignores
 case. There can be 1–20 emoji and at most 20 keywords with 64 characters in total.
 Invalid limits produce a helpful reply before downloading or saving artwork.
+The same syntax works with `/s`.
 An empty keyword section (`/sc |`) clears keywords on an existing sticker.
 
-Without explicit metadata, the existing emoji fallback remains: emoji from the
-replied-to text/caption, or `✨`. Reusing an existing sticker without explicit
-metadata leaves its saved emoji and keywords unchanged. Metadata changes apply
-to the registered sticker in the destination pack, never the source pack.
+Without explicit metadata, emoji come from the first available source: the
+source sticker's own emoji, a [Jev suggestion](#emoji-suggestions), emoji from
+the replied-to text/caption, or `✨`. An existing sticker already in the
+destination pack keeps its saved emoji and keywords unless metadata is explicit.
+Metadata changes apply to the registered sticker in the destination pack, never
+the source pack.
+
+## Emoji suggestions
+
+When `HUB_JEV_ENABLED` is set, artwork without explicit or own emoji gets up to
+three emoji from Jev before conversion. Only one still leaves the bot: Telegram's
+photo or media thumbnail, flattened onto white and scaled to a 512-pixel JPEG.
+No text, caption, filename, user or chat identity is sent. Stickers with their
+own emoji and custom emoji are never sent.
+
+Jev chooses among about a hundred English tags mapped to one emoji each, which
+classify more reliably than raw emoji glyphs. The most probable tag needs at
+least 0.3 probability; up to two more need 0.2 each. Download, preparation and
+the request share a 10-second budget. Any failure, timeout or uncertain answer
+continues the fallback chain without a user-visible error. Image input is an
+experimental Jev feature enabled by the `TypeSafe-Danger-Zone-Images` header.
+`jev.sticker_emoji` telemetry records only duration and outcome, never tags or
+artwork.
 
 Attached or replied-to images, videos and stickers keep precedence over custom
 emoji in their captions. Send a caption emoji separately to select its artwork.
@@ -93,9 +120,12 @@ reference; that ID is not proof that the file can be sent as a registered sticke
   three bounded candidate downloads within five seconds. Each download is capped
   at 512 KiB or the known smaller candidate size. Pack order only prioritizes
   candidate downloads; it never selects a reply without an identity or content match.
-- Telegram can re-encode a cross-pack copy, changing both identity and bytes.
-  Such a copy cannot be reliably matched and falls back to a pack link; perceptual
-  similarity and pack order are not used to guess a target.
+- Telegram re-encodes a cross-pack copy, changing both identity and bytes. The
+  client records the pack's identities immediately before its own addition or
+  creation; exactly one new same-format entry afterwards is the copy. Zero or
+  several new entries (for example, a concurrent addition) continue with content
+  matching and otherwise fall back to a pack link. Lookups without this client's
+  own addition never use new entries, pack order or perceptual similarity.
 - An unresolved or rejected preview falls back to a pack link. The upload is never
   sent as a fallback, and the last pack entry is never guessed.
 - A known destination file ID or unique identity in the same regular format skips
@@ -111,8 +141,11 @@ reference; that ID is not proof that the file can be sent as a registered sticke
   creation; uncertain network results from mutations are not retried.
 
 Pending titles retain `mixed_sticker` and `sticker_upload`, including metadata and
-trim notices. Older prompts still load and can recover the upload identity with
-`getFile`; an unavailable preview still returns the pack link.
+trim notices; `sticker_personal` skips the chat-administrator check for personal
+packs. Older chat prompts still load and can recover the upload identity with
+`getFile`; an unavailable preview still returns the pack link. Personal prompts
+from releases before the shared pipeline stored only source file IDs; they are
+cleared with a request to repeat `/s`.
 
 Offline tests cover identity, metadata, ownership, concurrency, failure recovery,
 limits and native animation timing/transparency. The production-image smoke check

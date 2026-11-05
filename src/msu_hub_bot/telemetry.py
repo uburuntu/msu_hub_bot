@@ -143,6 +143,7 @@ OPERATIONS = frozenset(
         "web.request",
         "jdoodle.execute",
         "jev.classify",
+        "jev.sticker_emoji",
         "intent.execute",
         "speech.transcribe",
         "tyan.image",

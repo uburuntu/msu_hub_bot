@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image
 from aiogram.methods import AddStickerToSet, DeleteStickerFromSet, SendDocument, SendPhoto, SendPoll, SendSticker, SendVoice
-from aiogram.types import BufferedInputFile, PhotoSize, Sticker, StickerSet, UserProfilePhotos
+from aiogram.types import BufferedInputFile, PhotoSize, Sticker, UserProfilePhotos
 
 from msu_hub_bot.commands import tenet
 from msu_hub_bot.execution.executor import TPExecutor
@@ -82,24 +82,17 @@ async def test_image_document_without_filename_is_mirrored():
     assert result.getpixel((1, 0)) == (255, 0, 0)
 
 
-async def test_video_sticker_uses_native_add_preview_delete(monkeypatch):
+async def test_video_sticker_is_sent_directly_without_a_temporary_pack(monkeypatch):
     bot = make_bot()
     sticker = Sticker(
         file_id="original", file_unique_id="identity", type="regular", width=512, height=512, is_animated=False, is_video=True
     )
-    saved = sticker.model_copy(update={"file_id": "saved"})
-    monkeypatch.setattr(
-        bot, "get_sticker_set", AsyncMock(return_value=StickerSet(name="pack", title="Pack", sticker_type="regular", stickers=[saved]))
-    )
     target = make_message(bot, sticker=sticker)
     await tenet.process_reverse(make_message(bot, reply_to_message=target), bot, worker())
     methods = bot.session.methods
-    add = next(method for method in methods if isinstance(method, AddStickerToSet))
-    assert add.sticker.format == "video" and add.sticker.emoji_list == ["🔄"]
-    assert add.sticker.sticker.data == b"converted"
-    sent, removed = methods[-2:]
-    assert isinstance(sent, SendSticker) and sent.sticker == "saved"
-    assert isinstance(removed, DeleteStickerFromSet) and removed.sticker == "saved"
+    assert not any(isinstance(method, (AddStickerToSet, DeleteStickerFromSet)) for method in methods)
+    sent = methods[-1]
+    assert isinstance(sent, SendSticker) and sent.sticker.data == b"converted" and sent.sticker.filename == "sticker.webm"
 
 
 async def test_reverse_budget_failure_explains_the_actual_limit(monkeypatch):

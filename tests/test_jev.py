@@ -310,3 +310,65 @@ async def test_unvalidated_reply_cannot_export_extra_fields_or_coerced_flags(tra
 def test_mime_is_a_bounded_media_type_not_an_arbitrary_context_field(mime):
     with pytest.raises(ValidationError):
         jev.ReplyMetadata(image=True, mime_type=mime)
+
+
+def emoji_payload(probabilities):
+    full = {tag: 0.0 for tag in jev.STICKER_EMOJI} | probabilities
+    choice = max(full, key=full.__getitem__)
+    return {
+        "model": "typesafe/jev-1.13-20260917",
+        "answers": {"emoji": {"type": "choice", "choice": choice, "confidence": full[choice], "probabilities": full}},
+        "usage": {"input_tokens": 3100, "output_tokens": 60, "cost": 0.0001},
+    }
+
+
+JPEG = b"\xff\xd8\xff" + b"synthetic"
+
+
+async def test_sticker_emoji_request_sends_only_the_artwork_with_image_opt_in(transport):
+    session, _ = transport
+    session.responses = [Response(emoji_payload({"cat": 0.7, "smiling": 0.3}))]
+    client = jev.JevClient("synthetic-key")
+    probabilities = await client.sticker_emojis(JPEG)
+    assert probabilities["cat"] == 0.7 and set(probabilities) == set(jev.STICKER_EMOJI)
+    url, request = session.requests[0]
+    assert url == jev.ENDPOINT and request["headers"]["TypeSafe-Danger-Zone-Images"] == "true"
+    body = request["json"]
+    assert set(body) == {"model", "state", "assets", "questions"}
+    assert body["assets"] == {"<art>": {"type": "image", "format": "jpeg", "data_base64": "/9j/c3ludGhldGlj"}}
+    assert "<art>" in body["state"] and "<art>" in body["questions"]["emoji"]["instructions"]
+    assert set(body["questions"]["emoji"]["criteria"]) == set(jev.STICKER_EMOJI)
+    await client.close()
+
+
+@pytest.mark.parametrize("image", [b"\x89PNG\r\n\x1a\n", b"", JPEG + b"x" * jev.MAX_IMAGE_BYTES, "not bytes"])
+async def test_sticker_emoji_rejects_non_jpeg_or_oversized_input_without_transport(transport, image):
+    session, _ = transport
+    with pytest.raises(jev.JevError) as error:
+        await jev.JevClient("synthetic-key").sticker_emojis(image)
+    assert error.value.reason is jev.JevErrorReason.INVALID_REQUEST and not session.requests
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload["answers"]["emoji"]["probabilities"].pop("cat"),
+        lambda payload: payload["answers"]["emoji"]["probabilities"].update(unknown=0.0),
+        lambda payload: payload["answers"]["emoji"]["probabilities"].update(cat=0.9, dog=0.9),
+        lambda payload: payload["answers"]["emoji"].update(choice="unknown"),
+    ],
+)
+async def test_sticker_emoji_rejects_malformed_distributions(transport, mutate):
+    session, _ = transport
+    payload = emoji_payload({"cat": 1.0})
+    mutate(payload)
+    session.responses = [Response(payload)]
+    with pytest.raises(jev.JevError) as error:
+        await jev.JevClient("synthetic-key").sticker_emojis(JPEG)
+    assert error.value.reason is jev.JevErrorReason.INVALID_RESPONSE
+
+
+def test_sticker_emoji_vocabulary_maps_unique_tags_to_unique_emoji():
+    emojis = [value for value, _ in jev.STICKER_EMOJI.values()]
+    assert 90 <= len(jev.STICKER_EMOJI) <= 110 and len(set(emojis)) == len(emojis)
+    assert all(tag.isascii() and tag.replace("_", "").isalpha() for tag in jev.STICKER_EMOJI)

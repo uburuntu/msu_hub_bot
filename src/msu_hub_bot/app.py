@@ -58,6 +58,7 @@ from msu_hub_bot.events import EcosystemManager, EventsMiddleware
 from msu_hub_bot.routing import build_router
 from msu_hub_bot.providers.jdoodle import ManyJDoodle
 from msu_hub_bot.providers.jev import JevClient
+from msu_hub_bot.commands.sticker_emoji import StickerEmojiPicker
 from msu_hub_bot.commands.intents import IntentCommands
 from msu_hub_bot.commands.speech import Speech
 from msu_hub_bot.providers.speech import SpeechClient
@@ -180,10 +181,12 @@ class Application:
             jdoodle = ManyJDoodle(settings.jdoodle_tokens, telemetry=telemetry)
             stack.push_async_callback(jdoodle.close)
             intents = None
+            sticker_emoji = None
             if settings.jev_enabled:
                 jev = JevClient(settings.openrouter_api_key)
                 stack.push_async_callback(jev.close)
                 intents = IntentCommands(jev, telemetry=telemetry, confidence=settings.jev_confidence)
+                sticker_emoji = StickerEmojiPicker(jev, telemetry=telemetry)
             crypto_exchange = binance()
             stack.push_async_callback(crypto_exchange.close)
             health = HealthCheck(settings.health_check_url)
@@ -232,6 +235,7 @@ class Application:
                 wolfram=wolfram,
                 jdoodle=jdoodle,
                 intents=intents,
+                sticker_emoji=sticker_emoji,
                 cpu_executor=executor,
                 crypto_exchange=crypto_exchange,
                 em=ecosystem,

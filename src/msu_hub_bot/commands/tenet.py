@@ -4,7 +4,7 @@ from typing import Optional
 
 from PIL import Image, ImageFile, ImageOps
 from aiogram import Bot, html
-from aiogram.types import Message, InputPollOption, InputSticker
+from aiogram.types import Message, InputPollOption
 from aiogram.utils.markdown import hcode
 
 from msu_hub_bot.execution.executor import TPExecutor
@@ -14,7 +14,6 @@ from msu_hub_bot.media.limits import validate_dimensions
 from msu_hub_bot.telegram.utils import action_by_type
 from msu_hub_bot.utils import megabytes, image_bytes_io
 from msu_hub_bot.media.ffmpeg import ReverseMediaError, ffmpeg
-from msu_hub_bot.settings import settings
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -104,15 +103,8 @@ async def process_reverse(message: Message, bot: Bot, cpu_executor: TPExecutor) 
                 return await message.reply(hcode("🤷🏻‍♂️ Timeout"))
             if not result_file:
                 return await message.reply(hcode("🤷🏻‍♂️ Не удалось выполнить запрос"))
-            await bot.add_sticker_to_set(
-                user_id=settings.tenet_sticker_owner_id,
-                name="tenet_webm_by_msu_hub_bot",
-                sticker=InputSticker(sticker=input_file(result_file, "sticker.webm"), format="video", emoji_list=["🔄"]),
-            )
-            pack = await bot.get_sticker_set("tenet_webm_by_msu_hub_bot")
-            await target.reply_sticker(pack.stickers[-1].file_id)
-            await bot.delete_sticker_from_set(sticker=pack.stickers[-1].file_id)
-            return True
+            # sendSticker accepts WEBM uploads; no temporary pack entry is needed.
+            return await target.reply_sticker(input_file(result_file, "sticker.webm"))
         file = await mirror(sticker, ext="webp")
         if file is None:
             return True

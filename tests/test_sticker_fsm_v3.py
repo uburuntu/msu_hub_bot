@@ -1,7 +1,6 @@
 """Sticker title transitions use real FSM storage and application event isolation."""
 
 import asyncio
-import io
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,8 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import CreateNewStickerSet, SendSticker
-from aiogram.types import InputSticker, Sticker, StickerSet, Update
-from PIL import Image
+from aiogram.types import InputSticker, Update
 
 from msu_hub_bot.telegram.state import ReleasableEventIsolation, StateContextMiddleware
 from msu_hub_bot.commands import sticker
@@ -152,46 +150,3 @@ async def test_cancellation_releases_transient_mixed_save_guard(monkeypatch):
     assert not sticker._pending_saves and isolation.key_count == 0
     await isolation.close()
     await state.storage.close()
-
-
-async def test_personal_title_consumption_releases_lock_before_download(monkeypatch):
-    bot = make_bot()
-    message = make_message(bot, text="Мой пак")
-    state, isolation = state_for(bot, message), ReleasableEventIsolation()
-    await state.set_state(sticker.StickerStates.sticker_set_name)
-    await state.set_data(sticker.PersonalStickerDraft(sticker_set_name="pack", emojis="✨", png="image").model_dump(mode="json"))
-    started, finish = asyncio.Event(), asyncio.Event()
-    image = io.BytesIO()
-    Image.new("RGB", (2, 2), "red").save(image, format="PNG")
-
-    async def download(*args):
-        started.set()
-        await finish.wait()
-        return io.BytesIO(image.getvalue())
-
-    monkeypatch.setattr(sticker, "download_by_file_id", download)
-    registered = Sticker(
-        file_id="registered-sticker", file_unique_id="id", type="regular", width=512, height=512, is_animated=False, is_video=False
-    )
-    monkeypatch.setattr(
-        bot, "get_sticker_set", AsyncMock(return_value=StickerSet(name="pack", title="Pack", sticker_type="regular", stickers=[registered]))
-    )
-    task = asyncio.create_task(invoke(message, state, bot, isolation))
-    try:
-        await asyncio.wait_for(started.wait(), 1)
-        async with isolation.lock(state.key):
-            assert await state.get_state() is None
-            await state.set_state("ProgStates:stdin")
-            await state.set_data({"later": "draft"})
-        finish.set()
-        await asyncio.wait_for(task, 1)
-        assert await state.get_state() == "ProgStates:stdin" and await state.get_data() == {"later": "draft"}
-        creation = next(method for method in bot.session.methods if isinstance(method, CreateNewStickerSet))
-        assert creation.stickers[0].format == "static"
-        assert creation.stickers[0].sticker.filename == "sticker.png"
-        assert isinstance(bot.session.methods[-1], SendSticker)
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-        await isolation.close()
-        await state.storage.close()
