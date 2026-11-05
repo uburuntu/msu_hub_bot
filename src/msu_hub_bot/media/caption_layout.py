@@ -10,9 +10,10 @@ from io import BytesIO
 from functools import lru_cache
 from typing import Literal, cast
 
+import emoji
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from msu_hub_bot.resources import lobster_font, meme_font, times_new_roman_font
+from msu_hub_bot.resources import emoji_font, lobster_font, meme_font, times_new_roman_font
 from msu_hub_bot.media.limits import validate_dimensions
 
 MAX_IMAGE_SIDE = 1600
@@ -23,6 +24,50 @@ class CaptionLayoutError(ValueError):
     pass
 
 
+# Noto Color Emoji is a bitmap font with a single 109-pixel strike.
+EMOJI_STRIKE = 109
+
+
+@lru_cache(maxsize=1)
+def _emoji_font() -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(emoji_font), EMOJI_STRIKE)
+
+
+@lru_cache(maxsize=128)
+def _emoji_glyph(cluster: str) -> Image.Image:
+    """Shared, read-only colour bitmap; callers resize it instead of mutating it."""
+    font = _emoji_font()
+    left, top, right, bottom = font.getbbox(cluster)
+    glyph = Image.new("RGBA", (max(1, math.ceil(right - left)), max(1, math.ceil(bottom - top))))
+    ImageDraw.Draw(glyph).text((-left, -top), cluster, font=font, embedded_color=True)
+    return glyph
+
+
+def _segments(line: str) -> list[tuple[str, bool]]:
+    """Split a line into text runs and whole emoji clusters, in order."""
+    parts: list[tuple[str, bool]] = []
+    position = 0
+    for match in emoji.emoji_list(line):
+        start, end = match["match_start"], match["match_end"]
+        if start > position:
+            parts.append((line[position:start], False))
+        parts.append((line[start:end], True))
+        position = end
+    if position < len(line):
+        parts.append((line[position:], False))
+    return parts
+
+
+def _emoji_size(cluster: str, font: ImageFont.FreeTypeFont) -> tuple[int, int]:
+    glyph = _emoji_glyph(cluster)
+    height = max(1, round(font.size))
+    return max(1, round(glyph.width * height / glyph.height)), height
+
+
+def _rich_width(line: str, font: ImageFont.FreeTypeFont) -> float:
+    return sum(_emoji_size(part, font)[0] if is_emoji else font.getlength(part) for part, is_emoji in _segments(line))
+
+
 @dataclass
 class Caption:
     text: str
@@ -31,6 +76,8 @@ class Caption:
     spacing: int
     stroke: int = 0
     scale: float = 1
+    # Text with emoji is laid out run by run; plain text keeps Pillow's multiline layout.
+    rich: bool = False
 
     @property
     def width(self) -> int:
@@ -54,6 +101,9 @@ class Caption:
         self._draw(image, left, top, color)
 
     def _draw(self, image: Image.Image, left: int, top: int, color: str) -> None:
+        if self.rich:
+            self._draw_rich(image, left - self.bounds[0], top - self.bounds[1], color)
+            return
         ImageDraw.Draw(image).multiline_text(
             (left - self.bounds[0], top - self.bounds[1]),
             self.text,
@@ -65,10 +115,65 @@ class Caption:
             stroke_fill="black",
         )
 
+    def _draw_rich(self, image: Image.Image, left: int, top: int, color: str) -> None:
+        draw = ImageDraw.Draw(image)
+        for part, size, x, y in _rich_layout(self.text, self.font, self.spacing):
+            if size is None:
+                draw.text((left + x, top + y), part, font=self.font, fill=color, stroke_width=self.stroke, stroke_fill="black", anchor="la")
+                continue
+            position = (round(left + x), round(top + y))
+            with closing(_emoji_glyph(part).resize(size, Image.Resampling.LANCZOS)) as glyph:
+                # Masked paste would square edge alpha and hide faint pixels from ink measurement.
+                if image.mode == "RGBA" and min(position) >= 0:
+                    image.alpha_composite(glyph, position)
+                else:
+                    image.paste(glyph, position, glyph)
 
-def _wrap(text: str, font: ImageFont.FreeTypeFont, width: int, stroke: int) -> str:
+
+def _rich_layout(text: str, font: ImageFont.FreeTypeFont, spacing: int) -> list[tuple[str, tuple[int, int] | None, float, float]]:
+    """Centred runs relative to the first line's ascender; emoji carry their pixel size."""
+    ascent, descent = font.getmetrics()
+    lines = text.split("\n")
+    widths = [_rich_width(line, font) for line in lines]
+    placed: list[tuple[str, tuple[int, int] | None, float, float]] = []
+    for index, (line, line_width) in enumerate(zip(lines, widths)):
+        x = (max(widths) - line_width) / 2
+        y = index * (ascent + descent + spacing)
+        for part, is_emoji in _segments(line):
+            if is_emoji:
+                size = _emoji_size(part, font)
+                placed.append((part, size, x, y + (ascent + descent - size[1]) / 2))
+                x += size[0]
+            else:
+                placed.append((part, None, x, y))
+                x += font.getlength(part)
+    return placed
+
+
+def _rich_bounds(text: str, font: ImageFont.FreeTypeFont, spacing: int, stroke: int) -> tuple[int, int, int, int]:
+    # Glyph boxes include bearings and accents; one pixel absorbs subpixel starts.
+    boxes = []
+    for part, size, x, y in _rich_layout(text, font, spacing):
+        if size is None:
+            left, top, right, bottom = font.getbbox(part, stroke_width=stroke, anchor="la")
+            boxes.append((x + left, y + top, x + right, y + bottom))
+        else:
+            boxes.append((round(x), round(y), round(x) + size[0], round(y) + size[1]))
+    if not boxes:
+        return 0, 0, 1, 1
+    return (
+        math.floor(min(box[0] for box in boxes)) - 1,
+        math.floor(min(box[1] for box in boxes)) - 1,
+        math.ceil(max(box[2] for box in boxes)) + 1,
+        math.ceil(max(box[3] for box in boxes)) + 1,
+    )
+
+
+def _wrap(text: str, font: ImageFont.FreeTypeFont, width: int, stroke: int, rich: bool = False) -> str:
     @lru_cache(maxsize=1024)
     def fits(value: str) -> bool:
+        if rich:
+            return _rich_width(value, font) + stroke * 2 <= width
         left, _, right, _ = font.getbbox(value, stroke_width=stroke)
         return right - left <= width
 
@@ -140,11 +245,15 @@ def fit_caption(text: str, font_path: Path, width: int, height: int, preferred_s
     if width <= 0 or height <= 0:
         raise ValueError("Caption rectangle must have positive dimensions")
 
+    rich = emoji.emoji_count(text) > 0
+
     def layout(size: int) -> Caption:
         font = ImageFont.truetype(str(font_path), size)
         spacing = max(1, size // 5)
         outline = min(stroke, size // 8)
-        wrapped = _wrap(text, font, width, outline)
+        wrapped = _wrap(text, font, width, outline, rich)
+        if rich:
+            return Caption(wrapped, font, _rich_bounds(wrapped, font, spacing, outline), spacing, outline, rich=True)
         with closing(Image.new("L", (1, 1))) as measuring:
             bounds = ImageDraw.Draw(measuring).multiline_textbbox(
                 (0, 0), wrapped, font=font, spacing=spacing, align="center", stroke_width=outline

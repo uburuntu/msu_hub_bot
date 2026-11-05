@@ -67,6 +67,13 @@ visible glyph bounds determine centering. Very long text necessarily becomes
 small. Source images are oriented and scaled to at most 1600 pixels per side;
 extreme aspect ratios receive padding.
 
+Emoji render in colour from the bundled Noto Color Emoji font, sized to the
+caption's font size and centred on its line; they carry no outline. Captions
+without emoji keep Pillow's multiline layout unchanged. Joined sequences (skin
+tones, families, flags) need Raqm shaping, which the image provides through
+`libfribidi`; without it, each component is drawn separately. The image smoke
+check verifies sequence shaping.
+
 Video captions use a rendered PNG overlay rather than interpolating text into
 FFmpeg syntax. Output uses H.264/AAC MP4 with even dimensions and fast-start
 metadata, retaining the source timeline, variable frame timestamps and optional

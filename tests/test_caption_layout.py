@@ -207,3 +207,22 @@ def test_image_and_video_frame_share_geometry_and_owned_overlay(style):
 def test_empty_caption_remains_an_actionable_error():
     with pytest.raises(layout.CaptionLayoutError, match="Добавь текст"):
         layout.fit_caption(" \n\t", meme_font, 100, 100, 20)
+
+
+@pytest.mark.parametrize("style", ["lobster", "demotivator", "meme"])
+def test_caption_emoji_render_in_colour_instead_of_missing_glyph_boxes(style):
+    source = io.BytesIO()
+    Image.new("RGB", (480, 320), (128, 128, 128)).save(source, format="PNG")
+    plain = layout.caption_image(io.BytesIO(source.getvalue()), "Пятница", style).convert("RGB")
+    with_emoji = layout.caption_image(io.BytesIO(source.getvalue()), "Пятница 🔥", style).convert("RGB")
+    # The source, caption text and panels are greyscale; only emoji bring saturated pixels.
+    saturated = [max(pixel) - min(pixel) > 60 for pixel in with_emoji.getdata()]
+    assert sum(saturated) > 100
+    assert not any(max(pixel) - min(pixel) > 60 for pixel in plain.getdata())
+
+
+def test_text_without_emoji_keeps_pillow_multiline_layout():
+    assert not layout.fit_caption("Пятница", meme_font, 300, 200, 40).rich
+    caption = layout.fit_caption("Пятница 🙂\nвторая строка", meme_font, 300, 200, 40)
+    assert caption.rich and caption.text.replace("\n", " ").split() == ["Пятница", "🙂", "вторая", "строка"]
+    assert caption.width <= 300 and caption.height <= 200

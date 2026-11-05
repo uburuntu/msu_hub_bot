@@ -7,6 +7,7 @@ their own licenses; the application license does not replace them.
 | --- | --- |
 | Liberation Serif Regular and Sans Regular 2.1.5 | Liberation Fonts; SIL Open Font License 1.1. Retrieved from Debian's `fonts-liberation2` 2.1.5-1 package and checked against Debian's SHA256 metadata. See `licenses/Liberation.txt`. |
 | Lobster Regular | Pablo Impallari; SIL Open Font License 1.1. See `licenses/Lobster.txt`. |
+| Noto Color Emoji (`v2026-09-24-unicode18_0`) | Google LLC; SIL Open Font License 1.1. Retrieved from the `googlefonts/noto-emoji` release tag and checked against its Git blob. See `licenses/NotoColorEmoji.txt`. |
 | Ubuntu Mono Regular | Canonical; Ubuntu Font Licence 1.0. See `licenses/UbuntuMono.txt`. |
 | Debate dataset | Bundled with the maintainer's confirmation that it may be redistributed. |
 
@@ -15,6 +16,9 @@ Liberation Serif font SHA256:
 
 Liberation Sans font SHA256:
 `8d91388f1d3604b3b8ae0e3ee2d140e50cd6122f9214514f4aca772540a4076d`.
+
+Noto Color Emoji font SHA256:
+`15671215ab769fdc7162a045d56fd7d7e477c51b04e6b3c761d914d8fdd6cc44`.
 
 The ACRCloud Python SDK remains an external, pinned Git dependency. Its native
 binaries are not vendored in this repository. Deployment images are transferred

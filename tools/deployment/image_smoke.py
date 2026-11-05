@@ -116,10 +116,13 @@ def check_captions(image_payload, video_payload):
 
     from msu_hub_bot.media.caption_layout import caption_image
     from msu_hub_bot.media.caption_video import caption_video
-    from msu_hub_bot.resources import meme_font
+    from msu_hub_bot.resources import emoji_font, meme_font
 
     assert ImageFont.truetype(str(meme_font), 24).getbbox("Привет, Ёж!"), "Meme font is missing from the image"
-    text = 'Ёж: "всё нормально" [100%] \\ путь.\n' * 48
+    # Raqm joins emoji sequences into one colour glyph; basic layout would draw four people.
+    family = ImageFont.truetype(str(emoji_font), 109).getbbox("👨‍👩‍👧‍👦")
+    assert family[2] - family[0] < 200, "Emoji sequences are not shaped"
+    text = 'Ёж: "всё нормально" [100%] \\ путь 🔥.\n' * 48
     with tempfile.TemporaryDirectory(prefix="hub-caption-smoke-") as directory:
         for style in ("lobster", "demotivator", "meme"):
             with io.BytesIO(image_payload) as source, closing(caption_image(source, text, style)) as image:

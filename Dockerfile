@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-edi
 RUN .venv/bin/python -m msu_hub_bot.media.background_model fetch
 
 FROM python:3.14.7-slim-trixie@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
-RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg tesseract-ocr tesseract-ocr-rus ca-certificates \
+RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg tesseract-ocr tesseract-ocr-rus libfribidi0 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 hubbot && useradd --uid 10001 --gid 10001 --no-create-home hubbot \
     && mkdir /work && mkdir -m 0700 /data && chown 10001:10001 /work /data
