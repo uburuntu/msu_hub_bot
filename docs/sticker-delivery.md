@@ -31,14 +31,15 @@ the source pack.
 ## Emoji suggestions
 
 When `HUB_JEV_ENABLED` is set, artwork without explicit or own emoji gets up to
-three emoji from Jev before conversion. Only stills leave the bot, flattened onto
-white and scaled to 512-pixel JPEGs. GIF and video clips send three ordered
-frames at 10, 50 and 85 percent of the excerpt a sticker would use: reaction
-clips often reach their point late, and Telegram's thumbnail is the opening
-frame. The clip is downloaded once inside the worker admission and reused for
-conversion. Other artwork sends Telegram's photo or media thumbnail. No text,
-caption, filename, user or chat identity is sent. Stickers with their own emoji
-and custom emoji are never sent.
+three emoji from Jev before conversion. Only stills leave the bot, flattened
+onto white and letterboxed into 512-pixel square JPEGs (Jev rejects small or
+very wide images). GIF and video clips send three ordered frames at 10, 50 and
+85 percent of the excerpt a sticker would use: reaction clips often reach their
+point late, and Telegram's thumbnail is the opening frame. The clip is
+downloaded once inside the worker admission and reused for conversion. Other
+artwork sends Telegram's photo or media thumbnail. No text, caption, filename,
+user or chat identity is sent. Stickers with their own emoji and custom emoji
+are never sent.
 
 Jev chooses among about a hundred English tags mapped to one emoji each, which
 classify more reliably than raw emoji glyphs. The most probable tag needs at

@@ -16,6 +16,36 @@ The Docker build explicitly downloads the fixed, checksum-verified model into th
 
 `/i` and `/imgur` use Imgur's official upload API and the configured `HUB_IMGUR_AUTHORIZATION` header (`Client-ID …` or an authorized bearer token). A failed upload is reported without returning provider bodies. Polling has a finite deadline; a configured key or reachable website alone does not establish that uploads are permitted or working. Validate upload permissions with a synthetic image before treating a new hosting configuration as operational.
 
+## Translation and speech
+
+`/tr`, `/translate`, `/ru` and `/en` use Lingvanex. Text translation omits the
+source language so Lingvanex detects it and reports what it found. `/ru` and
+`/en` translate from any language; when the text is already in the target
+language, they say so instead of echoing it. `/tr` treats up to two leading
+Lingvanex codes as target, or source and target; other leading words were only
+captured positionally and return to the text. Bare `/tr` translates into
+Russian, or into English when Lingvanex reports a Russian source.
+
+Lingvanex image translation has no detection, and a wrong source produces a
+phonetic transliteration rather than a translation. Without an explicit
+source, a [language detector](#jev-language-detection) inspects one 512-pixel
+square JPEG still of the image. An uncertain answer keeps the earlier fixed guess:
+Russian for `/en`, English otherwise.
+
+`/tts` and `/speech` use gTTS. A first argument that names a gTTS voice selects
+it; any other first word belongs to the text. Without a voice, the detector
+reads at most the first 1500 characters of the text. Languages gTTS cannot
+voice, uncertain answers and disabled Jev keep the Russian voice.
+
+### Jev language detection
+
+When `HUB_JEV_ENABLED` is set, Jev chooses among about forty ISO 639-1
+languages or `other`. Only a listed language with probability 0.6 or more is
+used; failures and timeouts silently keep the command's default. Text
+detection sends only the text sample; image detection sends only the still,
+using the experimental `TypeSafe-Danger-Zone-Images` opt-in. `jev.language`
+telemetry records duration and outcome, never text, images or languages.
+
 ## Link previews
 
 [Link orchestration](../src/msu_hub_bot/telegram/links/service.py) owns automatic URL selection, preferences and delivery. X, VK, YouTube, Instagram and TikTok keep their provider-specific extraction; [shared rich output](../src/msu_hub_bot/telegram/links/rich.py) owns text limits, custom-emoji fallback and ordered sends. The source message remains intact and replies stay in its forum topic. Known site routes never fall through to another extractor after a failure.

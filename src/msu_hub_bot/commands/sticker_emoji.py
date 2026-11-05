@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import PhotoSize, Sticker
 
 from msu_hub_bot.execution.executor import TPExecutor
-from msu_hub_bot.media.sticker_media import StickerMediaError, emoji_frames, emoji_preview
+from msu_hub_bot.media.sticker_media import StickerMediaError, emoji_frames, jpeg_still
 from msu_hub_bot.providers.jev import STICKER_EMOJI, JevClient, JevError, JevErrorReason
 from msu_hub_bot.telegram.files import DownloadableMedia, DownloadTooLarge, download
 from msu_hub_bot.telemetry import Boundary, Outcome, Provider, Telemetry
@@ -100,5 +100,5 @@ class StickerEmojiPicker:
         if file is None:
             return ()
         with file:
-            image, timeouted = await cpu_executor.run(emoji_preview, file.getvalue(), timeout=TIMEOUT)
+            image, timeouted = await cpu_executor.run(jpeg_still, file.getvalue(), timeout=TIMEOUT)
         return () if timeouted else (image,)

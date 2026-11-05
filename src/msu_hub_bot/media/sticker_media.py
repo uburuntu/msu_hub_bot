@@ -387,18 +387,23 @@ def prepare_media(data: bytes, kind: str) -> PreparedMedia:
         raise StickerMediaError("Не удалось прочитать картинку.") from exc
 
 
-def emoji_preview(data: bytes) -> bytes:
-    """A 512-pixel JPEG still for emoji suggestions; transparency becomes white."""
+def jpeg_still(data: bytes) -> bytes:
+    """A 512-pixel square JPEG still for Jev judgments; transparency and margins are white.
+
+    Jev rejects images whose short side is 256 pixels or less and very wide ones,
+    so every still is letterboxed onto the same square canvas.
+    """
     try:
         with closing(Image.open(io.BytesIO(data))) as source:
             _check_dimensions(source.size)
             with (
                 closing(ImageOps.exif_transpose(source)) as oriented,
                 closing(oriented.convert("RGBA")) as rgba,
-                closing(Image.new("RGBA", rgba.size, "white")) as background,
+                closing(_resize(rgba)) as resized,
+                closing(Image.new("RGBA", (512, 512), "white")) as canvas,
             ):
-                background.alpha_composite(rgba)
-                with closing(_resize(background)) as resized, closing(resized.convert("RGB")) as image, io.BytesIO() as output:
+                canvas.alpha_composite(resized, ((512 - resized.width) // 2, (512 - resized.height) // 2))
+                with closing(canvas.convert("RGB")) as image, io.BytesIO() as output:
                     image.save(output, format="JPEG", quality=85)
                     return output.getvalue()
     except (OSError, ValueError, EOFError, SyntaxError, Image.DecompressionBombError) as exc:
@@ -463,7 +468,7 @@ def emoji_frames(data: bytes) -> tuple[bytes, ...]:
                 # A seek past the last frame or a slow decode only loses this still.
                 continue
             if output.is_file() and output.stat().st_size:
-                frames.append(emoji_preview(output.read_bytes()))
+                frames.append(jpeg_still(output.read_bytes()))
         if not frames:
             raise StickerMediaError("Не удалось извлечь кадры.")
         return tuple(frames)

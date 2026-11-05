@@ -144,6 +144,7 @@ OPERATIONS = frozenset(
         "jdoodle.execute",
         "jev.classify",
         "jev.sticker_emoji",
+        "jev.language",
         "intent.execute",
         "speech.transcribe",
         "tyan.image",

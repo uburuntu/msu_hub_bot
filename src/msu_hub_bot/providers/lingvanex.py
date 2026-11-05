@@ -1,6 +1,7 @@
 from msu_hub_bot.settings import settings
 
 import io
+from dataclasses import dataclass
 
 import aiohttp
 from aiocache import cached
@@ -46,13 +47,31 @@ async def full_code(code: str) -> str:
     raise BadRequestError()
 
 
-async def translate(text: str, src: str, dest: str) -> str:
-    data = {
-        "from": await full_code(src),
-        "to": await full_code(dest),
-        "text": text,
-        "platform": "dp",
-    }
+@dataclass(frozen=True)
+class Translation:
+    text: str
+    # The language Lingvanex translated from: the requested one or its own detection.
+    source: str | None = None
+
+
+async def is_language(code: str) -> bool:
+    """A known Lingvanex code; an unavailable catalogue means no argument is a code."""
+    try:
+        await full_code(code)
+    except BadRequestError, aiohttp.ClientError, TimeoutError:
+        return False
+    return True
+
+
+def same_language(first: str | None, second: str | None) -> bool:
+    return bool(first and second) and first.replace("-", "_").split("_")[0].lower() == second.replace("-", "_").split("_")[0].lower()
+
+
+async def translate(text: str, src: str | None, dest: str) -> Translation:
+    """Without ``src``, Lingvanex detects the text language and reports it."""
+    data = {"to": await full_code(dest), "text": text, "platform": "dp"}
+    if src is not None:
+        data["from"] = await full_code(src)
 
     async with aiohttp.ClientSession() as session:
         url = "https://backenster.com/b1/api/v3/translate/"
@@ -61,13 +80,15 @@ async def translate(text: str, src: str, dest: str) -> str:
                 raise BadRequestError()
             result = await response.json()
 
-    if result.get("err") is not None or "result" not in result:
+    if result.get("err") is not None or not isinstance(result.get("result"), str):
         raise BadRequestError()
 
-    return result["result"]
+    source = result.get("from")
+    return Translation(result["result"], source if isinstance(source, str) else src)
 
 
 async def translate_image(file: io.BytesIO, src: str, dest: str) -> str:
+    """Image translation has no detection; an unknown source garbles the result."""
     data = aiohttp.formdata.FormData()
     data.add_field("from", await full_code(src))
     data.add_field("to", await full_code(dest))

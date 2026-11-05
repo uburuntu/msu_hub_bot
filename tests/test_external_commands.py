@@ -11,6 +11,7 @@ import pytest
 from aiohttp import ClientError
 
 from msu_hub_bot.providers.exceptions import ExternalServiceError
+from msu_hub_bot.providers.lingvanex import Translation
 from msu_hub_bot.commands import lingvanex
 
 
@@ -88,7 +89,8 @@ async def test_translation_failures_receive_one_reply(monkeypatch, handler, fail
     monkeypatch.setattr(lingvanex, "translate_image", AsyncMock(side_effect=failure("synthetic provider failure")))
     monkeypatch.setattr(lingvanex, "translate", AsyncMock(side_effect=failure("synthetic provider failure")))
 
-    await getattr(lingvanex, handler)(target, meta)
+    monkeypatch.setattr(lingvanex, "is_language", AsyncMock(return_value=True))
+    await getattr(lingvanex, handler)(target, meta, None)
 
     target.reply.assert_awaited_once_with("Не удалось выполнить перевод. Попробуйте ещё раз позже.")
     lingvanex.translate_image.assert_awaited_once()
@@ -99,12 +101,12 @@ async def test_translation_failures_receive_one_reply(monkeypatch, handler, fail
 async def test_translation_preserves_partial_result_and_names_failure(monkeypatch, failed):
     target, meta = translation_input()
     image = AsyncMock(return_value="Picture <text>")
-    text = AsyncMock(return_value="Translated <text>")
+    text = AsyncMock(return_value=Translation("Translated <text>", "en"))
     (image if failed == "image" else text).side_effect = ExternalServiceError("synthetic failure")
     monkeypatch.setattr(lingvanex, "translate_image", image)
     monkeypatch.setattr(lingvanex, "translate", text)
 
-    await lingvanex.process_ru(target, meta)
+    await lingvanex.process_ru(target, meta, None)
 
     target.reply.assert_awaited_once()
     reply = target.reply.call_args.args[0]
@@ -115,9 +117,9 @@ async def test_translation_preserves_partial_result_and_names_failure(monkeypatc
 async def test_translation_success_keeps_both_escaped_parts(monkeypatch):
     target, meta = translation_input()
     monkeypatch.setattr(lingvanex, "translate_image", AsyncMock(return_value="Picture <text>"))
-    monkeypatch.setattr(lingvanex, "translate", AsyncMock(return_value="Translated & text"))
+    monkeypatch.setattr(lingvanex, "translate", AsyncMock(return_value=Translation("Translated & text", "en")))
 
-    await lingvanex.process_ru(target, meta)
+    await lingvanex.process_ru(target, meta, None)
 
     target.reply.assert_awaited_once_with("Picture &lt;text&gt;\n\nTranslated &amp; text")
 
@@ -127,7 +129,7 @@ async def test_translation_without_input_does_not_call_provider(monkeypatch):
     monkeypatch.setattr(lingvanex, "translate_image", AsyncMock())
     monkeypatch.setattr(lingvanex, "translate", AsyncMock())
 
-    await lingvanex.process_ru(target, meta)
+    await lingvanex.process_ru(target, meta, None)
 
     target.reply.assert_not_awaited()
     lingvanex.translate_image.assert_not_awaited()
@@ -139,7 +141,7 @@ async def test_empty_translation_result_does_not_send_blank_message(monkeypatch,
     target, meta = translation_input(text="")
     monkeypatch.setattr(lingvanex, "translate_image", AsyncMock(return_value=result))
 
-    await lingvanex.process_ru(target, meta)
+    await lingvanex.process_ru(target, meta, None)
 
     target.reply.assert_awaited_once_with("Не удалось выполнить перевод. Попробуйте ещё раз позже.")
 
@@ -149,7 +151,7 @@ async def test_translation_cancellation_propagates(monkeypatch):
     monkeypatch.setattr(lingvanex, "translate_image", AsyncMock(side_effect=asyncio.CancelledError))
 
     with pytest.raises(asyncio.CancelledError):
-        await lingvanex.process_ru(target, meta)
+        await lingvanex.process_ru(target, meta, None)
 
     target.reply.assert_not_awaited()
 
@@ -243,8 +245,8 @@ async def test_long_translation_preserves_all_text_in_safe_replies(monkeypatch, 
     import html
 
     target, meta = translation_input(image=False)
-    monkeypatch.setattr(lingvanex, "translate", AsyncMock(return_value=source))
-    await lingvanex.process_ru(target, meta)
+    monkeypatch.setattr(lingvanex, "translate", AsyncMock(return_value=Translation(source, "en")))
+    await lingvanex.process_ru(target, meta, None)
     texts = [call.args[0] for call in target.reply.call_args_list]
     assert len(texts) > 1
     assert all(0 < len(text.encode("utf-16-le")) // 2 <= 4096 for text in texts)

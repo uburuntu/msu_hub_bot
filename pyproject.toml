@@ -236,6 +236,7 @@ files = [
     "src/msu_hub_bot/commands/sticker.py",
     "src/msu_hub_bot/commands/sticker_input.py",
     "src/msu_hub_bot/commands/sticker_emoji.py",
+    "src/msu_hub_bot/commands/language.py",
     "src/msu_hub_bot/commands/tenet.py",
     "src/msu_hub_bot/commands/tesseract.py",
     "src/msu_hub_bot/commands/tts.py",
@@ -279,7 +280,7 @@ files = [
 
 [[tool.mypy.overrides]]
 # Remove each provider/native exception when its SDK ships types; adapters remain checked.
-module = ["onnxruntime", "yt_dlp", "yt_dlp.*", "aiocache", "arxiv", "gtts", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "transliterate", "pyfiglet", "airtable", "ccxt", "ccxt.async_support"]
+module = ["onnxruntime", "yt_dlp", "yt_dlp.*", "aiocache", "arxiv", "gtts", "gtts.lang", "acrcloud.recognizer", "lottie", "lottie.*", "fontTools.pens.boundsPen", "transliterate", "pyfiglet", "airtable", "ccxt", "ccxt.async_support"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

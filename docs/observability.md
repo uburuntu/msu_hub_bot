@@ -83,6 +83,10 @@ sticker handler. It records duration and outcome only: no artwork, tags, chosen
 emoji, probabilities or usage. See [sticker delivery](sticker-delivery.md#emoji-suggestions)
 for what the provider receives.
 
+`jev.language` detects a source language for image translation and speech under
+the same rules: duration and outcome only, never text, images or detected
+languages. See [translation and speech](provider-tools.md#translation-and-speech).
+
 ### Link extraction
 
 `LinkService` owns one `links.preview` operation per recognized or attempted source. It records the terminal `link.stage`, `link.reason`, provider and outcome in a `bot.link.completed` log even when its trace is unsampled. Disabled preferences, conversation/command policy and unsupported routes are ignored outcomes, distinct from extraction failures and delivery failures. Duplicate links and candidates beyond the existing two-link limit do not create additional attempts. Ordinary unrecognized URLs with automatic previews disabled are not attempts.

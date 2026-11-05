@@ -18,7 +18,7 @@ from PIL import Image
 from msu_hub_bot.commands import sticker, sticker_emoji
 from msu_hub_bot.commands.sticker_emoji import StickerEmojiPicker, preview_source, select_emojis
 from msu_hub_bot.commands.sticker_input import parse_metadata
-from msu_hub_bot.media.sticker_media import PreparedMedia, emoji_frames, emoji_preview
+from msu_hub_bot.media.sticker_media import PreparedMedia, emoji_frames, jpeg_still
 from msu_hub_bot.providers.jev import JevError, JevErrorReason
 from msu_hub_bot.telegram import sticker_sets
 from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadedSticker
@@ -213,10 +213,12 @@ async def test_picker_skips_custom_emoji_and_media_without_stills(monkeypatch):
     sticker_emoji.download.assert_not_awaited()
 
 
-def test_emoji_preview_flattens_transparency_into_a_512px_jpeg():
-    preview = Image.open(io.BytesIO(emoji_preview(png())))
-    assert preview.format == "JPEG" and preview.size == (512, 256)
-    assert preview.getpixel((10, 10)) == pytest.approx((255, 255, 255), abs=3)
+@pytest.mark.parametrize("size", [(100, 50), (1000, 220), (40, 900), (512, 512)])
+def test_jpeg_still_letterboxes_onto_a_white_512px_square(size):
+    # Jev rejects short sides of 256 pixels or less and very wide images.
+    preview = Image.open(io.BytesIO(jpeg_still(png(size))))
+    assert preview.format == "JPEG" and preview.size == (512, 512)
+    assert preview.getpixel((256, 256)) == pytest.approx((255, 255, 255), abs=3)
 
 
 async def test_personal_title_needs_no_chat_admin_rights(monkeypatch):
@@ -340,4 +342,4 @@ def test_emoji_frames_sample_start_middle_and_late_stills(tmp_path, seconds):
     frames = emoji_frames(clip.read_bytes())
     assert 1 <= len(frames) <= 3 and (seconds < 1 or len(frames) == 3)
     assert all(Image.open(io.BytesIO(frame)).format == "JPEG" for frame in frames)
-    assert max(Image.open(io.BytesIO(frames[0])).size) == 512
+    assert Image.open(io.BytesIO(frames[0])).size == (512, 512)
