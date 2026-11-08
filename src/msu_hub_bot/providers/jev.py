@@ -303,12 +303,18 @@ class _OpenChoiceAnswer(_StrictModel):
 
 
 class _Usage(_StrictModel):
+    # OpenRouter grows billing metadata (e.g. is_byok, cost_details); unread fields are dropped.
+    model_config = ConfigDict(extra="ignore")
+
     input_tokens: TokenCount | None = None
     output_tokens: TokenCount | None = None
     cost: ReportedCost | None = None
 
 
 class _ResponseBase(_StrictModel):
+    # The envelope may gain provider fields; answers stay strict because they carry the judgment.
+    model_config = ConfigDict(extra="ignore")
+
     model: str = Field(min_length=1, max_length=128)
     usage: _Usage | None = None
     id: str | None = Field(default=None, max_length=256)

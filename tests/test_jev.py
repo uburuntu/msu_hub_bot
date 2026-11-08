@@ -137,6 +137,20 @@ async def test_each_command_and_confidence_are_preserved_without_usage(transport
     assert result.input_tokens is None and result.output_tokens is None and result.cost is None
 
 
+async def test_unread_provider_envelope_and_billing_fields_are_ignored(transport):
+    session, _ = transport
+    payload = decision_payload()
+    payload["object"] = "decision"
+    payload["usage"] |= {"is_byok": False, "cost_details": {"upstream_inference_cost": None}}
+    session.responses = [Response(payload)]
+    client = jev.JevClient("synthetic-key")
+    try:
+        result = await client.classify("synthetic request", jev.ReplyMetadata(image=True))
+    finally:
+        await client.close()
+    assert result.command == "pdf" and result.input_tokens == 612
+
+
 def malformed_payloads():
     answer_changes = [
         {"type": "noul"},
