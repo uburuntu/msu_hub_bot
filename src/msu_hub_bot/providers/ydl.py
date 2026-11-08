@@ -92,8 +92,9 @@ class YDL:
             reason, status = classify_link_error(error)
             record_link_diagnostic(LinkStage.EXTRACT, reason, http_status=status)
             return None
-        except TypeError:
-            # Some extractors (e.g. Yandex Music, Google Drive) crash on unexpected page data.
+        except TypeError, ValueError:
+            # Some extractors (e.g. Yandex Music, Google Drive, Internet Archive) crash on unexpected
+            # page data; yt-dlp wraps only KeyError and StopIteration in ExtractorError.
             record_link_diagnostic(LinkStage.EXTRACT, LinkReason.INVALID_RESPONSE)
             return None
 

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import requests
+from yt_dlp.compat import compat_HTMLParseError
 from yt_dlp.utils import DownloadError, UnsupportedError
 
 from msu_hub_bot.providers.link_diagnostics import LinkExtraction, LinkReason, LinkStage, collect_link_diagnostics
@@ -219,9 +220,10 @@ def test_scoped_extractor_failures_preserve_fixed_causes_without_message_parsing
     assert not collect_link_diagnostics(lambda: None).diagnostics
 
 
-def test_extractor_crash_on_unexpected_page_data_is_an_invalid_response():
+@pytest.mark.parametrize("crash", [TypeError("PRIVATE_BODY"), compat_HTMLParseError("opening PRIVATE_BODY tag not found")])
+def test_extractor_crash_on_unexpected_page_data_is_an_invalid_response(crash):
     client = MagicMock()
-    client.extract_info.side_effect = TypeError("PRIVATE_BODY")
+    client.extract_info.side_effect = crash
 
     result = collect_link_diagnostics(YDL.extract_data, "https://music.example.test/PRIVATE_URL", client)
 
