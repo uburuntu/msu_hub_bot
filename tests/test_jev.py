@@ -327,7 +327,7 @@ def test_mime_is_a_bounded_media_type_not_an_arbitrary_context_field(mime):
 
 
 def emoji_payload(probabilities):
-    full = {tag: 0.0 for tag in jev.STICKER_EMOJI} | probabilities
+    full = dict.fromkeys(jev.STICKER_EMOJI, 0.0) | probabilities
     choice = max(full, key=full.__getitem__)
     return {
         "model": "typesafe/jev-1.13-20260917",
@@ -341,17 +341,17 @@ JPEG = b"\xff\xd8\xff" + b"synthetic"
 
 async def test_sticker_emoji_request_sends_only_the_artwork_with_image_opt_in(transport):
     session, _ = transport
-    session.responses = [Response(emoji_payload({"cat": 0.7, "smiling": 0.3}))]
+    session.responses = [Response(emoji_payload({"🐱": 0.7, "😊": 0.3}))]
     client = jev.JevClient("synthetic-key")
     probabilities = await client.sticker_emojis([JPEG])
-    assert probabilities["cat"] == 0.7 and set(probabilities) == set(jev.STICKER_EMOJI)
+    assert probabilities["🐱"] == 0.7 and set(probabilities) == set(jev.STICKER_EMOJI)
     url, request = session.requests[0]
     assert url == jev.ENDPOINT and request["headers"]["TypeSafe-Danger-Zone-Images"] == "true"
     body = request["json"]
     assert set(body) == {"model", "state", "assets", "questions"}
     assert body["assets"] == {"<art>": {"type": "image", "format": "jpeg", "data_base64": "/9j/c3ludGhldGlj"}}
     assert body["state"] == "Sticker artwork: <art>"
-    assert set(body["questions"]["emoji"]["criteria"]) == set(jev.STICKER_EMOJI)
+    assert body["questions"]["emoji"]["criteria"] == {emoji: emoji for emoji in jev.STICKER_EMOJI}
     await client.close()
 
 
@@ -369,15 +369,15 @@ async def test_sticker_emoji_rejects_non_jpeg_oversized_or_too_many_inputs_witho
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda payload: payload["answers"]["emoji"]["probabilities"].pop("cat"),
+        lambda payload: payload["answers"]["emoji"]["probabilities"].pop("🐱"),
         lambda payload: payload["answers"]["emoji"]["probabilities"].update(unknown=0.0),
-        lambda payload: payload["answers"]["emoji"]["probabilities"].update(cat=0.9, dog=0.9),
+        lambda payload: payload["answers"]["emoji"]["probabilities"].update({"🐱": 0.9, "🐶": 0.9}),
         lambda payload: payload["answers"]["emoji"].update(choice="unknown"),
     ],
 )
 async def test_sticker_emoji_rejects_malformed_distributions(transport, mutate):
     session, _ = transport
-    payload = emoji_payload({"cat": 1.0})
+    payload = emoji_payload({"🐱": 1.0})
     mutate(payload)
     session.responses = [Response(payload)]
     with pytest.raises(jev.JevError) as error:
@@ -387,7 +387,7 @@ async def test_sticker_emoji_rejects_malformed_distributions(transport, mutate):
 
 async def test_animation_frames_are_sent_as_ordered_assets(transport):
     session, _ = transport
-    session.responses = [Response(emoji_payload({"muscle": 0.9, "handshake": 0.1}))]
+    session.responses = [Response(emoji_payload({"💪": 0.9, "🤝": 0.1}))]
     client = jev.JevClient("synthetic-key")
     await client.sticker_emojis([JPEG, JPEG + b"2", JPEG + b"3"])
     body = session.requests[0][1]["json"]
@@ -396,7 +396,6 @@ async def test_animation_frames_are_sent_as_ordered_assets(transport):
     await client.close()
 
 
-def test_sticker_emoji_vocabulary_maps_unique_tags_to_unique_emoji():
-    emojis = [value for value, _ in jev.STICKER_EMOJI.values()]
-    assert 90 <= len(jev.STICKER_EMOJI) <= 110 and len(set(emojis)) == len(emojis)
-    assert all(tag.isascii() and tag.replace("_", "").isalpha() for tag in jev.STICKER_EMOJI)
+def test_sticker_emoji_vocabulary_is_unique_glyphs_within_the_choice_limit():
+    assert 200 <= len(jev.STICKER_EMOJI) <= jev.MAX_CHOICE_OPTIONS and len(set(jev.STICKER_EMOJI)) == len(jev.STICKER_EMOJI)
+    assert not any(emoji.isascii() or emoji.isspace() for emoji in jev.STICKER_EMOJI)

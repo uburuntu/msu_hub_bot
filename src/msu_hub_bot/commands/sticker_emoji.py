@@ -9,28 +9,23 @@ from aiogram.types import PhotoSize, Sticker
 
 from msu_hub_bot.execution.executor import TPExecutor
 from msu_hub_bot.media.sticker_media import StickerMediaError, emoji_frames, jpeg_still
-from msu_hub_bot.providers.jev import STICKER_EMOJI, JevClient, JevError, JevErrorReason
+from msu_hub_bot.providers.jev import JevClient, JevError, JevErrorReason
 from msu_hub_bot.telegram.files import DownloadableMedia, DownloadTooLarge, download
 from msu_hub_bot.telemetry import Boundary, Outcome, Provider, Telemetry
 
 TIMEOUT = 10
 MAX_PREVIEW_BYTES = 5 * 1024 * 1024
 MAX_EMOJIS = 3
-TOP_PROBABILITY = 0.3
-EXTRA_PROBABILITY = 0.2
+EXTRA_SHARE = 0.5
 
 
 def select_emojis(probabilities: dict[str, float]) -> tuple[str, ...]:
-    """Take up to three tags: the top one at 0.3 or more, the others at 0.2 or more."""
-    ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
-    if not ranked or ranked[0][1] < TOP_PROBABILITY:
+    """Best effort: always the top emoji, plus up to two more at least half as likely."""
+    ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)[:MAX_EMOJIS]
+    if not ranked:
         return ()
-    chosen = [STICKER_EMOJI[ranked[0][0]][0]]
-    for tag, probability in ranked[1:MAX_EMOJIS]:
-        if probability < EXTRA_PROBABILITY:
-            break
-        chosen.append(STICKER_EMOJI[tag][0])
-    return tuple(dict.fromkeys(chosen))
+    floor = ranked[0][1] * EXTRA_SHARE
+    return tuple(emoji for emoji, probability in ranked if probability >= floor)
 
 
 def preview_source(source: DownloadableMedia) -> PhotoSize | None:

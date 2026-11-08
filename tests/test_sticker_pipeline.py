@@ -139,14 +139,14 @@ async def test_emoji_chain_prefers_sticker_emoji_then_jev_then_replied_text():
 @pytest.mark.parametrize(
     "probabilities,expected",
     [
-        ({"cat": 0.5, "smiling": 0.25, "love": 0.2, "dog": 0.05}, ("🐱", "😊", "😍")),
-        ({"cat": 0.3, "smiling": 0.19, "love": 0.19}, ("🐱",)),
-        ({"cat": 0.29, "smiling": 0.29, "love": 0.29}, ()),
-        ({"cat": 0.25, "dog": 0.25, "fox": 0.25, "frog": 0.25}, ()),
+        ({"🐱": 0.5, "😊": 0.25, "😍": 0.2, "🐶": 0.05}, ("🐱", "😊")),
+        ({"🐱": 0.12, "😊": 0.07, "😍": 0.05}, ("🐱", "😊")),
+        ({"🐱": 0.9, "😊": 0.05}, ("🐱",)),
+        ({"🐱": 0.25, "🐶": 0.25, "🦊": 0.25, "🐸": 0.25}, ("🐱", "🐶", "🦊")),
         ({}, ()),
     ],
 )
-def test_jev_tags_need_a_confident_top_pick_and_clear_extras(probabilities, expected):
+def test_jev_always_takes_the_top_emoji_and_extras_at_least_half_as_likely(probabilities, expected):
     assert select_emojis(probabilities) == expected
 
 
@@ -167,8 +167,8 @@ def png(size=(100, 50), mode="RGBA"):
     return data.getvalue()
 
 
-async def test_picker_sends_a_jpeg_of_the_thumbnail_and_maps_tags(monkeypatch):
-    client = SimpleNamespace(sticker_emojis=AsyncMock(return_value={"cat": 0.8, "dog": 0.2}))
+async def test_picker_sends_a_jpeg_of_the_thumbnail(monkeypatch):
+    client = SimpleNamespace(sticker_emojis=AsyncMock(return_value={"🐱": 0.6, "🐶": 0.4}))
     download = AsyncMock(return_value=io.BytesIO(png()))
     monkeypatch.setattr(sticker_emoji, "download", download)
     animation = make_message(animation=ANIMATION).animation
@@ -180,7 +180,7 @@ async def test_picker_sends_a_jpeg_of_the_thumbnail_and_maps_tags(monkeypatch):
 
 
 async def test_picker_sends_three_clip_frames_from_the_shared_download(monkeypatch):
-    client = SimpleNamespace(sticker_emojis=AsyncMock(return_value={"muscle": 0.71, "handshake": 0.28}))
+    client = SimpleNamespace(sticker_emojis=AsyncMock(return_value={"💪": 0.55, "🤝": 0.45}))
     monkeypatch.setattr(sticker_emoji, "download", AsyncMock())
     monkeypatch.setattr(sticker_emoji, "emoji_frames", Mock(return_value=(b"\xff\xd8\xff1", b"\xff\xd8\xff2", b"\xff\xd8\xff3")))
     clip = AsyncMock(return_value=b"mp4")

@@ -41,13 +41,15 @@ artwork sends Telegram's photo or media thumbnail. No text, caption, filename,
 user or chat identity is sent. Stickers with their own emoji and custom emoji
 are never sent.
 
-Jev chooses among about a hundred English tags mapped to one emoji each, which
-classify more reliably than raw emoji glyphs. The most probable tag needs at
-least 0.3 probability; up to two more need 0.2 each. Download, frame extraction
-and the request share a 10-second budget. Any failure, timeout or uncertain answer
-continues the fallback chain without a user-visible error. Image input is an
-experimental Jev feature enabled by the `TypeSafe-Danger-Zone-Images` header.
-`jev.sticker_emoji` telemetry records only duration and outcome, never tags or
+Jev chooses among about 230 raw emoji glyphs; it accepts at most 255 options. Glyphs keep the meanings
+chats give them (💀 for laughing, 🗿 for deadpan), which descriptive tags
+narrowed without making the choice more accurate. Suggestions are best effort:
+the most probable emoji is always used, plus up to two more that are at least
+half as likely, with no absolute confidence floor. Download, frame extraction
+and the request share a 10-second budget. Any failure or timeout continues the
+fallback chain without a user-visible error. Image input is an experimental Jev
+feature enabled by the `TypeSafe-Danger-Zone-Images` header.
+`jev.sticker_emoji` telemetry records only duration and outcome, never emoji or
 artwork.
 
 Attached or replied-to images, videos and stickers keep precedence over custom
