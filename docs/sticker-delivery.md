@@ -75,6 +75,10 @@ Worker admission is acquired before downloading; the byte limit is enforced on
 both declared size and streamed content. Temporary files and decoded image cores
 are released on success and failure.
 
+Video notes become circular stickers: the centred square fills the 512-pixel
+canvas and everything outside its inscribed circle is transparent, with an
+anti-aliased edge, as Telegram displays them.
+
 Video and animated-image input uses at most the first seven seconds of one source
 cycle. Excerpts longer than three seconds are accelerated to approximately 2.95
 seconds. Clipping is applied before frame acceleration. A successful save adds

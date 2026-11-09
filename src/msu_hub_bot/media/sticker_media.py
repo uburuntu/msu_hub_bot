@@ -92,8 +92,12 @@ def _probe(path: Path, *, timeout: float = 60) -> tuple[dict[str, Any], dict[str
     return info, video, duration
 
 
-def prepare_video(data: bytes) -> PreparedMedia:
-    """Convert up to the first seven source seconds to a silent VP9 sticker."""
+def prepare_video(data: bytes, *, circle: bool = False) -> PreparedMedia:
+    """Convert up to the first seven source seconds to a silent VP9 sticker.
+
+    ``circle`` crops a centred square and makes everything outside its inscribed
+    circle transparent, matching how Telegram displays video notes.
+    """
     if len(data) > MAX_INPUT_BYTES:
         raise StickerMediaError("Файл больше 20 МБ. Стикер не добавлен.")
     with TemporaryDirectory(prefix="hub-sticker-") as directory:
@@ -101,7 +105,7 @@ def prepare_video(data: bytes) -> PreparedMedia:
         output = Path(directory) / "sticker.webm"
         source.write_bytes(data)
         _, video, duration = _probe(source)
-        return _encode_video(source, output, video, duration, trimmed=duration > MAX_SOURCE_SECONDS)
+        return _encode_video(source, output, video, duration, trimmed=duration > MAX_SOURCE_SECONDS, circle=circle)
 
 
 def _encode_video(
@@ -112,6 +116,7 @@ def _encode_video(
     *,
     trimmed: bool,
     input_options: tuple[str, ...] = (),
+    circle: bool = False,
 ) -> PreparedMedia:
     factor = speed_factor(duration)
     if video:
@@ -130,6 +135,16 @@ def _encode_video(
         "h='if(gte(dar,1),max(2,trunc(512/dar/2)*2),512)',"
         "setsar=1,fps={fps}:round=down,format=yuva420p"
     )
+    if circle:
+        # The anti-aliased disc mask is rendered once; alphamerge repeats its only frame.
+        filters = (
+            f"setpts=(PTS-STARTPTS)/{factor:.12f},"
+            "crop=w='min(iw,ih)':h='min(iw,ih)',scale=512:512,"
+            "setsar=1,fps={fps}:round=down,format=yuva420p[video];"
+            "color=c=black:s=512x512:r=1:d=1,format=gray,"
+            "geq=lum='clip(255*(W/2+0.5-hypot(X+0.5-W/2,Y+0.5-H/2)),0,255)'[mask];"
+            "[video][mask]alphamerge"
+        )
     command = [
         "ffmpeg",
         "-nostdin",
@@ -372,13 +387,13 @@ def prepare_custom_emoji(data: bytes, kind: str) -> PreparedMedia:
         raise StickerMediaError("Не удалось подготовить анимированный эмодзи. Пришлите его как GIF или видео.") from exc
 
 
-def prepare_media(data: bytes, kind: str) -> PreparedMedia:
+def prepare_media(data: bytes, kind: str, *, circle: bool = False) -> PreparedMedia:
     if len(data) > MAX_INPUT_BYTES:
         raise StickerMediaError("Файл больше 20 МБ. Стикер не добавлен.")
     if kind == "animated":
         return PreparedMedia("animated", prepare_tgs(data))
     if kind == "video":
-        return prepare_video(data)
+        return prepare_video(data, circle=circle)
     try:
         return prepare_static(data)
     except (OSError, ValueError, EOFError, SyntaxError, Image.DecompressionBombError) as exc:

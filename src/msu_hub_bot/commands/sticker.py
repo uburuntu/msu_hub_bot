@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 from aiogram import Bot
@@ -7,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.base import StorageKey
-from aiogram.types import Message, InputSticker, Sticker
+from aiogram.types import Message, InputSticker, Sticker, VideoNote
 from aiogram.utils.markdown import hlink
 from pydantic import BaseModel
 
@@ -18,7 +19,7 @@ from msu_hub_bot.telegram.extraction import Extractor
 from msu_hub_bot.telegram.files import DownloadableMedia, download
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.telegram.state import ReleasableEventIsolation, UpdateStateContext, release_state_isolation
-from msu_hub_bot.media.sticker_media import MAX_INPUT_BYTES, StickerMediaError, prepare_media, prepare_custom_emoji
+from msu_hub_bot.media.sticker_media import MAX_INPUT_BYTES, PreparedMedia, StickerMediaError, prepare_media, prepare_custom_emoji
 from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadedSticker, UploadMetadata, sticker_error
 
 sticker_set_name_template = "with_love_for_{id}_by_msu_hub_bot"
@@ -175,7 +176,11 @@ class Stickers:
                 async def prepare_input() -> tuple[bytes, str]:
                     return await load(), kind or "static"
 
-                prepared, timeouted = await cpu_executor.run_prepared(prepare_input, prepare_custom_emoji if is_custom else prepare_media)
+                convert: Callable[[bytes, str], PreparedMedia] = prepare_custom_emoji if is_custom else prepare_media
+                if isinstance(source, VideoNote):
+                    # Telegram shows these square clips as circles.
+                    convert = partial(prepare_media, circle=True)
+                prepared, timeouted = await cpu_executor.run_prepared(prepare_input, convert)
                 if timeouted:
                     raise StickerMediaError("Обработка заняла слишком много времени. Стикер не добавлен.")
                 uploaded = await client.upload(

@@ -94,6 +94,22 @@ async def test_s_converts_a_gif_instead_of_saving_the_senders_avatar(monkeypatch
     assert draft.sticker_personal and draft.mixed_sticker.format == "video"
 
 
+async def test_video_notes_are_cut_into_circles(monkeypatch):
+    bot = make_bot()
+    note = {"file_id": "note", "file_unique_id": "note", "length": 384, "duration": 2}
+    reply = make_message(bot, message_id=1, video_note=note)
+    message = make_message(bot, message_id=2, text="/s", reply_to_message=reply.model_dump())
+    prepared = Mock(return_value=PreparedMedia("video", b"webm"))
+    monkeypatch.setattr(sticker, "prepare_media", prepared)
+    monkeypatch.setattr(sticker, "download", AsyncMock(return_value=io.BytesIO(b"mp4")))
+    monkeypatch.setattr(bot, "upload_sticker_file", AsyncMock(return_value=SimpleNamespace(file_id="uploaded", file_unique_id="new")))
+    monkeypatch.setattr(bot, "get_sticker_set", AsyncMock(side_effect=missing_pack()))
+
+    await sticker.process_sticker(message, meta("🙂"), state_for(bot, message), bot, executor())
+
+    prepared.assert_called_once_with(b"mp4", "video", circle=True)
+
+
 @pytest.mark.parametrize("kind", ["video", "animated", "static"])
 async def test_s_copies_existing_stickers_by_file_id_with_their_own_emoji(monkeypatch, kind):
     bot = make_bot()

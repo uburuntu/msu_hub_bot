@@ -112,6 +112,31 @@ def test_stronger_encoding_fits_detailed_animation_without_losing_alpha_or_timin
 
 
 @native
+def test_video_note_becomes_an_opaque_circle_with_transparent_corners(tmp_path):
+    source = tmp_path / "note.mp4"
+    # Slightly wide input also checks the centred square crop.
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=white:s=400x384:r=30:d=2", "-c:v", "mpeg4", str(source)],
+        check=True,
+        timeout=30,
+    )
+    prepared = media.prepare_media(source.read_bytes(), "video", circle=True)
+    assert prepared.kind == "video" and not prepared.trimmed
+    side = 64
+    _, frames = decode(tmp_path, prepared, side)
+    _, stream, _ = media._probe(tmp_path / "result.webm")
+    assert stream["width"] == stream["height"] == 512
+
+    def alpha(frame, x, y):
+        return frame[(y * side + x) * 4 + 3]
+
+    assert frames
+    for frame in frames:
+        assert all(alpha(frame, x, y) == 0 for x, y in [(0, 0), (side - 1, 0), (0, side - 1), (side - 1, side - 1), (6, 6)])
+        assert all(alpha(frame, x, y) >= 250 for x, y in [(32, 32), (32, 2), (2, 32), (61, 32), (32, 61)])
+
+
+@native
 @pytest.mark.parametrize("fmt", ["PNG", "WEBP"])
 def test_only_first_seven_seconds_enter_long_animation(tmp_path, fmt):
     prepared = media.prepare_media(animation(fmt, durations=[3000, 4000, 2000]), "static")
