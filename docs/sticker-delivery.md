@@ -43,12 +43,10 @@ chat administrator edits a chat's packs; the owner edits personal packs in the
 private chat. Callbacks name the owner and pack, and are honoured only for the
 current chat's series or the presser's own, after rechecking administrator status.
 
-When the bot is a group administrator allowed to delete messages, the list is an
-ephemeral message only the invoker sees: the follow-up prompts edit it in place,
-and the typed title or cover message is deleted after it is applied. Otherwise the
-list is a regular reply and typed input stays. The `/packs` message itself is never
-deleted. Telegram may drop ephemeral menus; when the menu can no longer be edited,
-the result arrives as a short regular message.
+The list is a regular reply everyone in the chat sees; follow-up prompts edit it
+in place, and the typed title or cover message stays. When the menu can no longer
+be edited (for example, it was deleted), the result arrives as a short regular
+message.
 
 A rename applies to the chosen pack only, 1–64 characters, through an FSM step
 per user, chat and topic that `/cancel` or «Отмена» clears. Covers come from any

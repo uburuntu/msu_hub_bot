@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
@@ -34,7 +33,7 @@ def sticker_set(title, count=3):
     return SimpleNamespace(title=title, stickers=[object()] * count)
 
 
-def fake_bot(packs=None, *, admin=True, bot_admin=True, can_delete=True):
+def fake_bot(packs=None, *, admin=True):
     packs = {FIRST: sticker_set("Котики", 120), SECOND: sticker_set("Котики (2)", 4)} if packs is None else packs
 
     async def lookup(name):
@@ -42,14 +41,11 @@ def fake_bot(packs=None, *, admin=True, bot_admin=True, can_delete=True):
             return packs[name]
         raise missing()
 
-    status = ChatMemberStatus.ADMINISTRATOR if bot_admin else ChatMemberStatus.MEMBER
     return SimpleNamespace(
         id=123456789,
         get_sticker_set=AsyncMock(side_effect=lookup),
         get_chat_administrators=AsyncMock(return_value=[SimpleNamespace(user=SimpleNamespace(id=42 if admin else 7))]),
-        get_chat_member=AsyncMock(return_value=SimpleNamespace(status=status, can_delete_messages=can_delete)),
         send_rich_message=AsyncMock(),
-        edit_ephemeral_message_text=AsyncMock(return_value=True),
         edit_message_text=AsyncMock(),
         delete_message=AsyncMock(return_value=True),
         set_sticker_set_title=AsyncMock(return_value=True),
@@ -96,22 +92,19 @@ def test_editors_get_rename_and_cover_buttons_and_others_only_a_link():
     assert [button.url for button in buttons(read_only)] == [f"https://t.me/addstickers/{FIRST}", f"https://t.me/addstickers/{LEGACY}"]
 
 
-async def test_admin_bot_sends_a_private_menu():
+async def test_menu_is_a_public_reply_with_edit_buttons_for_admins():
     bot = fake_bot()
-    await sticker_packs.process_packs(make_message(None, text="/packs"), bot)
-    kwargs = bot.send_rich_message.await_args.kwargs
-    assert kwargs["ephemeral_message_parameters"].receiver_user_id == 42
-    assert kwargs.get("reply_parameters") is None
-    assert len(buttons(kwargs["rich_message"])) == 6
-
-
-async def test_without_delete_rights_the_menu_is_public_and_non_admins_only_get_links():
-    bot = fake_bot(admin=False, can_delete=False)
     await sticker_packs.process_packs(make_message(None, text="/packs", message_id=9), bot)
     kwargs = bot.send_rich_message.await_args.kwargs
     assert kwargs.get("ephemeral_message_parameters") is None
     assert kwargs["reply_parameters"].message_id == 9
-    assert {button.text for button in buttons(kwargs["rich_message"])} == {"Открыть"}
+    assert len(buttons(kwargs["rich_message"])) == 6
+
+
+async def test_non_admins_only_get_links():
+    bot = fake_bot(admin=False)
+    await sticker_packs.process_packs(make_message(None, text="/packs", message_id=9), bot)
+    assert {button.text for button in buttons(bot.send_rich_message.await_args.kwargs["rich_message"])} == {"Открыть"}
 
 
 async def test_dm_lists_personal_packs():
@@ -120,7 +113,6 @@ async def test_dm_lists_personal_packs():
     await sticker_packs.process_packs(make_message(None, text="/packs", chat={"id": 42, "type": "private"}), bot)
     rich = bot.send_rich_message.await_args.kwargs["rich_message"]
     assert buttons(rich)[0].url.endswith(personal) and len(buttons(rich)) == 3
-    bot.get_chat_member.assert_not_awaited()
 
 
 async def test_no_packs_explains_how_to_start_one():
@@ -141,7 +133,7 @@ async def test_forged_callbacks_cannot_reach_other_packs(owner, chat):
     await sticker_packs.process_packs_cb(cb, PackCallback.unpack(cb.data), state, bot, None)
     assert cb.answer.await_args.kwargs["show_alert"] is True
     assert await state.get_state() is None
-    bot.edit_ephemeral_message_text.assert_not_awaited()
+    bot.edit_message_text.assert_not_awaited()
 
 
 async def test_non_admin_cannot_press_edit_buttons_on_a_public_menu():
@@ -153,41 +145,30 @@ async def test_non_admin_cannot_press_edit_buttons_on_a_public_menu():
     assert await state.get_state() is None
 
 
-async def test_private_rename_updates_one_pack_and_tidies_the_typed_title():
+async def test_rename_updates_one_pack_edits_the_menu_and_leaves_the_title_message():
     bot = fake_bot()
     state = state_for()
-    cb = query(PackCallback(action="rename", owner=OWNER, index=2).pack(), message_fields={"ephemeral_message_id": 77})
+    cb = query(PackCallback(action="rename", owner=OWNER, index=2).pack())
     await sticker_packs.process_packs_cb(cb, PackCallback.unpack(cb.data), state, bot, None)
     assert await state.get_state() == PackStates.title.state
-    assert bot.edit_ephemeral_message_text.await_args.kwargs["ephemeral_message_id"] == 77
+    assert bot.edit_message_text.await_args.kwargs["message_id"] == 5
 
-    title = make_message(None, message_id=11, text="  Новые котики  ")
-    await sticker_packs.process_pack_title(title, state, bot)
+    await sticker_packs.process_pack_title(make_message(None, message_id=11, text="  Новые котики  "), state, bot)
 
     bot.set_sticker_set_title.assert_awaited_once_with(name=SECOND, title="Новые котики")
-    bot.delete_message.assert_awaited_once_with(chat_id=CHAT, message_id=11)
-    rich = bot.edit_ephemeral_message_text.await_args.kwargs["rich_message"]
+    bot.delete_message.assert_not_awaited()
+    rich = bot.edit_message_text.await_args.kwargs["rich_message"]
     assert any("Название обновлено" in str(block.text) for block in rich.blocks if hasattr(block, "text"))
     assert await state.get_state() is None
 
 
-async def test_public_rename_edits_the_menu_and_leaves_the_title_message():
-    bot = fake_bot(can_delete=False)
-    state = state_for()
-    cb = query(PackCallback(action="rename", owner=OWNER, index=1).pack())
-    await sticker_packs.process_packs_cb(cb, PackCallback.unpack(cb.data), state, bot, None)
-    await sticker_packs.process_pack_title(make_message(None, message_id=11, text="Котики"), state, bot)
-    bot.delete_message.assert_not_awaited()
-    assert bot.edit_message_text.await_args.kwargs["message_id"] == 5
-
-
-async def test_expired_private_menu_falls_back_to_a_reply(monkeypatch):
+async def test_deleted_menu_falls_back_to_a_reply(monkeypatch):
     bot = fake_bot()
-    bot.edit_ephemeral_message_text.side_effect = TelegramBadRequest(method=GetStickerSet(name="pack"), message="Bad Request: gone")
+    bot.edit_message_text.side_effect = TelegramBadRequest(method=GetStickerSet(name="pack"), message="Bad Request: gone")
     monkeypatch.setattr(Message, "answer", AsyncMock())
     state = state_for()
     await state.set_state(PackStates.title)
-    await state.set_data({"pack_edit": {"owner": OWNER, "index": 1, "chat_id": CHAT, "menu_ephemeral_id": 3}})
+    await state.set_data({"pack_edit": {"owner": OWNER, "index": 1, "chat_id": CHAT, "menu_message_id": 3}})
     message = make_message(None, text="Котики")
     await sticker_packs.process_pack_title(message, state, bot)
     assert "Название обновлено" in message.answer.await_args.args[0]
@@ -230,7 +211,7 @@ async def test_sent_photo_becomes_a_static_cover(monkeypatch):
     bot = fake_bot()
     state = state_for()
     await state.set_state(PackStates.cover)
-    await state.set_data({"pack_edit": {"owner": OWNER, "index": 1, "chat_id": CHAT, "menu_ephemeral_id": 3}})
+    await state.set_data({"pack_edit": {"owner": OWNER, "index": 1, "chat_id": CHAT, "menu_message_id": 3}})
     monkeypatch.setattr(sticker_packs, "download_by_file_id", AsyncMock(return_value=io.BytesIO(png())))
     photo = make_message(None, message_id=12, photo=[{"file_id": "big", "file_unique_id": "big", "width": 300, "height": 150}])
 
@@ -242,7 +223,7 @@ async def test_sent_photo_becomes_a_static_cover(monkeypatch):
         assert (cover.format, cover.size) == ("WEBP", (100, 100))
     sticker_packs.download_by_file_id.assert_awaited_once()
     assert sticker_packs.download_by_file_id.await_args.args[0] == "big"
-    bot.delete_message.assert_awaited_once_with(chat_id=CHAT, message_id=12)
+    bot.delete_message.assert_not_awaited()
 
 
 async def test_animated_sticker_cover_uses_telegrams_still(monkeypatch):

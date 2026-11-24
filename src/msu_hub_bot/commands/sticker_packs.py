@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from aiogram import Bot
-from aiogram.enums import ChatMemberStatus, ChatType
+from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
@@ -13,7 +13,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
     Chat,
-    EphemeralMessageParameters,
     InputRichBlockButtons,
     InputRichBlockParagraph,
     InputRichBlockSectionHeading,
@@ -60,7 +59,6 @@ class PackEdit(BaseModel):
     index: int
     chat_id: int
     menu_message_id: int | None = None
-    menu_ephemeral_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -93,17 +91,6 @@ async def may_edit(bot: Bot, chat: Chat, user_id: int, owner: int) -> bool:
         return False
     admins = await bot.get_chat_administrators(chat_id=chat.id)
     return user_id in (admin.user.id for admin in admins)
-
-
-async def bot_can_tidy(bot: Bot, chat: Chat) -> bool:
-    """Private menus need a bot administrator; it also deletes typed input afterwards."""
-    if chat.type == ChatType.PRIVATE:
-        return False
-    try:
-        member = await bot.get_chat_member(chat_id=chat.id, user_id=bot.id)
-    except TelegramBadRequest:
-        return False
-    return member.status == ChatMemberStatus.ADMINISTRATOR and bool(getattr(member, "can_delete_messages", False))
 
 
 async def _lookup(bot: Bot, name: str) -> StickerSet | None:
@@ -199,13 +186,6 @@ async def process_packs(message: Message, bot: Bot) -> Message | bool:
     editable = await may_edit(bot, message.chat, user.id, owner)
     rich = render_list(packs, owner, personal=personal, editable=editable)
     thread = message.message_thread_id if message.is_topic_message else None
-    if await bot_can_tidy(bot, message.chat):
-        return await bot.send_rich_message(
-            chat_id=message.chat.id,
-            rich_message=rich,
-            message_thread_id=thread,
-            ephemeral_message_parameters=EphemeralMessageParameters(receiver_user_id=user.id),
-        )
     return await bot.send_rich_message(
         chat_id=message.chat.id,
         rich_message=rich,
@@ -215,13 +195,9 @@ async def process_packs(message: Message, bot: Bot) -> Message | bool:
 
 
 async def show(bot: Bot, edit: PackEdit, user_id: int, rich: InputRichMessage) -> bool:
-    """Update the menu in place; False if it is gone, e.g. an expired private menu."""
+    """Update the menu in place; False if it is gone, e.g. deleted."""
     try:
-        if edit.menu_ephemeral_id is not None:
-            await bot.edit_ephemeral_message_text(
-                chat_id=edit.chat_id, receiver_user_id=user_id, ephemeral_message_id=edit.menu_ephemeral_id, rich_message=rich
-            )
-        elif edit.menu_message_id is not None:
+        if edit.menu_message_id is not None:
             await bot.edit_message_text(chat_id=edit.chat_id, message_id=edit.menu_message_id, rich_message=rich)
         else:
             return False
@@ -237,16 +213,6 @@ async def show_list(bot: Bot, chat: Chat, edit: PackEdit, user_id: int, notice: 
     packs = await read_packs(bot, edit.owner)
     personal = chat.type == ChatType.PRIVATE
     return await show(bot, edit, user_id, render_list(packs, edit.owner, personal=personal, editable=True, notice=notice))
-
-
-async def tidy(bot: Bot, message: Message, edit: PackEdit) -> None:
-    """Private menus also hide the typed input; public ones leave it."""
-    if edit.menu_ephemeral_id is None:
-        return
-    try:
-        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-    except TelegramBadRequest:
-        pass
 
 
 async def current_edit(state: FSMContext) -> PackEdit | None:
@@ -315,8 +281,7 @@ async def process_packs_cb(
         owner=owner,
         index=index,
         chat_id=message.chat.id,
-        menu_message_id=None if message.ephemeral_message_id is not None else message.message_id,
-        menu_ephemeral_id=message.ephemeral_message_id,
+        menu_message_id=message.message_id,
     )
     user_id = query.from_user.id
     action = callback_data.action
@@ -382,7 +347,6 @@ async def process_pack_title(message: Message, state: FSMContext, bot: Bot) -> M
     except TelegramBadRequest:
         return await message.reply("Telegram не принял это название. Попробуйте другое или /cancel.")
     await state.clear()
-    await tidy(bot, message, edit)
     notice = "✅ Название обновлено."
     if not await show_list(bot, message.chat, edit, message.from_user.id, notice):
         return await message.answer(notice)
@@ -410,7 +374,6 @@ async def process_pack_cover(message: Message, state: FSMContext, bot: Bot, cpu_
         return await message.reply(f"{error} Или /cancel.")
     notice = await set_cover(bot, edit, message.from_user.id, payload)
     await state.clear()
-    await tidy(bot, message, edit)
     if not await show_list(bot, message.chat, edit, message.from_user.id, notice):
         return await message.answer(notice)
     return True
