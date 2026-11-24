@@ -42,6 +42,6 @@ COPY --from=build /project/.venv/ /opt/msu_hub_bot/.venv/
 ENV PATH=/opt/msu_hub_bot/.venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 DOCKER_MODE=1 DENO_DIR=/tmp/deno
 WORKDIR /work
 USER 10001:10001
-HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=3 CMD ["python", "-m", "msu_hub_bot.health"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --start-interval=2s --retries=3 CMD ["python", "-m", "msu_hub_bot.health"]
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/opt/msu_hub_bot/.venv/bin/msu-hub-bot"]

@@ -472,7 +472,7 @@ for path in Path('/proc').iterdir():
                     return
                 if not state["Running"] or state.get("Health", {}).get("Status") == "unhealthy":
                     break
-            time.sleep(3)
+            time.sleep(1)
         raise DeploymentError("Replacement did not become ready")
 
     def restore(self, previous):
