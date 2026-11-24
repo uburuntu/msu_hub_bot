@@ -608,3 +608,13 @@ async def test_unresolvable_raffle_buttons_use_the_expired_fallback(chess_select
     handler, _ = await asyncio.create_task(dispatcher.feed_update(bot, Update(update_id=1, callback_query=callback)))
     assert handler.callback.__qualname__ == "process_expired_callback"
     assert bot.session.methods == []
+
+
+def test_image_smoke_expects_the_registered_handler_counts():
+    # The release smoke check repeats these counts inside the built image; keep them in step.
+    import re
+
+    smoke = (Path(__file__).parents[1] / "tools/deployment/image_smoke.py").read_text()
+    expected = {event: int(count) for event, count in re.findall(r'assert count\("(\w+)"\) == (\d+)', smoke)}
+    root = router()
+    assert expected == {event: len(routes(root, event)) for event in expected}
