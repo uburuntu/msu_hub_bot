@@ -12,6 +12,21 @@ mixed formats, so animated stickers join the regular pack; the older separate
 Without attached or replied-to artwork, the invoker's profile photo remains the
 fallback.
 
+## Pack series
+
+Telegram caps a regular pack at 120 stickers, so each personal or chat pack is
+the first of a series. Later packs insert their number before the bot suffix
+(`with_love_for_{id}_2_by_msu_hub_bot`) and repeat the first pack's title with
+the number, `Котики (2)`, so only the first pack asks for a title. A save reads
+the packs in order and adds to the first one with room, which reuses places
+freed by `/sd`; a sticker already in one of the packs read is not added again.
+When every pack is full, the next one is created by the invoker and the reply
+links it. A pack that fills up between the read and the addition is a definite
+rejection, so the save moves on to the next pack. A series holds at most ten
+packs, which bounds the reads per save; beyond that the bot asks for `/sd`.
+`/sd` deletes from any pack of the invoker's or chat's series and from the legacy
+animated pack.
+
 ## Input and search metadata
 
 `/sc 😀🔥 | кот, мем` assigns associated emoji and comma-separated search keywords.

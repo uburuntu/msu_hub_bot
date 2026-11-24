@@ -20,13 +20,28 @@ from msu_hub_bot.telegram.files import DownloadableMedia, download
 from msu_hub_bot.telegram.filters import MetaInfo
 from msu_hub_bot.telegram.state import ReleasableEventIsolation, UpdateStateContext, release_state_isolation
 from msu_hub_bot.media.sticker_media import MAX_INPUT_BYTES, PreparedMedia, StickerMediaError, prepare_media, prepare_custom_emoji
-from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadedSticker, UploadMetadata, sticker_error
+from msu_hub_bot.telegram.sticker_sets import (
+    MAX_PACK_STICKERS,
+    MAX_SERIES_PACKS,
+    PackSeriesFull,
+    PackTitleRequired,
+    SavedSticker,
+    StickerSetClient,
+    UploadedSticker,
+    UploadMetadata,
+    series_index,
+    sticker_error,
+)
 
 sticker_set_name_template = "with_love_for_{id}_by_msu_hub_bot"
 # Separate animated packs predate mixed-format sets; only /sd still edits them.
 sticker_set_name_template_a = "with_love_for_{id}a_by_msu_hub_bot"
 trimmed_sticker_notice = "✂️ Для стикера использованы только первые 7 секунд."
-full_pack_notice = "🤷🏻‍♂️ Стикерпак заполнен: в нём уже 120 стикеров. Удалите ненужный командой /sd ответом на него."
+next_pack_notice = f"📦 В прошлом паке уже {MAX_PACK_STICKERS} стикеров, поэтому я начал новый {{link}}."
+full_pack_notice = (
+    f"🤷🏻‍♂️ Все {MAX_SERIES_PACKS} стикерпаков заполнены, в каждом по {MAX_PACK_STICKERS} стикеров. "
+    "Удалите ненужный командой /sd ответом на него."
+)
 
 
 class StickerStates(StatesGroup):
@@ -192,7 +207,9 @@ class Stickers:
                     emojis_explicit=metadata.emojis_explicit,
                 )
                 trimmed = prepared.trimmed
-            if not await client.save(name, message.from_user.id, uploaded):
+            try:
+                saved = await client.save(name, message.from_user.id, uploaded)
+            except PackTitleRequired:
                 draft = ChatStickerDraft(
                     mixed_sticker=uploaded.input_sticker(),
                     sticker_upload=UploadMetadata.model_validate(uploaded.metadata()),
@@ -211,14 +228,17 @@ class Stickers:
                         "Название видят все, и изменить его можно только через @Stickers."
                     )
                 return await message.reply("🎈 Пришлите название стикерпака (1–64 символа) или /cancel.")
-            return await cls.reply_saved_sticker(message, client, name, uploaded, trimmed=trimmed)
+            return await cls.reply_saved_sticker(message, client, saved, uploaded, trimmed=trimmed)
         except StickerMediaError as exc:
             return await message.reply(str(exc))
+        except PackSeriesFull:
+            return await message.reply(full_pack_notice)
         except TelegramBadRequest as exc:
             if sticker_error(exc, "PEER_ID_INVALID"):
                 return await message.reply(f"Сначала начните личный чат со мной, затем повторите {command}.")
             if sticker_error(exc, "STICKERS_TOO_MUCH"):
-                return await message.reply(full_pack_notice)
+                # Only a pack that filled up during this save gets here.
+                return await message.reply(f"🤷🏻‍♂️ Стикерпак только что заполнился. Повторите {command}, и стикер попадёт в следующий.")
             await message.reply("Не удалось добавить стикер. Подробнее в /error_stickers.")
             raise
 
@@ -227,12 +247,13 @@ class Stickers:
         cls,
         message: Message,
         client: StickerSetClient,
-        name: str,
+        saved: SavedSticker,
         uploaded: UploadedSticker,
         show_link: bool = False,
         trimmed: bool = False,
     ) -> Message:
         # A failed preview must never repeat the save.
+        name = saved.name
         file_id = await client.resolve(name, uploaded)
         metadata_notice = ""
         if uploaded.emojis_explicit or uploaded.keywords is not None:
@@ -246,7 +267,9 @@ class Stickers:
                 pass
             else:
                 notices = []
-                if show_link:
+                if saved.started_next_pack:
+                    notices.append(next_pack_notice.format(link=link))
+                elif show_link:
                     notices.append(f"✨ Стикерпак: {link}. Управлять им можно через @Stickers.")
                 if trimmed:
                     notices.append(trimmed_sticker_notice)
@@ -255,7 +278,10 @@ class Stickers:
                 if notices:
                     await message.reply("\n".join(notices))
                 return reply
-        text = f"✨ Стикер добавлен в {link}. Откройте его в паке."
+        if saved.started_next_pack:
+            text = next_pack_notice.format(link=link)
+        else:
+            text = f"✨ Стикер добавлен в {link}. Откройте его в паке."
         if trimmed:
             text += "\n" + trimmed_sticker_notice
         if metadata_notice:
@@ -289,7 +315,9 @@ class Stickers:
         release_state_isolation(state_context)
         try:
             try:
-                await client.save(draft.sticker_set_name, message.from_user.id, uploaded, title=title)
+                saved = await client.save(draft.sticker_set_name, message.from_user.id, uploaded, title=title)
+            except PackSeriesFull:
+                return await message.reply(full_pack_notice)
             except TelegramBadRequest as exc:
                 if sticker_error(exc, "PEER_ID_INVALID"):
                     return await message.reply("Начните личный чат со мной и снова пришлите название.")
@@ -298,9 +326,7 @@ class Stickers:
             async with events_isolation.lock(state.key):
                 if await state.get_state() == StickerStates.sticker_set_name.state and await state.get_data() == data:
                     await state.clear()
-            return await cls.reply_saved_sticker(
-                message, client, draft.sticker_set_name, uploaded, show_link=True, trimmed=draft.sticker_trimmed
-            )
+            return await cls.reply_saved_sticker(message, client, saved, uploaded, show_link=True, trimmed=draft.sticker_trimmed)
         finally:
             _pending_saves.discard(guard)
 
@@ -342,6 +368,12 @@ async def process_sticker_chat(
     return await Stickers.make_pack_sticker(message, meta, state, name, bot, cpu_executor, sticker_emoji)
 
 
+def owned_pack(name: str, owner_id: int) -> bool:
+    """Any pack of the owner's series, or their legacy animated pack."""
+    first = sticker_set_name_template.format(id=owner_id)
+    return series_index(name, first) is not None or name == sticker_set_name_template_a.format(id=owner_id)
+
+
 async def process_sticker_delete(message: Message, bot: Bot) -> Message | bool:
     if message.from_user is None:
         return True
@@ -351,10 +383,10 @@ async def process_sticker_delete(message: Message, bot: Bot) -> Message | bool:
     link = hlink("пака", f"https://t.me/addstickers/{name}")
     if not name.endswith("_by_msu_hub_bot"):
         return await message.reply("🤷🏻‍♂️ Этот стикерпак создан не мной, попробуйте через @Stickers")
-    if name in (sticker_set_name_template.format(id=message.from_user.id), sticker_set_name_template_a.format(id=message.from_user.id)):
+    if owned_pack(name, message.from_user.id):
         await bot.delete_sticker_from_set(sticker=sticker.file_id)
         return await message.reply(f"✅ Стикер удален из {link}, в течение часа он пропадет из набора у всех пользователей")
-    if name in (sticker_set_name_template.format(id=abs(message.chat.id)), sticker_set_name_template_a.format(id=abs(message.chat.id))):
+    if owned_pack(name, abs(message.chat.id)):
         if not await can_edit_chat_stickers(message, bot):
             return await message.reply("🤷🏻‍♂️ Стикерпак чата могут редактировать только его админы")
         await bot.delete_sticker_from_set(sticker=sticker.file_id)

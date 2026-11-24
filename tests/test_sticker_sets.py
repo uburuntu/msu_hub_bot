@@ -13,7 +13,17 @@ from aiogram.types import File
 from telegram_helpers import make_bot
 
 from msu_hub_bot.telegram import sticker_sets
-from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadedSticker
+from msu_hub_bot.telegram.sticker_sets import (
+    MAX_PACK_STICKERS,
+    MAX_SERIES_PACKS,
+    PackSeriesFull,
+    PackTitleRequired,
+    StickerSetClient,
+    UploadedSticker,
+    series_index,
+    series_pack_name,
+    series_title,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -317,3 +327,106 @@ async def test_unrelated_bad_request_is_not_treated_as_missing_pack():
         await StickerSetClient(bot).save("pack", 1, upload(), title="Pack")
     bot.create_new_sticker_set.assert_not_awaited()
     bot.add_sticker_to_set.assert_not_awaited()
+
+
+FIRST = "with_love_for_42_by_msu_hub_bot"
+SECOND = "with_love_for_42_2_by_msu_hub_bot"
+
+
+def full_pack(title="Наш пак", prefix="full"):
+    return SimpleNamespace(title=title, stickers=[registered(f"{prefix}-{i}") for i in range(MAX_PACK_STICKERS)])
+
+
+def series_bot(packs):
+    bot = bot_with_pack()
+
+    async def lookup(name):
+        if name in packs:
+            return packs[name]
+        raise error("STICKERSET_INVALID")
+
+    bot.get_sticker_set.side_effect = lookup
+    return bot
+
+
+def test_series_names_number_later_packs_before_the_bot_suffix():
+    assert series_pack_name(FIRST, 1) == FIRST
+    assert series_pack_name(FIRST, 2) == SECOND
+    assert series_pack_name("pack", 3) == "pack_3"
+    assert series_index(FIRST, FIRST) == 1
+    assert series_index("with_love_for_42_12_by_msu_hub_bot", FIRST) == 12
+    for foreign in (
+        "with_love_for_42a_by_msu_hub_bot",
+        "with_love_for_42_1_by_msu_hub_bot",
+        "with_love_for_42_02_by_msu_hub_bot",
+        "with_love_for_421_by_msu_hub_bot",
+        "with_love_for_4_2_by_msu_hub_bot",
+        "with_love_for_42_2_by_other_bot",
+    ):
+        assert series_index(foreign, FIRST) is None
+
+
+def test_series_titles_keep_the_number_within_telegram_limits():
+    assert series_title("Наш пак", 2) == "Наш пак (2)"
+    long = series_title("x" * 64, 10)
+    assert len(long) == 64 and long.endswith(" (10)")
+
+
+async def test_missing_first_pack_asks_for_a_title():
+    bot = series_bot({})
+    with pytest.raises(PackTitleRequired):
+        await StickerSetClient(bot).save(FIRST, 1, upload())
+    bot.create_new_sticker_set.assert_not_awaited()
+
+
+async def test_full_pack_starts_the_next_one_with_its_title():
+    bot = series_bot({FIRST: full_pack()})
+    client = StickerSetClient(bot)
+    saved = await client.save(FIRST, 7, upload())
+    assert (saved.name, saved.index, saved.started_next_pack) == (SECOND, 2, True)
+    kwargs = bot.create_new_sticker_set.await_args.kwargs
+    assert (kwargs["name"], kwargs["title"], kwargs["user_id"]) == (SECOND, "Наш пак (2)", 7)
+    bot.add_sticker_to_set.assert_not_awaited()
+
+
+async def test_first_pack_with_room_takes_the_sticker():
+    bot = series_bot({FIRST: full_pack(), SECOND: pack(registered("other"))})
+    saved = await StickerSetClient(bot).save(FIRST, 1, upload())
+    assert (saved.name, saved.started_next_pack) == (SECOND, False)
+    assert bot.add_sticker_to_set.await_args.kwargs["name"] == SECOND
+    bot.create_new_sticker_set.assert_not_awaited()
+
+
+async def test_room_in_an_earlier_pack_is_used_without_reading_later_ones():
+    bot = series_bot({FIRST: pack(registered("other")), SECOND: full_pack()})
+    saved = await StickerSetClient(bot).save(FIRST, 1, upload())
+    assert saved.name == FIRST
+    assert [call.args[0] for call in bot.get_sticker_set.await_args_list] == [FIRST]
+
+
+async def test_duplicate_in_a_full_pack_is_not_added_again():
+    first = full_pack()
+    first.stickers[5] = registered("wanted")
+    bot = series_bot({FIRST: first})
+    saved = await StickerSetClient(bot).save(FIRST, 1, upload())
+    assert saved.name == FIRST and not saved.created
+    bot.add_sticker_to_set.assert_not_awaited()
+    bot.create_new_sticker_set.assert_not_awaited()
+
+
+async def test_pack_filled_concurrently_moves_on_to_the_next():
+    bot = series_bot({FIRST: SimpleNamespace(title="Наш пак", stickers=full_pack().stickers[1:])})
+    bot.add_sticker_to_set.side_effect = error("STICKERS_TOO_MUCH")
+    saved = await StickerSetClient(bot).save(FIRST, 1, upload())
+    assert saved.name == SECOND and saved.started_next_pack
+    bot.add_sticker_to_set.assert_awaited_once()
+
+
+async def test_series_has_a_bounded_number_of_packs():
+    packs = {series_pack_name(FIRST, index): full_pack(prefix=str(index)) for index in range(1, MAX_SERIES_PACKS + 1)}
+    bot = series_bot(packs)
+    with pytest.raises(PackSeriesFull):
+        await StickerSetClient(bot).save(FIRST, 1, upload())
+    assert bot.get_sticker_set.await_count == MAX_SERIES_PACKS
+    bot.add_sticker_to_set.assert_not_awaited()
+    bot.create_new_sticker_set.assert_not_awaited()

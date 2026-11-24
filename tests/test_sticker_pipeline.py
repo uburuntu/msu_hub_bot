@@ -280,6 +280,38 @@ async def test_legacy_personal_title_prompt_is_cleared_with_a_hint(monkeypatch):
     assert await state.get_state() is None and "/s" in reply.await_args.args[0]
 
 
+async def test_full_pack_reply_links_the_new_pack(monkeypatch):
+    bot = make_bot()
+    message = make_message(
+        bot, message_id=2, text="/s", reply_to_message=make_message(bot, message_id=1, sticker=regular("source").model_dump()).model_dump()
+    )
+    full = SimpleNamespace(title="Мой пак", stickers=[regular(f"s{i}") for i in range(sticker_sets.MAX_PACK_STICKERS)])
+    monkeypatch.setattr(bot, "get_sticker_set", AsyncMock(side_effect=[full, missing_pack()]))
+    monkeypatch.setattr(bot, "create_new_sticker_set", AsyncMock(return_value=True))
+    monkeypatch.setattr(StickerSetClient, "resolve", AsyncMock(return_value="registered"))
+    monkeypatch.setattr(type(message), "reply_sticker", AsyncMock())
+    reply = AsyncMock()
+    monkeypatch.setattr(type(message), "reply", reply)
+
+    await sticker.process_sticker(message, meta(), state_for(bot, message), bot, executor())
+
+    assert bot.create_new_sticker_set.await_args.kwargs["title"] == "Мой пак (2)"
+    assert "with_love_for_42_2_by_msu_hub_bot" in reply.await_args.args[0]
+
+
+@pytest.mark.parametrize(
+    "name", ["with_love_for_42_by_msu_hub_bot", "with_love_for_42_3_by_msu_hub_bot", "with_love_for_42a_by_msu_hub_bot"]
+)
+async def test_sd_deletes_from_every_pack_of_the_series(monkeypatch, name):
+    bot = make_bot()
+    target = make_message(bot, message_id=1, sticker={**regular("x").model_dump(), "set_name": name})
+    message = make_message(bot, message_id=2, text="/sd", reply_to_message=target.model_dump())
+    monkeypatch.setattr(bot, "delete_sticker_from_set", AsyncMock(return_value=True))
+    monkeypatch.setattr(type(message), "reply", AsyncMock())
+    await sticker.process_sticker_delete(message, bot)
+    bot.delete_sticker_from_set.assert_awaited_once()
+
+
 async def test_sd_without_a_sticker_explains_itself(monkeypatch):
     bot = make_bot()
     message = make_message(bot, text="/sd")

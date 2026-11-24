@@ -13,7 +13,7 @@ from aiogram.types import InputSticker, Update
 
 from msu_hub_bot.telegram.state import ReleasableEventIsolation, StateContextMiddleware
 from msu_hub_bot.commands import sticker
-from msu_hub_bot.telegram.sticker_sets import StickerSetClient, UploadMetadata
+from msu_hub_bot.telegram.sticker_sets import SavedSticker, StickerSetClient, UploadMetadata
 from telegram_helpers import make_bot, make_message
 
 
@@ -60,7 +60,7 @@ async def test_mixed_title_duplicate_is_blocked_and_late_success_preserves_new_d
     async def save(*args, **kwargs):
         started.set()
         await finish.wait()
-        return True
+        return SavedSticker("pack", created=True)
 
     save_mock = AsyncMock(side_effect=save)
     monkeypatch.setattr(StickerSetClient, "save", save_mock)
@@ -94,7 +94,7 @@ async def test_mixed_title_success_clears_only_the_unchanged_draft(monkeypatch):
     state, isolation = state_for(bot, message), ReleasableEventIsolation()
     await state.set_state(sticker.StickerStates.sticker_set_name)
     await state.set_data(draft(message))
-    monkeypatch.setattr(StickerSetClient, "save", AsyncMock(return_value=True))
+    monkeypatch.setattr(StickerSetClient, "save", AsyncMock(return_value=SavedSticker("pack", created=True)))
     await invoke(message, state, bot, isolation)
     assert await state.get_state() is None and await state.get_data() == {}
     assert isolation.key_count == 0
@@ -120,7 +120,7 @@ async def test_mixed_save_failure_keeps_retry_data_and_clears_guard(monkeypatch)
     assert await state.get_state() == sticker.StickerStates.sticker_set_name.state
     assert not sticker._pending_saves and isolation.key_count == 0
     save.side_effect = None
-    save.return_value = True
+    save.return_value = SavedSticker("pack", created=True)
     await invoke(message, state, bot, isolation)
     assert save.await_count == 2 and await state.get_state() is None
     await isolation.close()

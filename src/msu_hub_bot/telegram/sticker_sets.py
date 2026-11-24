@@ -3,13 +3,14 @@
 import asyncio
 import hashlib
 import logging
+import re
 from dataclasses import dataclass
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
-from aiogram.types import InputSticker, Sticker
+from aiogram.types import InputSticker, Sticker, StickerSet
 from pydantic import BaseModel
 
 from msu_hub_bot.telegram.files import DownloadTooLarge, download_by_file_id, input_file
@@ -19,6 +20,49 @@ LOOKUP_TIMEOUT = 5
 LOOKUP_DELAYS = (0, 0.2, 0.5)
 MAX_CONTENT_LOOKUPS = 3
 MAX_STICKER_BYTES = 512 * 1024
+# Telegram's limit for regular sets; custom emoji sets allow 200.
+MAX_PACK_STICKERS = 120
+# Bounds the reads per save: every full pack is read before the one with room.
+MAX_SERIES_PACKS = 10
+MAX_TITLE_LENGTH = 64
+
+
+class PackTitleRequired(Exception):
+    """The first pack of a series does not exist yet and needs a title."""
+
+
+class PackSeriesFull(Exception):
+    """Every pack of the series holds the Telegram maximum."""
+
+
+def series_pack_name(name: str, index: int) -> str:
+    """Pack 1 keeps its name; later packs insert their number before the bot suffix."""
+    if index == 1:
+        return name
+    head, separator, bot_suffix = name.rpartition("_by_")
+    if not separator:
+        return f"{name}_{index}"
+    return f"{head}_{index}{separator}{bot_suffix}"
+
+
+def series_index(name: str, first: str) -> int | None:
+    """Return the position of name in the series that starts with first, if any."""
+    if name == first:
+        return 1
+    head, separator, bot_suffix = first.rpartition("_by_")
+    if separator:
+        pattern = rf"{re.escape(head)}_([1-9][0-9]*){re.escape(separator + bot_suffix)}"
+    else:
+        pattern = rf"{re.escape(first)}_([1-9][0-9]*)"
+    if (match := re.fullmatch(pattern, name, flags=re.ASCII)) and (index := int(match[1])) > 1:
+        return index
+    return None
+
+
+def series_title(title: str, index: int) -> str:
+    """Later packs repeat the first pack's title with their number."""
+    suffix = f" ({index})"
+    return title[: MAX_TITLE_LENGTH - len(suffix)].rstrip() + suffix
 
 
 def sticker_error(error: TelegramBadRequest, code: str) -> bool:
@@ -76,6 +120,19 @@ class UploadedSticker:
             tuple(sticker.keywords) if sticker.keywords is not None else None,
             metadata.emojis_explicit,
         )
+
+
+@dataclass(frozen=True)
+class SavedSticker:
+    """The pack holding a saved sticker; created when this save started the pack."""
+
+    name: str
+    index: int = 1
+    created: bool = False
+
+    @property
+    def started_next_pack(self) -> bool:
+        return self.created and self.index > 1
 
 
 class StickerSetClient:
@@ -141,43 +198,69 @@ class StickerSetClient:
             for sticker in stickers
         )
 
-    async def save(self, name: str, user_id: int, sticker: UploadedSticker, title: str | None = None) -> bool:
-        """Return False if a title is needed; True after registration is verified.
+    async def save(self, name: str, user_id: int, sticker: UploadedSticker, title: str | None = None) -> SavedSticker:
+        """Register the sticker in the first pack of the series that has room.
 
-        Known destination references are not added again. An uncertain network
-        result is never retried as a mutation.
+        name is the series' first pack. Without it, a title is required
+        (PackTitleRequired). When every existing pack is full, the next one is
+        created with the first pack's title and number, up to MAX_SERIES_PACKS.
+        Known references in the packs read on the way are not added again. A
+        definite rejection for a full pack moves on to the next; an uncertain
+        network result is never retried as a mutation.
         """
-        try:
-            pack = await self.bot.get_sticker_set(name)
-        except TelegramBadRequest as lookup_error:
-            if not sticker_error(lookup_error, "STICKERSET_INVALID"):
-                raise
-            if title is None:
-                return False
+        first: StickerSet | None = None
+        for index in range(1, MAX_SERIES_PACKS + 1):
+            pack_name = series_pack_name(name, index)
             try:
-                self._before_addition[name] = frozenset()
-                await self.bot.create_new_sticker_set(
-                    user_id=user_id,
-                    name=name,
-                    title=title,
-                    stickers=[sticker.input_sticker()],
-                    sticker_type="regular",
-                )
-            except TelegramBadRequest as creation_error:
-                # A concurrent admin may have created this exact chat pack.
-                try:
-                    pack = await self.bot.get_sticker_set(name)
-                except TelegramBadRequest as retry_error:
-                    if not sticker_error(retry_error, "STICKERSET_INVALID"):
-                        raise
-                    raise creation_error
-                self._before_addition.pop(name, None)
-                if not self._contains_reference(pack.stickers, sticker):
-                    await self._add(name, user_id, sticker, pack.stickers)
-        else:
+                pack = await self.bot.get_sticker_set(pack_name)
+            except TelegramBadRequest as lookup_error:
+                if not sticker_error(lookup_error, "STICKERSET_INVALID"):
+                    raise
+                if first is not None:
+                    return await self._create(pack_name, index, user_id, sticker, series_title(first.title, index))
+                if title is None:
+                    raise PackTitleRequired from None
+                return await self._create(pack_name, index, user_id, sticker, title)
+            if first is None:
+                first = pack
+            if self._contains_reference(pack.stickers, sticker):
+                return SavedSticker(pack_name, index)
+            if len(pack.stickers) >= MAX_PACK_STICKERS:
+                continue
+            try:
+                await self._add(pack_name, user_id, sticker, pack.stickers)
+            except TelegramBadRequest as add_error:
+                # A concurrent addition may have taken the last place.
+                if not sticker_error(add_error, "STICKERS_TOO_MUCH"):
+                    raise
+                self._before_addition.pop(pack_name, None)
+                continue
+            return SavedSticker(pack_name, index)
+        raise PackSeriesFull
+
+    async def _create(self, name: str, index: int, user_id: int, sticker: UploadedSticker, title: str) -> SavedSticker:
+        try:
+            self._before_addition[name] = frozenset()
+            await self.bot.create_new_sticker_set(
+                user_id=user_id,
+                name=name,
+                title=title,
+                stickers=[sticker.input_sticker()],
+                sticker_type="regular",
+            )
+        except TelegramBadRequest as creation_error:
+            # A concurrent save may have created this exact pack.
+            try:
+                pack = await self.bot.get_sticker_set(name)
+            except TelegramBadRequest as retry_error:
+                if not sticker_error(retry_error, "STICKERSET_INVALID"):
+                    raise
+                raise creation_error
+            self._before_addition.pop(name, None)
             if not self._contains_reference(pack.stickers, sticker):
                 await self._add(name, user_id, sticker, pack.stickers)
-        return True
+            return SavedSticker(name, index)
+        return SavedSticker(name, index, created=True)
 
     @staticmethod
     def _same_format(sticker: Sticker, kind: str) -> bool:
