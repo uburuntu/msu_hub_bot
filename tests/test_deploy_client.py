@@ -145,16 +145,20 @@ def test_publish_pushes_through_the_single_permitted_forward_and_closes_it(monke
         commands.append(command)
         return CompletedProcess(command, 0)
 
+    monkeypatch.setenv("GITHUB_RUN_ID", "77")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     monkeypatch.setattr(client, "free_port", lambda: 41234)
     monkeypatch.setattr(client.subprocess, "Popen", popen)
     monkeypatch.setattr(client.subprocess, "run", run)
     monkeypatch.setattr(client, "wait_for_registry", lambda registry, tunnel: None)
-    monkeypatch.setattr(client, "resolve_release", lambda registry, revision: ("sha256:" + "1" * 64, CONFIG))
+    resolved = []
+    monkeypatch.setattr(client, "resolve_release", lambda registry, tag: resolved.append(tag) or ("sha256:" + "1" * 64, CONFIG))
     result = client.publish(["ssh", "-i", "key"], "deploy@host", "msu-hub-bot:" + "a" * 40, "a" * 40)
     assert result == ("sha256:" + "1" * 64, CONFIG)
     tunnel = commands[0]
     assert tunnel[-3:] == ["-L", "127.0.0.1:41234:127.0.0.1:5000", "deploy@host"] and "-N" in tunnel
-    assert ["docker", "image", "push", "--quiet", "127.0.0.1:41234/msu-hub-bot:" + "a" * 40] in commands
+    assert ["docker", "image", "push", "--quiet", "127.0.0.1:41234/msu-hub-bot:" + "a" * 40 + "-77-2"] in commands
+    assert resolved == ["a" * 40 + "-77-2"]
     assert Tunnel.terminated
 
 
@@ -168,3 +172,14 @@ def test_deploy_requires_the_image_built_for_its_revision(monkeypatch):
         monkeypatch.setenv(name, value)
     with pytest.raises(SystemExit, match="does not match"):
         client.main()
+
+
+def test_push_tags_are_unique_per_attempt_and_validated():
+    assert client.push_tag("a" * 40, {"GITHUB_RUN_ID": "5", "GITHUB_RUN_ATTEMPT": "3"}) == "a" * 40 + "-5-3"
+    with pytest.raises(client.PublishError):
+        client.push_tag("a" * 40, {"GITHUB_RUN_ID": "5;rm", "GITHUB_RUN_ATTEMPT": "1"})
+
+
+def test_registry_status_lines_are_public(capsys):
+    client.report_result(CompletedProcess([], 0, stdout="Registry holds 512 MB\nRegistry holds lots\n"))
+    assert capsys.readouterr().out == "Registry holds 512 MB\n"

@@ -878,19 +878,47 @@ def test_rollback_pulls_a_missing_registry_image_from_the_host_registry(tmp_path
     assert ("docker", "pull", "--quiet", "--platform", "linux/amd64", "127.0.0.1:5000/msu-hub-bot@" + state["manifest"]) in calls
 
 
-def test_pruning_deletes_registry_manifests_of_dropped_releases(tmp_path):
-    keep, drop = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+def test_pruning_sweeps_every_manifest_outside_the_kept_releases(tmp_path, capsys):
+    keep, dropped, orphan = ("sha256:" + c * 64 for c in "123")
     current = {"release": "b" * 40 + "-2", "image": "sha256:" + "a" * 64, "manifest": keep}
     deployment.write_private(tmp_path / "current.json", json.dumps(current))
-    for release, manifest in ((current["release"], keep), ("c" * 40 + "-1", drop)):
+    for release, manifest in ((current["release"], keep), ("c" * 40 + "-1", dropped)):
         deployment.write_private(
             tmp_path / "releases" / release / "release.json", json.dumps({"image": "sha256:" + "f" * 64, "manifest": manifest})
         )
     deleted, calls = [], []
     deployer = deployment.Deployer(tmp_path)
+    deployer.registry_tags = lambda: {"b" * 40 + "-9-1": keep, "c" * 40 + "-8-1": dropped, "d" * 40 + "-7-2": orphan}
     deployer.delete_manifest = lambda digest: deleted.append(digest) or True
-    deployer.run = lambda *arguments, **kwargs: calls.append(arguments)
+
+    def run(*arguments, **kwargs):
+        calls.append(arguments)
+        return "9000\t/var/lib/registry\n" if "du" in arguments else ""
+
+    deployer.run = run
     deployer.prune_releases()
-    assert deleted == [drop]
-    assert any(call[:4] == ("docker", "exec", "msu_hub_registry", "registry") for call in calls)
+    assert sorted(deleted) == sorted([dropped, orphan])
+    collect = next(i for i, call in enumerate(calls) if call[:4] == ("docker", "exec", "msu_hub_registry", "registry"))
+    assert calls[collect + 1][:2] == ("docker", "restart") and calls[collect + 1][-1] == "msu_hub_registry"
     assert (tmp_path / "releases" / current["release"]).exists() and not (tmp_path / "releases" / ("c" * 40 + "-1")).exists()
+    output = capsys.readouterr().out
+    assert "Registry holds 9000 MB" in output and "exceeds its expected size" in output
+
+
+def test_sweep_without_orphans_skips_garbage_collection(tmp_path):
+    keep = "sha256:" + "1" * 64
+    calls = []
+    deployer = deployment.Deployer(tmp_path)
+    deployer.registry_tags = lambda: {"b" * 40 + "-1-1": keep}
+    deployer.run = lambda *arguments, **kwargs: calls.append(arguments) or ""
+    deployer.sweep_registry({keep})
+    assert not any("garbage-collect" in call or "restart" in call for call in calls)
+
+
+def test_release_pull_requires_free_disk_space(tmp_path, monkeypatch, capsys):
+    deployer = deployment.Deployer(tmp_path)
+    deployer.run = lambda *arguments, **kwargs: pytest.fail("pulled without space")
+    monkeypatch.setattr(deployment.shutil, "disk_usage", lambda path: type("Usage", (), {"free": 1024**3})())
+    with pytest.raises(deployment.DeploymentError, match="Insufficient disk space"):
+        deployer.pull_image(registry_payload())
+    assert "Insufficient disk space" in capsys.readouterr().out

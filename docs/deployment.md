@@ -45,9 +45,20 @@ The wrapper pulls `127.0.0.1:5000/msu-hub-bot@MANIFEST` and checks that Docker's
 image ID equals the configuration digest from the request, then the platform,
 revision label, non-root user, entrypoint and absence of runtime settings.
 Rollback reuses the local image, or pulls the saved manifest again if Docker
-pruned it. Pruning a release deletes its manifest and sweeps unreferenced blobs;
-deployments are serialized, so no push races the sweep. Releases saved before the
-registry keep their image archives and still roll back from them.
+pruned it. Releases saved before the registry keep their image archives and
+still roll back from them.
+
+Storage stays bounded to the current and previous releases. Every push uses a
+unique `REVISION-RUN-ATTEMPT` tag, so pushes that never became a release (a
+failed request, a rerun) remain listed. After each successful deployment the
+wrapper deletes every manifest except the two kept releases, collects their
+unreferenced blobs, restarts the registry (garbage collection leaves its in-memory
+blob cache stale, so a later push would skip swept shared layers) and reports
+`Registry holds N MB` in the Actions log, with a
+warning above 8 GB. Deployments are serialized, so no push races the sweep. A
+pull is refused while less than 5 GB is free on the host. After a dependency change
+the registry briefly holds two dependency layers (a few hundred megabytes each)
+until a later deployment prunes the older release.
 
 ### Updating the host wrapper
 

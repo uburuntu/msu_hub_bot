@@ -33,6 +33,15 @@ REGISTRY = "127.0.0.1:5000"
 REPOSITORY = "msu-hub-bot"
 REGISTRY_CONTAINER = "msu_hub_registry"
 ARCHIVE_FIELDS = ("archive_sha256", "archive_size")
+MANIFEST_TYPES = (
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+)
+# A release needs room for its new layers in both the registry and Docker's store.
+MIN_FREE_BYTES = 5 * 1024**3
+REGISTRY_WARNING_MB = 8 * 1024
 REGISTRY_FIELDS = ("manifest",)
 MAX_ARCHIVE_SIZE = 2 * 1024**3
 MAX_CONFIGURATION_SIZE = 256 * 1024
@@ -295,6 +304,10 @@ class Deployer:
     def pull_image(self, state):
         """Pull by manifest digest, then check the identity Docker assigned."""
         reference = registry_reference(state)
+        if shutil.disk_usage(self.root).free < MIN_FREE_BYTES:
+            message = "Insufficient disk space for the release; free space on the host"
+            report(message)
+            raise DeploymentError(message)
         self.run("docker", "pull", "--quiet", "--platform", "linux/amd64", reference, timeout=600)
         data = self.run("docker", "image", "inspect", reference, check=False)
         info = json.loads(data)[0] if data else {}
@@ -350,23 +363,33 @@ class Deployer:
         except (OSError, urllib.error.URLError):
             return False
 
-    def prune_releases(self):
-        keep = [self.read_state(name) for name in ("current.json", "previous.json")]
-        directories = {state["release"] for state in keep if state and "release" in state}
-        images = {state["image"] for state in keep if state and "image" in state}
-        manifests = {state["manifest"] for state in keep if state and "manifest" in state}
+    def registry_tags(self):
+        """Map each pushed tag to its manifest digest; an unreachable registry yields none."""
+        try:
+            with urllib.request.urlopen(f"http://{REGISTRY}/v2/{REPOSITORY}/tags/list", timeout=20) as response:
+                tags = json.loads(response.read(1024 * 1024)).get("tags") or []
+            result = {}
+            for tag in tags:
+                request = urllib.request.Request(
+                    f"http://{REGISTRY}/v2/{REPOSITORY}/manifests/{tag}", method="HEAD", headers={"Accept": ", ".join(MANIFEST_TYPES)}
+                )
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    digest = response.headers.get("Docker-Content-Digest", "")
+                if IMAGE_RE.fullmatch(digest):
+                    result[tag] = digest
+            return result
+        except (OSError, ValueError, urllib.error.URLError):
+            return {}
+
+    def sweep_registry(self, kept):
+        """Delete every pushed manifest outside the kept releases, then free its blobs.
+
+        Each push has a unique tag, so pushes that never became a release
+        (failed requests, reruns) are still listed and removed here.
+        """
         deleted = False
-        for directory in (self.root / "releases").iterdir():
-            if directory.name in directories or directory.is_symlink() or not re.fullmatch(r"[0-9a-f]{40}-[0-9]+", directory.name):
-                continue
-            metadata = directory / "release.json"
-            if metadata.exists():
-                old = json.loads(metadata.read_text())
-                if IMAGE_RE.fullmatch(old.get("image", "")) and old["image"] not in images:
-                    self.run("docker", "image", "rm", old["image"], check=False)
-                if IMAGE_RE.fullmatch(old.get("manifest", "")) and old["manifest"] not in manifests:
-                    deleted = self.delete_manifest(old["manifest"]) or deleted
-            shutil.rmtree(directory)
+        for digest in set(self.registry_tags().values()) - kept:
+            deleted = self.delete_manifest(digest) or deleted
         if deleted:
             # Deploys are serialized, so no push can race the blob sweep.
             self.run(
@@ -379,6 +402,31 @@ class Deployer:
                 timeout=300,
                 check=False,
             )
+            # The registry caches blob existence in memory and garbage collection
+            # does not invalidate it: a later push would skip swept shared layers.
+            self.run("docker", "restart", "--time", "10", REGISTRY_CONTAINER, timeout=60, check=False)
+        usage = self.run("docker", "exec", REGISTRY_CONTAINER, "du", "-sm", "/var/lib/registry", timeout=60, check=False)
+        if usage and (size := usage.split()[0]).isdigit():
+            report(f"Registry holds {size} MB")
+            if int(size) > REGISTRY_WARNING_MB:
+                report("Registry exceeds its expected size; inspect it privately")
+
+    def prune_releases(self):
+        keep = [self.read_state(name) for name in ("current.json", "previous.json")]
+        directories = {state["release"] for state in keep if state and "release" in state}
+        images = {state["image"] for state in keep if state and "image" in state}
+        manifests = {state["manifest"] for state in keep if state and "manifest" in state}
+        for directory in (self.root / "releases").iterdir():
+            if directory.name in directories or directory.is_symlink() or not re.fullmatch(r"[0-9a-f]{40}-[0-9]+", directory.name):
+                continue
+            metadata = directory / "release.json"
+            if metadata.exists():
+                old = json.loads(metadata.read_text())
+                if IMAGE_RE.fullmatch(old.get("image", "")) and old["image"] not in images:
+                    self.run("docker", "image", "rm", old["image"], check=False)
+            shutil.rmtree(directory)
+        if manifests:
+            self.sweep_registry(manifests)
 
     def compose(self, state, *args, timeout=180):
         directory = (self.root / "releases" / state["release"]).resolve()

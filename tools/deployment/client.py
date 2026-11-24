@@ -35,6 +35,8 @@ PUBLIC_STATUS = {
     "Previous poller restored",
     "Rollback completed",
     "Rollback failed; restoring the current release",
+    "Registry exceeds its expected size; inspect it privately",
+    "Insufficient disk space for the release; free space on the host",
 }
 
 
@@ -51,7 +53,7 @@ def runtime_environment(environment: Mapping[str, str]) -> dict[str, str]:
 def report_result(result):
     # SSH diagnostics can expose resolved IPs or host paths in public Actions logs.
     for line in result.stdout.splitlines():
-        if line in PUBLIC_STATUS or re.fullmatch(r"Deployed [0-9a-f]{40} sha256:[0-9a-f]{64}", line):
+        if line in PUBLIC_STATUS or re.fullmatch(r"Deployed [0-9a-f]{40} sha256:[0-9a-f]{64}|Registry holds [0-9]+ MB", line):
             print(line)
     if result.returncode:
         print("Deployment failed; inspect the host privately for details", file=sys.stderr)
@@ -109,8 +111,17 @@ def wait_for_registry(registry: str, tunnel: subprocess.Popen, deadline: float =
     raise PublishError("Registry tunnel did not open")
 
 
+def push_tag(revision: str, environment: Mapping[str, str]) -> str:
+    """A tag per push attempt keeps every pushed manifest visible to the host's sweep."""
+    run, attempt = environment.get("GITHUB_RUN_ID", "0"), environment.get("GITHUB_RUN_ATTEMPT", "1")
+    if not run.isdigit() or not attempt.isdigit():
+        raise PublishError("Invalid workflow run identity")
+    return f"{revision}-{run}-{attempt}"
+
+
 def publish(ssh: list[str], destination: str, image: str, revision: str) -> tuple[str, str]:
     """Push through a forward limited to the host registry, then resolve its digests."""
+    tag = push_tag(revision, os.environ)
     port = free_port()
     registry = f"127.0.0.1:{port}"
     tunnel = subprocess.Popen(
@@ -119,7 +130,7 @@ def publish(ssh: list[str], destination: str, image: str, revision: str) -> tupl
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    remote = f"{registry}/{REPOSITORY}:{revision}"
+    remote = f"{registry}/{REPOSITORY}:{tag}"
     try:
         wait_for_registry(registry, tunnel)
         subprocess.run(["docker", "image", "tag", image, remote], check=True, capture_output=True)
@@ -127,7 +138,7 @@ def publish(ssh: list[str], destination: str, image: str, revision: str) -> tupl
         if subprocess.run(["docker", "image", "push", "--quiet", remote], capture_output=True).returncode:
             raise PublishError("Image push failed")
         print(f"Image published in {time.monotonic() - started:.0f}s", flush=True)
-        return resolve_release(registry, revision)
+        return resolve_release(registry, tag)
     finally:
         subprocess.run(["docker", "image", "rm", remote], capture_output=True)
         tunnel.terminate()
