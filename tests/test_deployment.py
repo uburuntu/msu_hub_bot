@@ -779,3 +779,118 @@ def test_feature_state_rollback_cannot_resume_application_document_conversations
     with pytest.raises(deployment.DeploymentError, match="reconcile data"):
         deployer.deploy({"action": "rollback"})
     assert not restored
+
+
+def registry_payload():
+    request = supabase_payload()
+    for key in ("archive_sha256", "archive_size"):
+        request.pop(key)
+    request["manifest"] = "sha256:" + "d" * 64
+    return request
+
+
+def test_registry_release_is_pinned_by_manifest_digest():
+    deployment.validate_payload(registry_payload())
+    for bad in ("latest", "sha256:" + "D" * 64, None):
+        request = registry_payload()
+        request["manifest"] = bad
+        with pytest.raises(deployment.DeploymentError, match="Manifest"):
+            deployment.validate_payload(request)
+    mixed = registry_payload()
+    mixed["archive_size"] = 100
+    with pytest.raises(deployment.DeploymentError, match="Unexpected deployment fields"):
+        deployment.validate_payload(mixed)
+
+
+def inspected(image, *, revision="b" * 40, env=()):
+    return json.dumps(
+        [
+            {
+                "Id": image,
+                "Os": "linux",
+                "Architecture": "amd64",
+                "Config": {
+                    "User": "10001:10001",
+                    "Entrypoint": ["/opt/msu_hub_bot/.venv/bin/msu-hub-bot"],
+                    "Labels": {"org.opencontainers.image.revision": revision},
+                    "Env": list(env),
+                },
+            }
+        ]
+    )
+
+
+@pytest.mark.parametrize("problem", [None, "identity", "revision", "env"])
+def test_registry_pull_checks_the_assigned_identity_and_runtime_contract(tmp_path, problem):
+    request = registry_payload()
+    calls = []
+
+    def run(*arguments, **kwargs):
+        calls.append(arguments)
+        if arguments[:3] == ("docker", "image", "inspect"):
+            image = "sha256:" + "e" * 64 if problem == "identity" else request["image"]
+            return inspected(
+                image,
+                revision="c" * 40 if problem == "revision" else request["revision"],
+                env=["HUB_BOT_TOKEN=x"] if problem == "env" else (),
+            )
+        return ""
+
+    deployer = deployment.Deployer(tmp_path)
+    deployer.run = run
+    if problem:
+        with pytest.raises(deployment.DeploymentError):
+            deployer.receive_image(request, tmp_path, None)
+    else:
+        deployer.receive_image(request, tmp_path, None)
+    assert calls[0] == ("docker", "pull", "--quiet", "--platform", "linux/amd64", "127.0.0.1:5000/msu-hub-bot@" + request["manifest"])
+
+
+def test_registry_release_state_records_its_manifest(tmp_path):
+    request = registry_payload()
+    deployer = deployment.Deployer(tmp_path)
+    deployer.run = lambda *args, **kwargs: "{}"
+    deployer.receive_image = lambda *args: None
+    deployer.compose = lambda *args, **kwargs: ""
+    deployer.wait_healthy = lambda: None
+    deployer.stop_legacy = lambda: None
+    deployer.stop_replacement = lambda: None
+    deployer.inspect = lambda name: None
+    deployer.prune_releases = lambda: None
+    deployer.deploy(request)
+    state = deployer.read_state("current.json")
+    assert state["manifest"] == request["manifest"] and "archive_sha256" not in state
+
+
+def test_rollback_pulls_a_missing_registry_image_from_the_host_registry(tmp_path):
+    state = {"image": "sha256:" + "a" * 64, "revision": "b" * 40, "manifest": "sha256:" + "d" * 64}
+    calls = []
+
+    def run(*arguments, check=True, **kwargs):
+        calls.append(arguments)
+        if arguments[:3] == ("docker", "image", "inspect"):
+            return None if arguments[3] == state["image"] else inspected(state["image"])
+        return ""
+
+    deployer = deployment.Deployer(tmp_path)
+    deployer.run = run
+    deployer.ensure_image(state)
+    assert ("docker", "pull", "--quiet", "--platform", "linux/amd64", "127.0.0.1:5000/msu-hub-bot@" + state["manifest"]) in calls
+
+
+def test_pruning_deletes_registry_manifests_of_dropped_releases(tmp_path):
+    keep, drop = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    current = {"release": "b" * 40 + "-2", "image": "sha256:" + "a" * 64, "manifest": keep}
+    deployment.write_private(tmp_path / "current.json", json.dumps(current))
+    for release, manifest in ((current["release"], keep), ("c" * 40 + "-1", drop)):
+        deployment.write_private(
+            tmp_path / "releases" / release / "release.json", json.dumps({"image": "sha256:" + "f" * 64, "manifest": manifest})
+        )
+    deleted, calls = [], []
+    deployer = deployment.Deployer(tmp_path)
+    deployer.delete_manifest = lambda digest: deleted.append(digest) or True
+    deployer.run = lambda *arguments, **kwargs: calls.append(arguments)
+    deployer.prune_releases()
+    assert deleted == [drop]
+    assert any(call[:4] == ("docker", "exec", "msu_hub_registry", "registry") for call in calls)
+    assert (tmp_path / "releases" / current["release"]).exists() and not (tmp_path / "releases" / ("c" * 40 + "-1")).exists()

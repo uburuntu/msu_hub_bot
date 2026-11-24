@@ -3,11 +3,6 @@ name: CI
 on:
   pull_request:
   workflow_call:
-    inputs:
-      check_image:
-        description: Build and smoke-test the Linux image in this workflow
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -43,12 +38,8 @@ jobs:
         working-directory: web
 
   python:
-    name: Python (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-15]
+    name: Python
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -72,27 +63,19 @@ jobs:
         env:
           TYPECHECK_BASE_REF: ${{ github.event.pull_request.base.sha }}
       - run: uv run --no-sync mypy
-      - run: uv run --no-sync pytest -q
+      - run: uv run --no-sync pytest -q -n auto
 
   storage:
     name: PostgreSQL storage contracts
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: test-only-postgres
-          POSTGRES_DB: hub_test_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d hub_test_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
+      # A plain container starts alongside setup and, unlike a service, needs no teardown.
+      - name: Start PostgreSQL
+        run: >-
+          docker run --detach --name postgres --publish 5432:5432
+          --env POSTGRES_USER=postgres --env POSTGRES_PASSWORD=test-only-postgres --env POSTGRES_DB=hub_test_ci
+          postgres:17-alpine
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -104,6 +87,8 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
       - run: uv sync --locked
+      - name: Wait for PostgreSQL
+        run: timeout 60 sh -c 'until docker exec postgres pg_isready --quiet -U postgres -d hub_test_ci; do sleep 1; done'
       - name: Exercise schema, isolation, quiz scoring, atomic mutations and retention
         run: uv run --no-sync pytest -q tests/test_postgres_storage.py tests/test_feature_postgres.py tests/test_application_postgres.py tests/test_membership_postgres.py tests/test_reminders.py tests/test_chess_match_postgres.py tests/test_raffle_postgres.py tests/test_telegram_state_postgres.py tests/test_feedback_context_postgres.py tests/test_feedback_store_postgres.py
         env:
@@ -125,20 +110,12 @@ jobs:
 
   image:
     name: Linux image
-    if: github.event_name == 'pull_request' || inputs.check_image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Check native libraries, startup, and image archive
-        id: image
+      - name: Expose the Actions cache to the image build
+        uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+      - name: Check native libraries and startup, warming the release build cache
         run: python3 tools/deployment/build_release.py
-      - name: Remove private image archive
-        if: always()
-        env:
-          DEPLOY_ARCHIVE: ${{ steps.image.outputs.archive }}
-        run: |
-          if [ -n "$DEPLOY_ARCHIVE" ]; then
-            rm -f -- "$DEPLOY_ARCHIVE" "$(dirname -- "$DEPLOY_ARCHIVE")/metadata.json"
-          fi

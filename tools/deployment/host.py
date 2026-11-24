@@ -18,6 +18,8 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path, PurePosixPath
 
 IMAGE_RE = re.compile(r"sha256:[0-9a-f]{64}")
@@ -25,6 +27,13 @@ REVISION_RE = re.compile(r"[0-9a-f]{40}")
 SCHEMA_RE = re.compile(r"[a-z][a-z0-9_]{0,62}")
 CONTAINER = "msu_hub_bot"
 LEGACY = "hub_bot"
+# Releases arrive through a registry bound to the host's loopback interface;
+# Actions reaches it only through the deployment key's single permitted forward.
+REGISTRY = "127.0.0.1:5000"
+REPOSITORY = "msu-hub-bot"
+REGISTRY_CONTAINER = "msu_hub_registry"
+ARCHIVE_FIELDS = ("archive_sha256", "archive_size")
+REGISTRY_FIELDS = ("manifest",)
 MAX_ARCHIVE_SIZE = 2 * 1024**3
 MAX_CONFIGURATION_SIZE = 256 * 1024
 
@@ -72,17 +81,43 @@ def validate_payload(payload):
         if set(payload) != {"action"}:
             raise DeploymentError("Unexpected rollback fields")
         return
-    if set(payload) != {"action", "image", "revision", "environment", "archive_sha256", "archive_size"}:
+    common = {"action", "image", "revision", "environment"}
+    if set(payload) not in (common | set(ARCHIVE_FIELDS), common | set(REGISTRY_FIELDS)):
         raise DeploymentError("Unexpected deployment fields")
     if not isinstance(payload["image"], str) or not IMAGE_RE.fullmatch(payload["image"]):
         raise DeploymentError("Image must be an immutable SHA256 image ID")
     if not isinstance(payload["revision"], str) or not REVISION_RE.fullmatch(payload["revision"]):
         raise DeploymentError("Invalid source revision")
     validate_environment(payload["environment"])
+    if "manifest" in payload:
+        if not isinstance(payload["manifest"], str) or not IMAGE_RE.fullmatch(payload["manifest"]):
+            raise DeploymentError("Manifest must be an immutable SHA256 digest")
+        return
     if not isinstance(payload["archive_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", payload["archive_sha256"]):
         raise DeploymentError("Invalid archive checksum")
     if type(payload["archive_size"]) is not int or not 0 < payload["archive_size"] <= MAX_ARCHIVE_SIZE:
         raise DeploymentError("Invalid archive size")
+
+
+def transfer_fields(state):
+    """Registry releases are pinned by manifest; older releases by their saved archive."""
+    return REGISTRY_FIELDS if "manifest" in state else ARCHIVE_FIELDS
+
+
+def registry_reference(state):
+    return REGISTRY + "/" + REPOSITORY + "@" + state["manifest"]
+
+
+def validate_image_config(config, state):
+    if config.get("os") != "linux" or config.get("architecture") != "amd64":
+        raise DeploymentError("Unsupported image platform")
+    runtime = config.get("config") or {}
+    if (runtime.get("Labels") or {}).get("org.opencontainers.image.revision") != state["revision"]:
+        raise DeploymentError("Image source revision mismatch")
+    if runtime.get("User") != "10001:10001" or runtime.get("Entrypoint") != ["/opt/msu_hub_bot/.venv/bin/msu-hub-bot"]:
+        raise DeploymentError("Image does not match this service's runtime contract")
+    if any(value.startswith(("HUB_", "DEPLOY_", "LOGFIRE_", "OTEL_", "GH_TOKEN=", "GITHUB_TOKEN=")) for value in runtime.get("Env") or []):
+        raise DeploymentError("Image contains runtime configuration")
 
 
 def validate_archive(path, state):
@@ -120,17 +155,7 @@ def validate_archive(path, state):
         raw, config = read_json(manifest["Config"])
         if "sha256:" + hashlib.sha256(raw).hexdigest() != state["image"]:
             raise DeploymentError("Image ID does not match its configuration")
-        if config.get("os") != "linux" or config.get("architecture") != "amd64":
-            raise DeploymentError("Unsupported image platform")
-        runtime = config.get("config", {})
-        if runtime.get("Labels", {}).get("org.opencontainers.image.revision") != state["revision"]:
-            raise DeploymentError("Image source revision mismatch")
-        if runtime.get("User") != "10001:10001" or runtime.get("Entrypoint") != ["/opt/msu_hub_bot/.venv/bin/msu-hub-bot"]:
-            raise DeploymentError("Image does not match this service's runtime contract")
-        if any(
-            value.startswith(("HUB_", "DEPLOY_", "LOGFIRE_", "OTEL_", "GH_TOKEN=", "GITHUB_TOKEN=")) for value in runtime.get("Env", [])
-        ):
-            raise DeploymentError("Image contains runtime configuration")
+        validate_image_config(config, state)
         if not isinstance(manifest.get("Layers"), list) or any(
             layer not in members or not members[layer].isfile() for layer in manifest["Layers"]
         ):
@@ -267,7 +292,20 @@ class Deployer:
         except (OSError, ValueError, DeploymentError):
             raise DeploymentError("Invalid protected release configuration") from None
 
+    def pull_image(self, state):
+        """Pull by manifest digest, then check the identity Docker assigned."""
+        reference = registry_reference(state)
+        self.run("docker", "pull", "--quiet", "--platform", "linux/amd64", reference, timeout=600)
+        data = self.run("docker", "image", "inspect", reference, check=False)
+        info = json.loads(data)[0] if data else {}
+        if info.get("Id") != state["image"]:
+            raise DeploymentError("Pulled image does not match its configuration")
+        validate_image_config({"os": info.get("Os"), "architecture": info.get("Architecture"), "config": info.get("Config")}, state)
+
     def receive_image(self, payload, directory, stream):
+        if "manifest" in payload:
+            self.pull_image(payload)
+            return
         archive = directory / "image.tar.gz"
         remaining = payload["archive_size"]
         if shutil.disk_usage(directory).free < remaining + 1024**3:
@@ -292,6 +330,9 @@ class Deployer:
     def ensure_image(self, state):
         if self.run("docker", "image", "inspect", state["image"], check=False):
             return
+        if "manifest" in state:
+            self.pull_image(state)
+            return
         archive = self.root / "releases" / state["release"] / "image.tar.gz"
         validate_archive(archive, state)
         self.run("docker", "image", "load", "--input", str(archive), timeout=600)
@@ -301,10 +342,20 @@ class Deployer:
         if self.diagnostic_path:
             write_private(self.diagnostic_path, (result.stdout + result.stderr)[-131072:])
 
+    def delete_manifest(self, digest):
+        request = urllib.request.Request(f"http://{REGISTRY}/v2/{REPOSITORY}/manifests/{digest}", method="DELETE")
+        try:
+            with urllib.request.urlopen(request, timeout=20):
+                return True
+        except (OSError, urllib.error.URLError):
+            return False
+
     def prune_releases(self):
         keep = [self.read_state(name) for name in ("current.json", "previous.json")]
         directories = {state["release"] for state in keep if state and "release" in state}
         images = {state["image"] for state in keep if state and "image" in state}
+        manifests = {state["manifest"] for state in keep if state and "manifest" in state}
+        deleted = False
         for directory in (self.root / "releases").iterdir():
             if directory.name in directories or directory.is_symlink() or not re.fullmatch(r"[0-9a-f]{40}-[0-9]+", directory.name):
                 continue
@@ -313,7 +364,21 @@ class Deployer:
                 old = json.loads(metadata.read_text())
                 if IMAGE_RE.fullmatch(old.get("image", "")) and old["image"] not in images:
                     self.run("docker", "image", "rm", old["image"], check=False)
+                if IMAGE_RE.fullmatch(old.get("manifest", "")) and old["manifest"] not in manifests:
+                    deleted = self.delete_manifest(old["manifest"]) or deleted
             shutil.rmtree(directory)
+        if deleted:
+            # Deploys are serialized, so no push can race the blob sweep.
+            self.run(
+                "docker",
+                "exec",
+                REGISTRY_CONTAINER,
+                "registry",
+                "garbage-collect",
+                "/etc/distribution/config.yml",
+                timeout=300,
+                check=False,
+            )
 
     def compose(self, state, *args, timeout=180):
         directory = (self.root / "releases" / state["release"]).resolve()
@@ -387,7 +452,7 @@ for path in Path('/proc').iterdir():
             # migration. The SSH JSON protocol deliberately exposes no such option.
             expected = {
                 "previous": self.read_state("current.json"),
-                "candidate": {key: payload.get(key) for key in ("image", "revision", "archive_sha256", "archive_size")},
+                "candidate": {key: payload.get(key) for key in ("image", "revision", *transfer_fields(payload))},
                 "administrative_cutover": True,
             }
             try:
@@ -440,7 +505,7 @@ for path in Path('/proc').iterdir():
         state = {
             "release": release,
             "storage_backend": "supabase",
-            **{key: payload[key] for key in ("revision", "image", "archive_sha256", "archive_size")},
+            **{key: payload[key] for key in ("revision", "image", *transfer_fields(payload))},
         }
         state["supabase_schema"] = environment["HUB_SUPABASE_SCHEMA"]
         write_private(directory / "release.json", json.dumps(state))

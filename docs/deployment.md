@@ -6,8 +6,9 @@ The application uses `~/msu_hub_bot` on the deployment host. The SSH deployment
 key is separate from personal SSH keys and restricted to the installed host
 wrapper as a forced command. Its source is [tools/deployment/host.py](../tools/deployment/host.py).
 The wrapper accepts only deploy/rollback requests and
-uses a host lock. A deployment sends one JSON header followed by a compressed
-image archive over the same encrypted SSH connection.
+uses a host lock. A deployment first pushes the image to the host's private
+registry through an SSH forward, then sends one JSON request naming the image by
+manifest digest. Only layers the registry lacks cross the network.
 
 Requirements: Linux x86-64, Python 3, Docker, Compose 2.30 or later, and access to
 the Supabase API through Docker network `msu_db`. The account
@@ -20,13 +21,33 @@ Install the reviewed wrapper as `~/msu_hub_bot/deploy.py` in a mode-700 director
 Add a dedicated Ed25519 public key to the deployment account's authorized keys:
 
 ```text
-restrict,command="/usr/bin/python3 /home/DEPLOY_USER/msu_hub_bot/deploy.py" ssh-ed25519 PUBLIC_KEY msu_hub_bot-actions
+restrict,port-forwarding,permitopen="127.0.0.1:5000",command="/usr/bin/python3 /home/DEPLOY_USER/msu_hub_bot/deploy.py" ssh-ed25519 PUBLIC_KEY msu_hub_bot-actions
 ```
+
+The only forward the key may open is the release registry's loopback port.
 
 Use the actual home path when moving hosts. Wrapper changes require the normal
 administrator SSH connection; the restricted CI key cannot upload executable
 scripts or run arbitrary commands. Keep the deployment directory and SSH files
 private to their owner.
+
+### Release registry
+
+[registry.compose.yml](../tools/deployment/registry.compose.yml) runs a
+digest-pinned `registry:3` bound to `127.0.0.1:5000`, read-only with all
+capabilities dropped. Install it beside the wrapper and start it with
+`docker compose -f ~/msu_hub_bot/registry.compose.yml up -d` over the
+administrator connection. It has no authentication; loopback binding and the
+deployment key's single permitted forward are its boundary, so never publish
+the port.
+
+The wrapper pulls `127.0.0.1:5000/msu-hub-bot@MANIFEST` and checks that Docker's
+image ID equals the configuration digest from the request, then the platform,
+revision label, non-root user, entrypoint and absence of runtime settings.
+Rollback reuses the local image, or pulls the saved manifest again if Docker
+pruned it. Pruning a release deletes its manifest and sweeps unreferenced blobs;
+deployments are serialized, so no push races the sweep. Releases saved before the
+registry keep their image archives and still roll back from them.
 
 ### Updating the host wrapper
 
@@ -112,15 +133,15 @@ values in `--body` arguments or shell history. Arrays and mappings must be JSON.
 
 Pull requests run all checks, including the Linux image smoke test; a new commit
 cancels older CI runs for that pull request. Deploy reruns the checks for its own
-revision. When deployment is enabled on `main`, its deployment job owns the
-image build and smoke test; otherwise, CI keeps that validation. Deployment and
-rollback share the production queue and never cancel an active release.
+revision, building the image alongside the tests. Deployment and rollback share
+the production queue and never cancel an active release.
 
-Actions builds and tests the image before the transfer step receives any
-production configuration. Images are transferred directly over SSH. The host
-checks the archive checksum, image ID, revision label, platform, non-root user,
-entrypoint, and tag before loading it. Archives containing extra image tags,
-unsafe paths, or embedded runtime settings are rejected.
+The image build uses the Actions cache, so unchanged layers keep their digests:
+system packages, locked dependencies, the background-removal model and the
+application are separate layers, ordered by how often they change. The deployment
+job rebuilds from that cache, repeats the smoke test, and only then receives
+production configuration. A code-only release pushes a few megabytes to the
+host registry instead of the whole image.
 
 The workflow sends configuration over authenticated SSH. The wrapper stores a
 mode-600 `runtime.env` for each release, outside any checkout. Its single JSON

@@ -15,8 +15,6 @@ concurrency:
 jobs:
   validate:
     uses: ./.github/workflows/ci.yml
-    with:
-      check_image: ${{ github.ref != 'refs/heads/main' || vars.DEPLOY_ENABLED != 'true' }}
 
   deploy:
     if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
@@ -30,7 +28,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Build and validate private image archive
+      - name: Expose the Actions cache to the image build
+        uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+      - name: Rebuild the validated image from the build cache
         id: image
         run: python3 tools/deployment/build_release.py
       - name: Skip superseded revisions
@@ -46,7 +46,7 @@ jobs:
         if: steps.current.outputs.deploy == 'true'
         run: python3 tools/deployment/client.py
         env:
-          DEPLOY_ARCHIVE: ${{ steps.image.outputs.archive }}
+          DEPLOY_IMAGE: ${{ steps.image.outputs.image }}
           DEPLOY_HOST: ${{ secrets.SSH_HOST }}
           DEPLOY_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PORT: ${{ secrets.SSH_PORT }}
@@ -108,11 +108,3 @@ jobs:
           HUB_SUPPORTERS_BASE: ${{ secrets.HUB_SUPPORTERS_BASE }}
           HUB_SUPPORTERS_TABLE: ${{ secrets.HUB_SUPPORTERS_TABLE }}
           HUB_SUPPORTERS_API_KEY: ${{ secrets.HUB_SUPPORTERS_API_KEY }}
-      - name: Remove private image archive
-        if: always()
-        env:
-          DEPLOY_ARCHIVE: ${{ steps.image.outputs.archive }}
-        run: |
-          if [ -n "$DEPLOY_ARCHIVE" ]; then
-            rm -f -- "$DEPLOY_ARCHIVE" "$(dirname -- "$DEPLOY_ARCHIVE")/metadata.json"
-          fi

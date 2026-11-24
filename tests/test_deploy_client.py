@@ -71,3 +71,100 @@ def test_enabled_deployment_accepts_only_exact_project_write_token(enabled):
         "HUB_ENVIRONMENT": "production",
         "LOGFIRE_TOKEN": "write-canary",
     }
+
+
+CONFIG = "sha256:" + "c" * 64
+
+
+def serve_manifests(monkeypatch, documents):
+    requested = []
+
+    def fetch(registry, reference):
+        requested.append(reference)
+        return documents[reference]
+
+    monkeypatch.setattr(client, "fetch_manifest", fetch)
+    return requested
+
+
+def test_release_resolves_a_single_platform_manifest(monkeypatch):
+    serve_manifests(monkeypatch, {"rev": ("sha256:" + "1" * 64, {"config": {"digest": CONFIG}})})
+    assert client.resolve_release("127.0.0.1:1", "rev") == ("sha256:" + "1" * 64, CONFIG)
+
+
+def test_release_index_pins_the_linux_amd64_manifest(monkeypatch):
+    index = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            {"digest": "sha256:" + "2" * 64, "platform": {"os": "linux", "architecture": "amd64"}},
+            {"digest": "sha256:" + "3" * 64, "platform": {"os": "unknown", "architecture": "unknown"}},
+        ],
+    }
+    requested = serve_manifests(
+        monkeypatch,
+        {"rev": ("sha256:" + "0" * 64, index), "sha256:" + "2" * 64: ("sha256:" + "2" * 64, {"config": {"digest": CONFIG}})},
+    )
+    assert client.resolve_release("127.0.0.1:1", "rev") == ("sha256:" + "2" * 64, CONFIG)
+    assert requested == ["rev", "sha256:" + "2" * 64]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"config": {"digest": "sha256:short"}},
+        {"manifests": []},
+        {"manifests": [{"digest": "sha256:" + "2" * 64, "platform": {"os": "linux", "architecture": "arm64"}}]},
+    ],
+)
+def test_release_rejects_ambiguous_or_invalid_manifests(monkeypatch, document):
+    serve_manifests(monkeypatch, {"rev": ("sha256:" + "0" * 64, document)})
+    with pytest.raises(client.PublishError):
+        client.resolve_release("127.0.0.1:1", "rev")
+
+
+def test_publish_pushes_through_the_single_permitted_forward_and_closes_it(monkeypatch):
+    commands = []
+
+    class Tunnel:
+        terminated = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            Tunnel.terminated = True
+
+        def wait(self, timeout):
+            return 0
+
+    def popen(command, **kwargs):
+        commands.append(command)
+        return Tunnel()
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr(client, "free_port", lambda: 41234)
+    monkeypatch.setattr(client.subprocess, "Popen", popen)
+    monkeypatch.setattr(client.subprocess, "run", run)
+    monkeypatch.setattr(client, "wait_for_registry", lambda registry, tunnel: None)
+    monkeypatch.setattr(client, "resolve_release", lambda registry, revision: ("sha256:" + "1" * 64, CONFIG))
+    result = client.publish(["ssh", "-i", "key"], "deploy@host", "msu-hub-bot:" + "a" * 40, "a" * 40)
+    assert result == ("sha256:" + "1" * 64, CONFIG)
+    tunnel = commands[0]
+    assert tunnel[-3:] == ["-L", "127.0.0.1:41234:127.0.0.1:5000", "deploy@host"] and "-N" in tunnel
+    assert ["docker", "image", "push", "--quiet", "127.0.0.1:41234/msu-hub-bot:" + "a" * 40] in commands
+    assert Tunnel.terminated
+
+
+def test_deploy_requires_the_image_built_for_its_revision(monkeypatch):
+    for name, value in {
+        "DEPLOY_HOST": "host",
+        "DEPLOY_USER": "deploy",
+        "GITHUB_SHA": "a" * 40,
+        "DEPLOY_IMAGE": "msu-hub-bot:other",
+    }.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(SystemExit, match="does not match"):
+        client.main()

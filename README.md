@@ -148,14 +148,15 @@ paste an expanded production Compose configuration into logs or issues.
 
 ## CI and production
 
-Pull requests run locked Python checks on Linux and macOS, Ruff, strict progressive mypy, tests, secret
+Pull requests run locked Python checks on Linux, Ruff, strict progressive mypy, tests, secret
 scanning, workflow validation, and a Linux amd64 container smoke test. Actions
 references and tool versions are pinned. Production credentials are confined
 to the deployment job on the `production` environment.
 
-Main-branch changes run the same checks, build and test the release image,
-and transfer it directly to the VPS over SSH. The host verifies the archive
-and runs its immutable image ID. Images are kept on the runner and VPS.
+Main-branch changes run the same checks, build and test the release image
+with a layer cache, and push only changed layers to a loopback-only registry on
+the VPS through an SSH forward. The host pulls the release by digest, verifies it
+and runs its immutable image ID.
 The bot connects to separately managed Supabase APIs. Deployment does
 not run migrations or recreate shared infrastructure. Supabase is the sole
 application database backend; immutable schema history and recovery artifact
