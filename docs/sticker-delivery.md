@@ -22,8 +22,13 @@ the packs in order and adds to the first one with room, which reuses places
 freed by `/sd`; a sticker already in one of the packs read is not added again.
 When every pack is full, the next one is created by the invoker and the reply
 links it. A pack that fills up between the read and the addition is a definite
-rejection, so the save moves on to the next pack. A series holds at most ten
-packs, which bounds the reads per save; beyond that the bot asks for `/sd`.
+rejection, so the save moves on to the next pack. The process remembers each series'
+open pack and the first pack's title, so later saves read only that pack; the
+single poller sees every save. A restart, a `/sd` in the series or a remembered
+pack deleted in @Stickers makes the next save read from the first pack again.
+Places freed in @Stickers are reused after that re-read, and duplicate detection
+covers only the packs read. A series holds at most ten packs, which bounds the
+reads after a re-read; beyond that the bot asks for `/sd`.
 `/sd` deletes from any pack of the invoker's or chat's series and from the legacy
 animated pack.
 

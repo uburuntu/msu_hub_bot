@@ -202,6 +202,7 @@ def message(admin=True, kind="static"):
 
 def registered_pack(kind="static"):
     return SimpleNamespace(
+        title="Pack",
         stickers=[
             SimpleNamespace(
                 file_id="registered-sticker",
@@ -210,7 +211,7 @@ def registered_pack(kind="static"):
                 is_animated=kind == "animated",
                 is_video=kind == "video",
             )
-        ]
+        ],
     )
 
 
@@ -265,7 +266,7 @@ def test_non_admin_cannot_add(handlers):
 @pytest.mark.parametrize("kind", ["static", "animated", "video"])
 def test_upload_and_add_modern_api(handlers, kind):
     m = message(kind=kind)
-    m.bot.get_sticker_set.side_effect = [SimpleNamespace(stickers=[]), registered_pack(kind)]
+    m.bot.get_sticker_set.side_effect = [SimpleNamespace(title="Pack", stickers=[]), registered_pack(kind)]
     handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared")
     meta = SimpleNamespace(extract_text=lambda: (m, "😎"))
     asyncio.run(handlers["process_sticker_chat"](m, meta, None))
@@ -389,9 +390,9 @@ def test_saved_sticker_preview_failure_never_repeats_the_addition(handlers, fail
     handlers["prepare_media"] = lambda data, kind: media.PreparedMedia(kind, b"prepared", trimmed=True)
     meta = SimpleNamespace(extract_text=lambda: (m, ""))
     if failure == "lookup":
-        m.bot.get_sticker_set.side_effect = [SimpleNamespace(stickers=[]), error("unavailable", network=True)]
+        m.bot.get_sticker_set.side_effect = [SimpleNamespace(title="Pack", stickers=[]), error("unavailable", network=True)]
     else:
-        m.bot.get_sticker_set.side_effect = [SimpleNamespace(stickers=[]), registered_pack("video")]
+        m.bot.get_sticker_set.side_effect = [SimpleNamespace(title="Pack", stickers=[]), registered_pack("video")]
         m.reply_sticker.side_effect = error("preview rejected")
     asyncio.run(handlers["process_sticker_chat"](m, meta, None))
     m.bot.upload_sticker_file.assert_awaited_once()

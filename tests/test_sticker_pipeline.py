@@ -328,7 +328,7 @@ def reencoded(unique_id):
 
 
 async def test_one_new_entry_after_our_addition_identifies_a_reencoded_copy():
-    before = SimpleNamespace(stickers=[reencoded("older")])
+    before = SimpleNamespace(title="Pack", stickers=[reencoded("older")])
     after = SimpleNamespace(
         stickers=[reencoded("older"), reencoded("copy"), SimpleNamespace(**{**vars(reencoded("static")), "is_video": False})]
     )
@@ -345,7 +345,7 @@ async def test_one_new_entry_after_our_addition_identifies_a_reencoded_copy():
 
 
 async def test_ambiguous_concurrent_additions_fall_back_to_the_pack_link():
-    before = SimpleNamespace(stickers=[])
+    before = SimpleNamespace(title="Pack", stickers=[])
     after = SimpleNamespace(stickers=[reencoded("copy"), reencoded("another-admin")])
     bot = SimpleNamespace(
         get_sticker_set=AsyncMock(side_effect=[before, after, after, after]),

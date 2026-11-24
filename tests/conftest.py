@@ -8,6 +8,14 @@ from uuid import uuid4
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def forget_open_sticker_packs(monkeypatch):
+    """The open-pack cache is process state; each test starts from a fresh process."""
+    from msu_hub_bot.telegram import sticker_sets
+
+    monkeypatch.setattr(sticker_sets, "_open_packs", {})
+
+
 @pytest.fixture(scope="session")
 def postgres():
     from test_postgres_storage import Database, SCHEMAS, exercise_namespace_migration, exercise_reaction_migration

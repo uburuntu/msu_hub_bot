@@ -10,7 +10,7 @@ from typing import Any
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
-from aiogram.types import InputSticker, Sticker, StickerSet
+from aiogram.types import InputSticker, Sticker
 from pydantic import BaseModel
 
 from msu_hub_bot.telegram.files import DownloadTooLarge, download_by_file_id, input_file
@@ -25,6 +25,22 @@ MAX_PACK_STICKERS = 120
 # Bounds the reads per save: every full pack is read before the one with room.
 MAX_SERIES_PACKS = 10
 MAX_TITLE_LENGTH = 64
+
+
+@dataclass(frozen=True)
+class OpenPack:
+    index: int
+    first_title: str
+
+
+# Process-local: the single poller sees every save, so after one save a series
+# starts at its last open pack. A restart, /sd or a vanished pack reads from pack 1.
+_open_packs: dict[str, OpenPack] = {}
+
+
+def forget_open_pack(name: str) -> None:
+    """Read the series from its first pack again, e.g. after /sd freed a place."""
+    _open_packs.pop(name, None)
 
 
 class PackTitleRequired(Exception):
@@ -204,27 +220,36 @@ class StickerSetClient:
         name is the series' first pack. Without it, a title is required
         (PackTitleRequired). When every existing pack is full, the next one is
         created with the first pack's title and number, up to MAX_SERIES_PACKS.
+        Reading starts at the pack remembered by the last save in this process.
         Known references in the packs read on the way are not added again. A
         definite rejection for a full pack moves on to the next; an uncertain
         network result is never retried as a mutation.
         """
-        first: StickerSet | None = None
-        for index in range(1, MAX_SERIES_PACKS + 1):
+        cached = _open_packs.get(name)
+        start = cached.index if cached else 1
+        first_title = cached.first_title if cached else None
+        for index in range(start, MAX_SERIES_PACKS + 1):
             pack_name = series_pack_name(name, index)
             try:
                 pack = await self.bot.get_sticker_set(pack_name)
             except TelegramBadRequest as lookup_error:
                 if not sticker_error(lookup_error, "STICKERSET_INVALID"):
                     raise
-                if first is not None:
-                    return await self._create(pack_name, index, user_id, sticker, series_title(first.title, index))
+                if cached and index == start:
+                    # The remembered pack was deleted in @Stickers.
+                    forget_open_pack(name)
+                    return await self.save(name, user_id, sticker, title)
+                if first_title is not None:
+                    return self._remember(
+                        name, await self._create(pack_name, index, user_id, sticker, series_title(first_title, index)), first_title
+                    )
                 if title is None:
                     raise PackTitleRequired from None
-                return await self._create(pack_name, index, user_id, sticker, title)
-            if first is None:
-                first = pack
+                return self._remember(name, await self._create(pack_name, index, user_id, sticker, title), title)
+            if first_title is None:
+                first_title = pack.title
             if self._contains_reference(pack.stickers, sticker):
-                return SavedSticker(pack_name, index)
+                return self._remember(name, SavedSticker(pack_name, index), first_title)
             if len(pack.stickers) >= MAX_PACK_STICKERS:
                 continue
             try:
@@ -235,8 +260,15 @@ class StickerSetClient:
                     raise
                 self._before_addition.pop(pack_name, None)
                 continue
-            return SavedSticker(pack_name, index)
+            return self._remember(name, SavedSticker(pack_name, index), first_title)
+        if first_title is not None:
+            _open_packs[name] = OpenPack(MAX_SERIES_PACKS, first_title)
         raise PackSeriesFull
+
+    @staticmethod
+    def _remember(name: str, saved: SavedSticker, first_title: str) -> SavedSticker:
+        _open_packs[name] = OpenPack(saved.index, first_title)
+        return saved
 
     async def _create(self, name: str, index: int, user_id: int, sticker: UploadedSticker, title: str) -> SavedSticker:
         try:

@@ -171,7 +171,7 @@ def test_telegram_transformed_copy_falls_back_without_preview_or_metadata_guess(
     m = message()
     m.reply_to_message.sticker = artwork(file_size=8)
     transformed = artwork(file_id="target-copy", file_unique_id="transformed-identity", file_size=8)
-    m.bot.get_sticker_set.return_value = SimpleNamespace(stickers=[transformed])
+    m.bot.get_sticker_set.return_value = SimpleNamespace(title="Pack", stickers=[transformed])
 
     def download(file_id, *, destination):
         destination.write(b"old-data" if file_id == "source-file" else b"new-data")

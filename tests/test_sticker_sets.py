@@ -48,7 +48,7 @@ def registered(unique_id, kind="video", *, file_id=None, size=4):
 
 
 def pack(*items):
-    return SimpleNamespace(stickers=list(items))
+    return SimpleNamespace(title="Pack", stickers=list(items))
 
 
 def bot_with_pack(*items):
@@ -430,3 +430,43 @@ async def test_series_has_a_bounded_number_of_packs():
     assert bot.get_sticker_set.await_count == MAX_SERIES_PACKS
     bot.add_sticker_to_set.assert_not_awaited()
     bot.create_new_sticker_set.assert_not_awaited()
+
+
+async def test_next_save_starts_at_the_remembered_open_pack():
+    packs = {FIRST: full_pack(), SECOND: pack(registered("other"))}
+    bot = series_bot(packs)
+    await StickerSetClient(bot).save(FIRST, 1, upload("one"))
+    bot.get_sticker_set.reset_mock()
+    saved = await StickerSetClient(bot).save(FIRST, 1, upload("two"))
+    assert saved.name == SECOND
+    assert [call.args[0] for call in bot.get_sticker_set.await_args_list] == [SECOND]
+
+
+async def test_pack_started_from_the_cache_keeps_the_first_title():
+    packs = {FIRST: full_pack(), SECOND: pack(registered("other"))}
+    bot = series_bot(packs)
+    await StickerSetClient(bot).save(FIRST, 1, upload("one"))
+    packs[SECOND] = full_pack(title="Наш пак (2)", prefix="second")
+    saved = await StickerSetClient(bot).save(FIRST, 1, upload("two"))
+    assert saved.started_next_pack and saved.index == 3
+    assert bot.create_new_sticker_set.await_args.kwargs["title"] == "Наш пак (3)"
+
+
+async def test_vanished_remembered_pack_reads_the_series_again():
+    packs = {FIRST: full_pack(), SECOND: pack(registered("other"))}
+    bot = series_bot(packs)
+    await StickerSetClient(bot).save(FIRST, 1, upload("one"))
+    del packs[SECOND]
+    bot.get_sticker_set.reset_mock()
+    saved = await StickerSetClient(bot).save(FIRST, 1, upload("two"))
+    assert saved.name == SECOND and saved.started_next_pack
+    assert [call.args[0] for call in bot.get_sticker_set.await_args_list] == [SECOND, FIRST, SECOND]
+
+
+async def test_forgetting_reuses_a_place_freed_in_an_earlier_pack():
+    packs = {FIRST: full_pack(), SECOND: pack(registered("other"))}
+    bot = series_bot(packs)
+    await StickerSetClient(bot).save(FIRST, 1, upload("one"))
+    packs[FIRST] = SimpleNamespace(title="Наш пак", stickers=full_pack().stickers[1:])
+    sticker_sets.forget_open_pack(FIRST)
+    assert (await StickerSetClient(bot).save(FIRST, 1, upload("two"))).name == FIRST

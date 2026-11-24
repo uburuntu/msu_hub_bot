@@ -29,6 +29,7 @@ from msu_hub_bot.telegram.sticker_sets import (
     StickerSetClient,
     UploadedSticker,
     UploadMetadata,
+    forget_open_pack,
     series_index,
     sticker_error,
 )
@@ -374,6 +375,12 @@ def owned_pack(name: str, owner_id: int) -> bool:
     return series_index(name, first) is not None or name == sticker_set_name_template_a.format(id=owner_id)
 
 
+async def delete_owned_sticker(bot: Bot, sticker: Sticker, owner_id: int) -> None:
+    await bot.delete_sticker_from_set(sticker=sticker.file_id)
+    # The freed place goes to the next save.
+    forget_open_pack(sticker_set_name_template.format(id=owner_id))
+
+
 async def process_sticker_delete(message: Message, bot: Bot) -> Message | bool:
     if message.from_user is None:
         return True
@@ -384,12 +391,12 @@ async def process_sticker_delete(message: Message, bot: Bot) -> Message | bool:
     if not name.endswith("_by_msu_hub_bot"):
         return await message.reply("🤷🏻‍♂️ Этот стикерпак создан не мной, попробуйте через @Stickers")
     if owned_pack(name, message.from_user.id):
-        await bot.delete_sticker_from_set(sticker=sticker.file_id)
+        await delete_owned_sticker(bot, sticker, message.from_user.id)
         return await message.reply(f"✅ Стикер удален из {link}, в течение часа он пропадет из набора у всех пользователей")
     if owned_pack(name, abs(message.chat.id)):
         if not await can_edit_chat_stickers(message, bot):
             return await message.reply("🤷🏻‍♂️ Стикерпак чата могут редактировать только его админы")
-        await bot.delete_sticker_from_set(sticker=sticker.file_id)
+        await delete_owned_sticker(bot, sticker, abs(message.chat.id))
         return await message.reply(f"✅ Стикер удален из {link}, в течение часа он пропадет из набора у всех пользователей")
     return await message.reply(
         "🤷🏻‍♂️ Судя по всему, стикерпак создан другим пользователем или в другом чате, где создавали — там и удаляйте"
