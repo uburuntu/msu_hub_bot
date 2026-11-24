@@ -36,8 +36,10 @@ animated pack.
 ## Pack list and editing
 
 `/packs` lists the chat's series in a group and the invoker's personal series in
-a private chat, followed by the legacy animated pack if it exists. Each pack is a
-rich-message heading linking to it, its sticker count and a button row:
+a private chat, followed by the legacy animated pack if it exists. A summary line
+gives the number of packs, stickers and places left in the series. Each pack is a
+rich-message heading linking to it, its sticker count, format mix (🖼 still,
+✨ animated, 🎞 video, with a legend when needed) and total file size, and a button row:
 «Открыть» for everyone, plus «✏️ Название» and «🖼 Обложка» for its editors. Any
 chat administrator edits a chat's packs; the owner edits personal packs in the
 private chat. Callbacks name the owner and pack, and are honoured only for the

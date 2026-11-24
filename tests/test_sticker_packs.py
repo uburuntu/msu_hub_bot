@@ -29,8 +29,9 @@ def missing():
     return TelegramBadRequest(method=GetStickerSet(name="pack"), message="Bad Request: STICKERSET_INVALID")
 
 
-def sticker_set(title, count=3):
-    return SimpleNamespace(title=title, stickers=[object()] * count)
+def sticker_set(title, count=3, *, animated=0, video=0, size=1000):
+    kinds = [(True, False)] * animated + [(False, True)] * video + [(False, False)] * (count - animated - video)
+    return SimpleNamespace(title=title, stickers=[SimpleNamespace(is_animated=a, is_video=v, file_size=size) for a, v in kinds])
 
 
 def fake_bot(packs=None, *, admin=True):
@@ -282,3 +283,41 @@ def test_cover_is_a_transparent_letterboxed_square_from_the_first_frame():
 def test_unreadable_cover_input_is_a_media_error():
     with pytest.raises(StickerMediaError):
         prepare_cover(b"not an image")
+
+
+def test_pack_details_show_formats_and_size_skipping_empty_ones():
+    pack = sticker_packs.Pack.read(1, FIRST, sticker_set("Котики", 87, animated=30, video=5, size=113_000))
+    assert pack.details() == "87 из 120 · 🖼 52 · ✨ 30 · 🎞 5 · 9,4 МБ"
+    still = sticker_packs.Pack.read(1, FIRST, sticker_set("Котики", 2, size=3000))
+    assert still.details() == "2 из 120 · 🖼 2 · 6 КБ"
+
+
+@pytest.mark.parametrize(
+    "amount,word", [(1, "пак"), (2, "пака"), (5, "паков"), (11, "паков"), (12, "паков"), (21, "пак"), (22, "пака"), (111, "паков")]
+)
+def test_russian_plurals(amount, word):
+    assert sticker_packs.plural(amount, "пак", "пака", "паков") == word
+
+
+def test_totals_count_the_series_room_and_include_the_legacy_pack():
+    packs = [
+        sticker_packs.Pack(1, FIRST, "Котики", 120),
+        sticker_packs.Pack(2, SECOND, "Котики (2)", 4),
+        sticker_packs.Pack(0, LEGACY, "Старые", 30),
+    ]
+    assert sticker_packs.totals(packs) == "3 пака · 154 стикера · места ещё на 1076"
+    full = [sticker_packs.Pack(index, FIRST, "x", 120) for index in range(1, 11)]
+    assert sticker_packs.totals(full) == "10 паков · 1200 стикеров · все места заняты"
+
+
+def test_list_shows_totals_and_a_format_legend_only_when_needed():
+    still = [sticker_packs.Pack(1, FIRST, "Котики", 3, still=3)]
+    rich = sticker_packs.render_list(still, OWNER, personal=False, editable=False)
+    texts = [str(getattr(block, "text", "")) for block in rich.blocks]
+    assert "1 пак · 3 стикера · места ещё на 1197" in texts
+    assert not any("видео" in text for text in texts)
+    mixed = [sticker_packs.Pack(1, FIRST, "Котики", 3, still=2, video=1)]
+    assert any(
+        "🎞 видео" in str(getattr(block, "text", ""))
+        for block in sticker_packs.render_list(mixed, OWNER, personal=False, editable=False).blocks
+    )

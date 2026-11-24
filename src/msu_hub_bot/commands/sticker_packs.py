@@ -14,6 +14,7 @@ from aiogram.types import (
     CallbackQuery,
     Chat,
     InputRichBlockButtons,
+    InputRichBlockFooter,
     InputRichBlockParagraph,
     InputRichBlockSectionHeading,
     InputRichBlockUnion,
@@ -67,6 +68,54 @@ class Pack:
     name: str
     title: str
     count: int
+    still: int = 0
+    animated: int = 0
+    video: int = 0
+    size: int = 0
+
+    @classmethod
+    def read(cls, index: int, name: str, found: StickerSet) -> "Pack":
+        stickers = found.stickers
+        animated = sum(1 for sticker in stickers if sticker.is_animated)
+        video = sum(1 for sticker in stickers if sticker.is_video)
+        size = sum(sticker.file_size or 0 for sticker in stickers)
+        return cls(index, name, found.title, len(stickers), len(stickers) - animated - video, animated, video, size)
+
+    def details(self) -> str:
+        """«87 из 120 · 🖼 52 · ✨ 30 · 🎞 5 · 9,4 МБ», skipping empty formats."""
+        parts = [f"{self.count} из {MAX_PACK_STICKERS}"]
+        parts += [f"{mark} {amount}" for mark, amount in (("🖼", self.still), ("✨", self.animated), ("🎞", self.video)) if amount]
+        if self.size:
+            parts.append(file_size(self.size))
+        return " · ".join(parts)
+
+
+def plural(amount: int, one: str, few: str, many: str) -> str:
+    tens, units = amount % 100, amount % 10
+    if units == 1 and tens != 11:
+        return one
+    if 2 <= units <= 4 and not 12 <= tens <= 14:
+        return few
+    return many
+
+
+def file_size(size: int) -> str:
+    if size < 1024 * 1024:
+        return f"{max(1, round(size / 1024))} КБ"
+    return f"{size / 1024 / 1024:.1f} МБ".replace(".", ",")
+
+
+def totals(packs: Sequence[Pack]) -> str:
+    """«3 пака · 254 стикера · места ещё на 966» across the whole series."""
+    stickers = sum(pack.count for pack in packs)
+    series = sum(pack.count for pack in packs if pack.index != LEGACY_INDEX)
+    room = MAX_SERIES_PACKS * MAX_PACK_STICKERS - series
+    parts = [
+        f"{len(packs)} {plural(len(packs), 'пак', 'пака', 'паков')}",
+        f"{stickers} {plural(stickers, 'стикер', 'стикера', 'стикеров')}",
+        f"места ещё на {room}" if room > 0 else "все места заняты",
+    ]
+    return " · ".join(parts)
 
 
 def pack_name(owner: int, index: int) -> str:
@@ -108,10 +157,10 @@ async def read_packs(bot: Bot, owner: int) -> list[Pack]:
         name = pack_name(owner, index)
         if (found := await _lookup(bot, name)) is None:
             break
-        packs.append(Pack(index, name, found.title, len(found.stickers)))
+        packs.append(Pack.read(index, name, found))
     legacy = pack_name(owner, LEGACY_INDEX)
     if (found := await _lookup(bot, legacy)) is not None:
-        packs.append(Pack(LEGACY_INDEX, legacy, found.title, len(found.stickers)))
+        packs.append(Pack.read(LEGACY_INDEX, legacy, found))
     return packs
 
 
@@ -120,11 +169,14 @@ def _button(text: str, action: str, owner: int, index: int) -> RichMessageButton
 
 
 def render_list(packs: Sequence[Pack], owner: int, *, personal: bool, editable: bool, notice: str = "") -> InputRichMessage:
-    blocks: list[InputRichBlockUnion] = [InputRichBlockSectionHeading(text="Ваши стикерпаки" if personal else "Стикерпаки чата", size=2)]
+    blocks: list[InputRichBlockUnion] = [
+        InputRichBlockSectionHeading(text="Ваши стикерпаки" if personal else "Стикерпаки чата", size=2),
+        InputRichBlockParagraph(text=totals(packs)),
+    ]
     if notice:
         blocks.append(InputRichBlockParagraph(text=notice))
     for pack in packs:
-        count = f"{pack.count} из {MAX_PACK_STICKERS} стикеров"
+        count = pack.details()
         if pack.index == LEGACY_INDEX:
             count = f"Старый анимированный пак · {count}"
         buttons = [RichMessageButton(text="Открыть", url=pack_link(pack.name))]
@@ -135,6 +187,8 @@ def render_list(packs: Sequence[Pack], owner: int, *, personal: bool, editable: 
             InputRichBlockParagraph(text=count),
             InputRichBlockButtons(buttons=buttons),
         ]
+    if any(pack.animated or pack.video for pack in packs):
+        blocks.append(InputRichBlockFooter(text="🖼 картинки · ✨ анимация · 🎞 видео"))
     return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
 
