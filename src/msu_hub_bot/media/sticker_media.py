@@ -427,6 +427,39 @@ def jpeg_still(data: bytes) -> bytes:
         raise StickerMediaError("Не удалось прочитать превью.") from exc
 
 
+COVER_SIZE = 100
+MAX_COVER_BYTES = 128 * 1024
+
+
+def prepare_cover(data: bytes) -> bytes:
+    """A 100-pixel square WEBP pack cover from a still; animations give their first frame.
+
+    The artwork keeps its proportions and transparency; margins stay transparent.
+    """
+    try:
+        with closing(Image.open(io.BytesIO(data))) as source:
+            _check_dimensions(source.size)
+            with (
+                closing(ImageOps.exif_transpose(source)) as oriented,
+                closing(oriented.convert("RGBA")) as rgba,
+                closing(Image.new("RGBA", (COVER_SIZE, COVER_SIZE), (0, 0, 0, 0))) as canvas,
+            ):
+                ratio = COVER_SIZE / max(rgba.size)
+                size = cast(tuple[int, int], tuple(max(1, round(value * ratio)) for value in rgba.size))
+                with closing(rgba.resize(size, Image.Resampling.LANCZOS)) as resized:
+                    canvas.alpha_composite(resized, ((COVER_SIZE - resized.width) // 2, (COVER_SIZE - resized.height) // 2))
+                for options in ({"lossless": True}, {"quality": 80}):
+                    with io.BytesIO() as output:
+                        canvas.save(output, format="WEBP", **options)
+                        if output.tell() <= MAX_COVER_BYTES:
+                            return output.getvalue()
+    except (OSError, ValueError, EOFError, SyntaxError, Image.DecompressionBombError) as exc:
+        if isinstance(exc, StickerMediaError):
+            raise
+        raise StickerMediaError("Не удалось прочитать картинку для обложки.") from exc
+    raise StickerSizeError("Обложка получилась больше 128 КБ. Пришлите картинку попроще.")
+
+
 EMOJI_FRAME_POSITIONS = (0.1, 0.5, 0.85)
 EMOJI_FRAME_TIMEOUT = 5
 

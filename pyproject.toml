@@ -234,6 +234,7 @@ files = [
     "src/msu_hub_bot/commands/song.py",
     "src/msu_hub_bot/commands/stats.py",
     "src/msu_hub_bot/commands/sticker.py",
+    "src/msu_hub_bot/commands/sticker_packs.py",
     "src/msu_hub_bot/commands/sticker_input.py",
     "src/msu_hub_bot/commands/sticker_emoji.py",
     "src/msu_hub_bot/commands/language.py",

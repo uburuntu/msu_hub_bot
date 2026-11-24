@@ -3,8 +3,9 @@
 `/s` adds artwork to the invoker's personal regular pack; `/sc` adds it to the
 chat's pack and is limited to chat administrators. Both accept images, GIF/video
 clips, existing regular stickers, or a custom emoji from a message or caption,
-and share the same selection, conversion, metadata and preview behavior. Pack
-replacement, reordering, title editing and thumbnails remain in Telegram's apps.
+and share the same selection, conversion, metadata and preview behavior. `/packs`
+lists the packs and edits their titles and covers; replacing and reordering
+stickers remain in Telegram's apps.
 
 `/sa` and `/sac` are retained aliases of `/s` and `/sc`. Telegram packs accept
 mixed formats, so animated stickers join the regular pack; the older separate
@@ -31,6 +32,32 @@ covers only the packs read. A series holds at most ten packs, which bounds the
 reads after a re-read; beyond that the bot asks for `/sd`.
 `/sd` deletes from any pack of the invoker's or chat's series and from the legacy
 animated pack.
+
+## Pack list and editing
+
+`/packs` lists the chat's series in a group and the invoker's personal series in
+a private chat, followed by the legacy animated pack if it exists. Each pack is a
+rich-message heading linking to it, its sticker count and a button row:
+«Открыть» for everyone, plus «✏️ Название» and «🖼 Обложка» for its editors. Any
+chat administrator edits a chat's packs; the owner edits personal packs in the
+private chat. Callbacks name the owner and pack, and are honoured only for the
+current chat's series or the presser's own, after rechecking administrator status.
+
+When the bot is a group administrator allowed to delete messages, the list is an
+ephemeral message only the invoker sees: the follow-up prompts edit it in place,
+and the typed title or cover message is deleted after it is applied. Otherwise the
+list is a regular reply and typed input stays. The `/packs` message itself is never
+deleted. Telegram may drop ephemeral menus; when the menu can no longer be edited,
+the result arrives as a short regular message.
+
+A rename applies to the chosen pack only, 1–64 characters, through an FSM step
+per user, chat and topic that `/cancel` or «Отмена» clears. Covers come from any
+image, sticker or custom emoji; animations and videos use Telegram's own still
+preview. The still becomes a 100-pixel square transparent WEBP within 128 KB,
+keeping proportions. The cover prompt also offers the chat's photo (the user's
+profile photo in a private chat) and a reset to Telegram's default, the first
+sticker. Rejections, such as a still cover for a legacy animated pack, produce a
+short explanation in the menu.
 
 ## Input and search metadata
 

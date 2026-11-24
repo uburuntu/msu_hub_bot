@@ -105,6 +105,14 @@ from msu_hub_bot.commands.sticker import (
     StickerStates,
     process_sticker_delete,
 )
+from msu_hub_bot.commands.sticker_packs import (
+    PackCallback,
+    PackStates,
+    process_pack_cover,
+    process_pack_title,
+    process_packs,
+    process_packs_cb,
+)
 from msu_hub_bot.commands.tenet import process_reverse
 from msu_hub_bot.commands.tesseract import process_image_to_text
 from msu_hub_bot.commands.tts import process_tts
@@ -343,6 +351,28 @@ def build_router(*, speech: Speech, wolfram: WolframAPI, config: Settings) -> Ro
         MetaCommand("sd", "sticker_delete"),
         StateFilter(None),
         flags={"handler_key": "process_sticker_delete", "fsm_release": False},
+    )
+    group("sticker").message.register(
+        process_packs,
+        MetaCommand("packs", "sticker_packs"),
+        StateFilter(None),
+        flags={"handler_key": "process_packs", "fsm_release": True},
+    )
+    group("sticker").callback_query.register(
+        process_packs_cb,
+        PackCallback.filter(),
+        StateFilter(None, PackStates.title, PackStates.cover),
+        flags={"handler_key": "process_packs_cb", "fsm_release": False},
+    )
+    group("sticker").message.register(
+        process_pack_title,
+        StateFilter(PackStates.title),
+        flags={"handler_key": "process_pack_title", "fsm_release": False},
+    )
+    group("sticker").message.register(
+        process_pack_cover,
+        StateFilter(PackStates.cover),
+        flags={"handler_key": "process_pack_cover", "fsm_release": False},
     )
     group("errors").message.register(
         process_error_stickers,
