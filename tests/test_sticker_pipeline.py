@@ -312,6 +312,26 @@ async def test_sd_deletes_from_every_pack_of_the_series(monkeypatch, name):
     bot.delete_sticker_from_set.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        ("Bad Request: STICKER_INVALID", "уже удалён"),
+        ("Bad Request: STICKERSET_INVALID", "уже удалён"),
+        ("Bad Request: synthetic rejection", "/error_stickers"),
+    ],
+)
+async def test_sd_explains_telegram_rejections(monkeypatch, error, expected):
+    bot = make_bot()
+    target = make_message(bot, message_id=1, sticker={**regular("x").model_dump(), "set_name": "with_love_for_42_by_msu_hub_bot"})
+    message = make_message(bot, message_id=2, text="/sd", reply_to_message=target.model_dump())
+    rejection = TelegramBadRequest(method=GetStickerSet(name="pack"), message=error)
+    monkeypatch.setattr(bot, "delete_sticker_from_set", AsyncMock(side_effect=rejection))
+    reply = AsyncMock()
+    monkeypatch.setattr(type(message), "reply", reply)
+    await sticker.process_sticker_delete(message, bot)
+    assert expected in reply.await_args.args[0]
+
+
 async def test_sd_without_a_sticker_explains_itself(monkeypatch):
     bot = make_bot()
     message = make_message(bot, text="/sd")
